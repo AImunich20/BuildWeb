@@ -46,7 +46,7 @@ DEFAULTS = {
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "", "from": "", "to": "", "tls": True},
     },
     "app": {
-        "auto_update": False,  # read by the desktop shell: install updates without asking
+        "auto_update": True,  # read by the desktop shell: install patches without asking (then offer a restart)
     },
     "export": {
         "last_target": "downloads",

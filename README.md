@@ -61,14 +61,25 @@ BUILDWEB_PORT=5051 .venv/bin/python run.py
 Desktop app: run `npm install`, then `npm run dev`, or `npm run dmg` for a local `.dmg` (copied to `release/`).
 To update GrapesJS, bump the versions in `package.json` and run `npm run vendor`.
 
-## Releasing an update
+## Releasing an update: just push
 
-1. Bump `version` in `package.json` **and** `src-tauri/Cargo.toml`.
-2. `RELEASE_NOTES="..." npm run release -- --publish`
+Every push to `main` runs `.github/workflows/release.yml`:
 
-This builds and signs the app (key: `~/.tauri/buildweb.key`, never commit it) and uploads the `.dmg`,
-`.app.tar.gz`, `.sig` and `latest.json` to **AImunich20/buildweb-releases**. Installed apps then pick up the
-update.
+1. Run the Django tests.
+2. Set the next version (latest release + 1 patch, or the version in `package.json` if you raised it,
+   e.g. `node scripts/set-version.js 0.2.0` for a minor release).
+3. Build and sign on an Apple-silicon runner.
+4. Publish the `.dmg`, `.app.tar.gz`, `.sig` and `latest.json` to **AImunich20/buildweb-releases**.
+5. Commit the version bump back with `[skip ci]`.
+
+The release notes are the commit messages. Installed apps check every hour and install the patch on their
+own (they ask before restarting). Put `[skip release]` in a commit message to push without releasing.
+
+Repository secrets (one-time setup):
+- `TAURI_SIGNING_PRIVATE_KEY`: the contents of `~/.tauri/buildweb.key` (never commit the key file).
+- `RELEASES_TOKEN`: a token that can create releases in `AImunich20/buildweb-releases`.
+
+To release by hand instead, run `RELEASE_NOTES="..." npm run release -- --publish`.
 
 ## Data locations (installed app)
 

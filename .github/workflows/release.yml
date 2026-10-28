@@ -1,0 +1,88 @@
+# Every push to main = a new patch release that installed apps pick up automatically.
+#   test    → Django test suite
+#   release → next version (latest release + 1 patch, or package.json if bumped by hand),
+#             signed .app/.dmg built on Apple silicon, published to AImunich20/buildweb-releases,
+#             version bump committed back with [skip ci].
+# Put "[skip release]" in a commit message to push without releasing.
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (~/.tauri/buildweb.key), RELEASES_TOKEN (can create releases in buildweb-releases).
+name: Release patch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Django tests
+        working-directory: backend
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python -r requirements.txt
+          BUILDWEB_DATA=$(mktemp -d) .venv/bin/python manage.py test builder
+
+  release:
+    needs: test
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: macos-14
+    env:
+      RELEASES_REPO: AImunich20/buildweb-releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+
+      - name: Next version
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          latest=$(gh release view --repo "$RELEASES_REPO" --json tagName -q .tagName 2>/dev/null || echo v0.0.0)
+          version=$(node scripts/set-version.js next "$latest")
+          echo "Latest release $latest → building v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Release notes
+        run: |
+          before="${{ github.event.before }}"
+          if [ -n "$before" ] && git cat-file -e "$before" 2>/dev/null && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+            git log --no-merges --format='- %s' "$before..${{ github.sha }}" | grep -v '\[skip' > notes.txt || true
+          fi
+          [ -s notes.txt ] || git log -1 --format='- %s' > notes.txt
+          { echo "RELEASE_NOTES<<EOF_NOTES"; cat notes.txt; echo "EOF_NOTES"; } >> "$GITHUB_ENV"
+
+      - name: Build, sign and publish
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          BUILDWEB_REPO: ${{ env.RELEASES_REPO }}
+        run: sh scripts/release.sh --publish
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git diff --cached --quiet || git commit -m "release v$VERSION [skip ci]"
+          git push origin HEAD:main || echo "::warning::could not push the version bump (main moved on); next run continues from the latest release anyway"

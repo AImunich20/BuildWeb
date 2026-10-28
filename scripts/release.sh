@@ -7,9 +7,12 @@ set -e
 cd "$(dirname "$0")/.."
 VERSION=$(node -p "require('./package.json').version")
 REPO=${BUILDWEB_REPO:-AImunich20/buildweb-releases}
-KEY=${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/buildweb.key}
-[ -f "$KEY" ] || { echo "Signing key not found: $KEY"; exit 1; }
-export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
+# CI passes the key itself in TAURI_SIGNING_PRIVATE_KEY; locally it is read from ~/.tauri/buildweb.key.
+if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+  KEY=${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.tauri/buildweb.key}
+  [ -f "$KEY" ] || { echo "Signing key not found: $KEY"; exit 1; }
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
+fi
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
 npx tauri build --bundles app

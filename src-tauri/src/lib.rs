@@ -6,7 +6,7 @@
 //! 2. start `run.py` on 127.0.0.1:5050 (the editor is local only; published sites can be hosted on the
 //!    LAN by the backend's separate hosting server),
 //! 3. point the window at it, and
-//! 4. check GitHub Releases for a signed update (at start and every 6 hours; installs on its own when
+//! 4. check GitHub Releases for a signed update (at start and every hour; installs on its own when
 //!    "auto update" is on in the app's settings).
 //!
 //! Closing the window only hides it: the app keeps running in the menu bar so hosted sites stay online.
@@ -30,7 +30,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
 
 const PORT: u16 = 5050;
-const UPDATE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const UPDATE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 struct Backend(Mutex<Option<Child>>);
 
@@ -214,7 +214,7 @@ async fn check_update(app: AppHandle, declined: &mut Option<String>, manual: boo
     if !manual && declined.as_deref() == Some(update.version.as_str()) {
         return;
     }
-    let auto = backend_config(&app)["app"]["auto_update"].as_bool().unwrap_or(false);
+    let auto = backend_config(&app)["app"]["auto_update"].as_bool().unwrap_or(true);
     if auto && !manual {
         // Install quietly, then offer a restart (the new version also starts on the next launch).
         if update.download_and_install(|_, _| {}, || {}).await.is_err() {

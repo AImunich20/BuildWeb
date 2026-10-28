@@ -37,8 +37,9 @@ user in Thai. The UI copy is in Thai.
 ## Rules
 - Run tests with `cd backend && BUILDWEB_DATA=$(mktemp -d) .venv/bin/python manage.py test builder`.
 - When running a dev server while testing, use a port other than 5050 if the installed app may be running.
-- Releases: bump `package.json` and `src-tauri/Cargo.toml`, then `npm run release -- --publish`. Publishing is
-  outward-facing, so confirm with the user first.
+- Releases: every push to main publishes a patch (`.github/workflows/release.yml`), so pushing is itself a
+  release and is outward-facing; confirm with the user first. Use `[skip release]` for non-release pushes.
+  Versions are set with `node scripts/set-version.js` (it updates package.json and Cargo.toml).
 - When testing Tailscale publishing, use a spare HTTPS port and turn it off afterwards. Never enable
   Funnel (public internet) without asking the user.
 - On this Mac, XAMPP is x86-only and Rosetta is not installed, so XAMPP's MySQL/PHP cannot run here. Test
