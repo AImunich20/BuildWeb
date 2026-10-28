@@ -42,6 +42,10 @@ class Site(models.Model):
         help_text="เว้นว่าง = ใช้ตัวรับฟอร์มของ BuildWeb เมื่อโฮสต์ หรือ bw-form.php เมื่อส่งออกไป XAMPP",
     )
     published = models.BooleanField("เผยแพร่", default=True)
+    host_port = models.PositiveIntegerField(
+        "พอร์ตเฉพาะของเว็บนี้", null=True, blank=True, unique=True,
+        help_text="เว้นว่าง = เปิดที่ /<ชื่อในลิงก์>/ บนพอร์ตโฮสติ้งหลัก · ใส่พอร์ต = เปิดเว็บนี้ที่ / ของพอร์ตนั้นด้วย",
+    )
     use_base_styles = models.BooleanField(
         "ใช้สไตล์พื้นฐานของ BuildWeb", default=True,
         help_text="ปิดสำหรับเว็บที่นำเข้า เพื่อให้หน้าตาเหมือนต้นฉบับ (ไม่ใส่ฟอนต์/รีเซ็ต CSS ของธีม)",

@@ -32,6 +32,9 @@ DEFAULTS = {
         "port": 8090,
         "lan": True,  # listen on 0.0.0.0 so other devices on the network can open the sites
         "default_site": None,  # site slug served at "/"
+        "tailscale": False,  # publish through `tailscale serve` (HTTPS on <machine>.ts.net)
+        "tailscale_port": 443,
+        "funnel": False,  # `tailscale funnel`: public internet instead of tailnet only
     },
     "notify": {
         "enabled": True,

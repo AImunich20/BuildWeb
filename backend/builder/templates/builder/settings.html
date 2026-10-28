@@ -1,14 +1,22 @@
 {% extends "builder/base.html" %}
 {% block title %}โฮสติ้ง & ตั้งค่า · BuildWeb{% endblock %}
 {% block main %}
-<div class="topline"><div><h1>โฮสติ้ง & ตั้งค่า</h1><div class="sub">เปิดเว็บให้คนอื่นเข้าชมจากเครื่องนี้ และอัพเดทโปรแกรม</div></div></div>
+<div class="topline"><div><div class="crumbs">~/settings</div><h1>โฮสติ้ง & ตั้งค่า</h1><div class="sub">เปิดเว็บให้คนอื่นเข้าชมจากเครื่องนี้ และอัพเดทโปรแกรม</div></div></div>
 <div class="grid g2">
-  <div class="card pad" id="hosting"></div>
+  <div class="card pad" id="hosting" style="align-self:start"></div>
   <div class="grid" style="align-content:start">
     <div class="card pad">
       <h2>อัพเดทโปรแกรม</h2>
-      <div class="hint">BuildWeb ตรวจหาเวอร์ชันใหม่จาก GitHub อัตโนมัติทุกครั้งที่เปิด และทุก 6 ชั่วโมง — กด “อัพเดทเลย” แล้วโปรแกรมจะติดตั้งและเปิดใหม่ให้เอง ข้อมูลเว็บของคุณไม่หาย</div>
-      <div class="row"><span class="badge brand">เวอร์ชันปัจจุบัน v{{ app_version }}</span><button class="btn primary" onclick="BW.checkUpdates()">ตรวจสอบอัพเดทตอนนี้</button></div>
+      <div class="hint">ตรวจหาเวอร์ชันใหม่จาก GitHub ทุกครั้งที่เปิดและทุก 6 ชั่วโมง ข้อมูลเว็บของคุณไม่หายเมื่ออัพเดท</div>
+      <div class="list-row" style="padding:10px 0"><div style="flex:1"><b>ติดตั้งอัพเดทอัตโนมัติ</b><div class="small muted">ดาวน์โหลดและติดตั้งเองเบื้องหลัง แล้วถามก่อนเปิดใหม่</div></div>
+        <span class="switch"><input type="checkbox" id="auto-update"><span></span></span></div>
+      <div class="row" style="margin-top:12px"><span class="badge brand mono">v{{ app_version }}</span><button class="btn primary sm" onclick="BW.checkUpdates()">ตรวจสอบอัพเดทตอนนี้</button></div>
+    </div>
+    <div class="card pad" id="desktop-card">
+      <h2>แอปบน Mac</h2>
+      <div class="hint">ปิดหน้าต่างแล้ว BuildWeb ยังทำงานต่อบนแถบเมนู (◆) — เว็บที่โฮสต์อยู่ยังเปิดได้ เลือก “ออกจาก BuildWeb” จากไอคอนเพื่อปิดจริง</div>
+      <div class="list-row" style="padding:10px 0"><div style="flex:1"><b>เปิด BuildWeb เมื่อเข้าเครื่อง</b><div class="small muted">เริ่มแบบซ่อนหน้าต่าง เหมาะกับการโฮสต์เว็บตลอดเวลา</div></div>
+        <span class="switch"><input type="checkbox" id="autostart"><span></span></span></div>
     </div>
     <div class="card pad">
       <h2>ระบบ</h2>
@@ -28,39 +36,82 @@
 const D = JSON.parse(document.getElementById('settings-data').textContent);
 const { api, toast, esc } = BW;
 
+function urlRow(u) {
+  return `<div class="row" style="margin-bottom:6px;flex-wrap:nowrap"><code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</code>
+    <button class="btn sm" data-copy="${esc(u)}">คัดลอก</button><a class="btn sm" href="${esc(u)}" target="_blank">เปิด</a></div>`;
+}
 function drawHosting(h) {
   const el = document.getElementById('hosting');
+  const ts = h.tailscale || {};
   const sites = D.sites.map(s => `<option value="${esc(s.slug)}" ${s.slug === h.default_site ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
-  el.innerHTML = `<div class="row between"><div><h2>โฮสต์เว็บไซต์</h2><div class="hint" style="margin:0">เซิร์ฟเวอร์สำหรับเว็บที่เผยแพร่ (แยกจากหน้าแอดมิน — คนอื่นเข้าหน้าแก้ไขไม่ได้)</div></div>
+  const tsState = !ts.installed ? '<span class="badge">ไม่พบ Tailscale</span>'
+    : !ts.running ? `<span class="badge warn">Tailscale ไม่ได้เชื่อมต่อ${ts.state ? ' (' + esc(ts.state) + ')' : ''}</span>`
+    : `<span class="badge ok"><span class="dot"></span>${esc(ts.dns_name)}</span>`;
+  el.innerHTML = `<div class="card-head" style="margin:-20px -20px 16px"><div><h2>โฮสต์เว็บไซต์</h2><div class="hint" style="margin:0">เซิร์ฟเวอร์สำหรับเว็บที่เผยแพร่ แยกจากหน้าแอดมิน คนอื่นเข้าหน้าแก้ไขไม่ได้</div></div>
       <label class="switch"><input type="checkbox" id="h-enabled" ${h.enabled ? 'checked' : ''}><span></span></label></div>
-    <div style="margin:16px 0">${h.running ? '<span class="badge ok"><span class="dot"></span>ออนไลน์</span>' : '<span class="badge"><span class="dot"></span>ปิดอยู่</span>'}
+    <div style="margin-bottom:14px">${h.running ? '<span class="badge ok"><span class="dot"></span>ออนไลน์</span>' : '<span class="badge"><span class="dot"></span>ปิดอยู่</span>'}
       ${h.error ? `<div class="alert err" style="margin-top:10px">${esc(h.error)}</div>` : ''}</div>
-    ${h.running ? `<div class="sect-title">ลิงก์สำหรับเปิดเว็บ</div>${h.urls.map(u => `<div class="row" style="margin-bottom:8px"><code style="flex:1">${esc(u)}</code>
-      <button class="btn sm" data-copy="${esc(u)}">คัดลอก</button><a class="btn sm" href="${esc(u)}" target="_blank">เปิด</a></div>`).join('')}
-      ${h.lan ? `<div class="muted small">อุปกรณ์อื่นที่ต่อ Wi-Fi เดียวกันเปิดลิงก์ <code>${esc(h.lan_ip)}</code> ได้เลย (ถ้า macOS ถามเรื่อง Firewall ให้กด “อนุญาต”)</div>` : ''}` : ''}
+    ${h.running ? `<div class="sect-title">ทุกเว็บ · /ชื่อในลิงก์/</div>${h.urls.map(urlRow).join('')}${ts.url ? urlRow(ts.url) : ''}` : ''}
+    ${h.site_ports.length ? `<div class="sect-title">เว็บที่มีพอร์ตของตัวเอง</div>` + h.site_ports.map(sp => `<div style="margin-bottom:10px">
+        <div class="row small" style="margin-bottom:4px"><b>${esc(sp.name)}</b><span class="mono muted">:${sp.port}</span>
+        ${sp.running ? '<span class="badge ok"><span class="dot"></span>ออนไลน์</span>' : sp.published ? '<span class="badge">ปิด</span>' : '<span class="badge">ไม่ได้เผยแพร่</span>'}</div>
+        ${sp.error ? `<div class="alert err">${esc(sp.error)}</div>` : ''}${sp.urls.map(urlRow).join('')}</div>`).join('') : ''}
     <div class="sect-title">ตั้งค่า</div>
-    <div class="grid g2" style="gap:0 16px">
-      <label class="field"><span>พอร์ต</span><input class="input mono" id="h-port" type="number" min="1024" max="65535" value="${h.port}"></label>
+    <div class="grid g2" style="gap:0 12px">
+      <label class="field"><span>พอร์ตหลัก</span><input class="input mono" id="h-port" type="number" min="1024" max="65535" value="${h.port}"></label>
       <label class="field"><span>เว็บหลัก (เปิดที่ “/”)</span><select class="input" id="h-default"><option value="">— แสดงรายการเว็บ —</option>${sites}</select></label>
     </div>
-    <label class="check"><input type="checkbox" id="h-lan" ${h.lan ? 'checked' : ''}>ให้เครื่องอื่นในเครือข่ายเข้าได้ (LAN)</label>
-    <div class="muted small" style="margin-bottom:14px">แต่ละเว็บเปิดได้ที่ <code>http://…:${h.port}/&lt;ชื่อในลิงก์&gt;/</code> · ต้องเปิดโปรแกรมทิ้งไว้ระหว่างโฮสต์</div>
+    <label class="check"><input type="checkbox" id="h-lan" ${h.lan ? 'checked' : ''}>ให้เครื่องอื่นในเครือข่ายเข้าได้ (LAN / Tailscale IP)</label>
+    <div class="small muted" style="margin-bottom:6px">อยากให้หลายเว็บเปิดที่ “/” พร้อมกัน: ตั้ง “พอร์ตเฉพาะ” ในหน้า ตั้งค่าเว็บ ของแต่ละเว็บ</div>
+
+    <div class="sect-title">Tailscale</div>
+    <div class="row" style="margin-bottom:10px">${tsState}</div>
+    ${ts.running ? `
+      <div class="list-row" style="padding:8px 0;border:0"><div style="flex:1"><b>เผยแพร่ผ่าน Tailscale (HTTPS)</b>
+        <div class="small muted">https://${esc(ts.dns_name)}${h.tailscale && h.tailscale.port && h.tailscale.port !== 443 ? ':' + h.tailscale.port : ''}/ · ใช้ <code>tailscale serve</code></div></div>
+        <span class="switch"><input type="checkbox" id="ts-enabled" ${ts.enabled ? 'checked' : ''}><span></span></span></div>
+      <div class="grid g2" style="gap:0 12px">
+        <label class="field"><span>พอร์ต HTTPS</span><input class="input mono" id="ts-port" type="number" value="${ts.port || 443}"></label>
+        <label class="field"><span>ใครเข้าได้</span><select class="input" id="ts-funnel">
+          <option value="0" ${!ts.funnel ? 'selected' : ''}>เฉพาะอุปกรณ์ใน tailnet ของฉัน</option>
+          <option value="1" ${ts.funnel ? 'selected' : ''}>ทุกคนบนอินเทอร์เน็ต (Funnel)</option></select></label>
+      </div>
+      ${ts.error ? `<div class="alert err">${esc(ts.error)}</div>` : ''}
+      <div class="small muted" style="margin-bottom:12px">Funnel ใช้ได้กับพอร์ต 443, 8443, 10000 และต้องเปิดสิทธิ์ใน Tailscale admin ก่อน · เว็บที่มีพอร์ตเฉพาะจะได้ https://…:พอร์ตนั้น/ ด้วย (ใน tailnet)</div>`
+    : ts.installed ? '<div class="small muted" style="margin-bottom:12px">เปิดแอป Tailscale และล็อกอินก่อน แล้วกลับมาที่หน้านี้</div>'
+    : '<div class="small muted" style="margin-bottom:12px">ติดตั้ง Tailscale จาก tailscale.com/download เพื่อเปิดเว็บจากที่ไหนก็ได้ผ่านโดเมน *.ts.net</div>'}
     <button class="btn primary" id="h-save">บันทึกการตั้งค่าโฮสติ้ง</button>`;
   el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); toast('คัดลอกแล้ว', 'ok'); });
+  const val = id => document.getElementById(id);
   const save = async () => {
+    const body = { enabled: val('h-enabled').checked, lan: val('h-lan').checked, port: val('h-port').value, default_site: val('h-default').value };
+    if (val('ts-enabled')) Object.assign(body, { tailscale: val('ts-enabled').checked, tailscale_port: val('ts-port').value, funnel: val('ts-funnel').value === '1' });
+    if (body.funnel && body.tailscale && !await BW.confirmBox('เปิดสู่อินเทอร์เน็ต', 'Funnel จะทำให้ <b>ทุกคนบนอินเทอร์เน็ต</b> เปิดเว็บที่เผยแพร่ได้ (หน้าแอดมินยังปิดอยู่) ยืนยัน?', { ok: 'เปิด Funnel' })) return;
+    const btn = val('h-save'); btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
     try {
-      const r = await api('/api/settings/hosting', {
-        enabled: document.getElementById('h-enabled').checked, lan: document.getElementById('h-lan').checked,
-        port: document.getElementById('h-port').value, default_site: document.getElementById('h-default').value,
-      });
+      const r = await api('/api/settings/hosting', body);
       drawHosting(r.hosting);
-      toast(r.hosting.running ? 'โฮสติ้งเปิดแล้ว' : 'บันทึกแล้ว', 'ok');
+      toast(r.hosting.tailscale.error ? 'บันทึกแล้ว แต่ Tailscale มีปัญหา' : r.hosting.running ? 'โฮสติ้งเปิดแล้ว' : 'บันทึกแล้ว', r.hosting.tailscale.error ? 'err' : 'ok');
     } catch (e) { toast(e.message, 'err'); const r = await api('/api/settings/hosting'); drawHosting(r.hosting); }
   };
-  document.getElementById('h-save').onclick = save;
-  document.getElementById('h-enabled').onchange = save;
+  val('h-save').onclick = save;
+  val('h-enabled').onchange = save;
 }
 drawHosting(D.hosting);
+
+api('/api/settings/app').then(r => document.getElementById('auto-update').checked = r.app.auto_update);
+document.getElementById('auto-update').onchange = async e => {
+  try { await api('/api/settings/app', { auto_update: e.target.checked }); toast(e.target.checked ? 'จะติดตั้งอัพเดทอัตโนมัติ' : 'จะถามก่อนอัพเดท', 'ok'); }
+  catch (err) { toast(err.message, 'err'); }
+};
+const T = window.__TAURI__;
+const as = document.getElementById('autostart');
+if (T && T.core) {
+  T.core.invoke('get_autostart').then(v => as.checked = !!v).catch(() => {});
+  as.onchange = () => T.core.invoke('set_autostart', { enabled: as.checked })
+    .then(() => toast(as.checked ? 'จะเปิดเมื่อเข้าเครื่อง' : 'ปิดการเปิดอัตโนมัติแล้ว', 'ok'))
+    .catch(e => { toast(String(e), 'err'); as.checked = !as.checked; });
+} else { as.disabled = true; as.closest('.list-row').querySelector('.small').textContent = 'ใช้ได้เมื่อเปิดผ่านแอป BuildWeb'; }
 
 document.getElementById('restart').onclick = async () => {
   if (!await BW.confirmBox('รีสตาร์ทระบบ', 'เริ่มเซิร์ฟเวอร์เบื้องหลังใหม่ ใช้เวลาไม่กี่วินาที')) return;

@@ -1,0 +1,95 @@
+{% extends "builder/base.html" %}
+{% block title %}การแจ้งเตือน · BuildWeb{% endblock %}
+{% block main %}
+<div class="topline">
+  <div><div class="crumbs">~/settings/notify</div><h1>การแจ้งเตือน</h1><div class="sub">แจ้งทันทีเมื่อมีคนส่งฟอร์มบนเว็บของคุณ</div></div>
+  <div class="row"><label class="row small" style="gap:8px">แจ้งเตือนทั้งหมด <span class="switch"><input type="checkbox" id="n-enabled"><span></span></span></label>
+    <button class="btn" id="test-all">ส่งข้อความทดสอบ</button><button class="btn primary" id="save">บันทึก</button></div>
+</div>
+<div class="grid g2" id="cards">
+  <div class="card">
+    <div class="card-head"><div><h2>macOS</h2><div class="hint" style="margin:0">ป้ายแจ้งเตือนมุมจอ พร้อมเสียง</div></div><span class="switch"><input type="checkbox" id="n-mac"><span></span></span></div>
+    <div class="card pad" style="border:0"><div class="row"><button class="btn sm" data-test="mac">ทดสอบ</button><span class="small muted">ถ้าไม่ขึ้น: System Settings › Notifications › Script Editor</span></div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Telegram</h2><div class="hint" style="margin:0">ส่งเข้าแชตผ่านบอท</div></div><span data-status="telegram"></span></div>
+    <div class="card pad" style="border:0">
+      <label class="field"><span>Bot token <small>— จาก @BotFather</small></span><input class="input mono" id="telegram_token" placeholder="123456:ABC-…"></label>
+      <label class="field"><span>Chat ID <small>— ส่งข้อความหาบอท แล้วดูจาก @userinfobot</small></span><input class="input mono" id="telegram_chat" placeholder="123456789"></label>
+      <button class="btn sm" data-test="telegram">ทดสอบ</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Discord</h2><div class="hint" style="margin:0">Webhook ของช่อง</div></div><span data-status="discord"></span></div>
+    <div class="card pad" style="border:0">
+      <label class="field"><span>Webhook URL <small>— Channel › Edit › Integrations › Webhooks</small></span><input class="input mono" id="discord_webhook" placeholder="https://discord.com/api/webhooks/…"></label>
+      <button class="btn sm" data-test="discord">ทดสอบ</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Webhook</h2><div class="hint" style="margin:0">POST JSON ไปยังระบบของคุณ (n8n, Make, Zapier, Google Apps Script…)</div></div><span data-status="webhook"></span></div>
+    <div class="card pad" style="border:0">
+      <label class="field"><span>URL</span><input class="input mono" id="webhook_url" placeholder="https://…"></label>
+      <div class="small muted" style="margin-bottom:12px">ส่ง <code>{"event","site","page","form","data","created_at"}</code></div>
+      <button class="btn sm" data-test="webhook">ทดสอบ</button>
+    </div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-head"><div><h2>อีเมล (SMTP)</h2><div class="hint" style="margin:0">เช่น Gmail: smtp.gmail.com พอร์ต 587 + App Password</div></div><span class="switch"><input type="checkbox" id="e-enabled"><span></span></span></div>
+    <div class="card pad" style="border:0">
+      <div class="grid g3" style="gap:0 12px">
+        <label class="field"><span>SMTP host</span><input class="input mono" id="e-host" placeholder="smtp.gmail.com"></label>
+        <label class="field"><span>พอร์ต</span><input class="input mono" id="e-port" type="number" placeholder="587"></label>
+        <label class="field"><span>ผู้ใช้</span><input class="input mono" id="e-user" placeholder="you@gmail.com"></label>
+        <label class="field"><span>รหัสผ่าน / App password</span><input class="input mono" id="e-password" type="password"><small id="e-pw-hint"></small></label>
+        <label class="field"><span>ผู้ส่ง <small>(เว้นว่าง = ผู้ใช้)</small></span><input class="input mono" id="e-from"></label>
+        <label class="field"><span>ส่งถึง</span><input class="input mono" id="e-to" placeholder="owner@example.com"></label>
+      </div>
+      <div class="row"><label class="check" style="margin:0"><input type="checkbox" id="e-tls">ใช้ STARTTLS</label><button class="btn sm" data-test="email">ทดสอบ</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const { api, toast, esc } = BW;
+const $ = id => document.getElementById(id);
+let N = null;
+function fill(n) {
+  N = n;
+  $('n-enabled').checked = n.enabled; $('n-mac').checked = n.mac;
+  ['telegram_token', 'telegram_chat', 'discord_webhook', 'webhook_url'].forEach(k => $(k).value = n[k] || '');
+  $('e-enabled').checked = n.email.enabled; $('e-tls').checked = n.email.tls !== false;
+  ['host', 'port', 'user', 'from', 'to'].forEach(k => $('e-' + k).value = n.email[k] || '');
+  $('e-pw-hint').textContent = n.email.password_set ? 'ตั้งไว้แล้ว — เว้นว่างเพื่อใช้รหัสเดิม' : '';
+  document.querySelectorAll('[data-status]').forEach(el => {
+    el.innerHTML = n.channels.includes(el.dataset.status) ? '<span class="badge ok"><span class="dot"></span>เปิดใช้</span>' : '<span class="badge">ยังไม่ตั้งค่า</span>';
+  });
+}
+function payload() {
+  return {
+    enabled: $('n-enabled').checked, mac: $('n-mac').checked,
+    telegram_token: $('telegram_token').value, telegram_chat: $('telegram_chat').value,
+    discord_webhook: $('discord_webhook').value, webhook_url: $('webhook_url').value,
+    email: { enabled: $('e-enabled').checked, tls: $('e-tls').checked, host: $('e-host').value, port: $('e-port').value,
+      user: $('e-user').value, from: $('e-from').value, to: $('e-to').value, password: $('e-password').value },
+  };
+}
+async function save(quiet) {
+  try { const r = await api('/api/settings/notify', payload()); fill(r.notify); $('e-password').value = ''; if (!quiet) toast('บันทึกแล้ว', 'ok'); return true; }
+  catch (e) { BW.showFieldError(document.body, Object.assign(e, { field: null })); const el = e.field && $(e.field); if (el) el.classList.add('err'); return false; }
+}
+async function test(channel) {
+  if (!await save(true)) return;
+  try {
+    const r = await api('/api/settings/notify/test', { channel });
+    const lines = Object.entries(r.results).map(([k, v]) => `${k}: ${v === 'ok' ? '✓ สำเร็จ' : '✕ ' + v}`);
+    toast(lines.join(' · ') || 'ช่องทางนี้ยังไม่ได้ตั้งค่า', Object.values(r.results).every(v => v === 'ok') && lines.length ? 'ok' : 'err');
+  } catch (e) { toast(e.message, 'err'); }
+}
+$('save').onclick = () => save();
+$('test-all').onclick = () => test('');
+document.querySelectorAll('[data-test]').forEach(b => b.onclick = () => test(b.dataset.test));
+api('/api/settings/notify').then(r => fill(r.notify));
+</script>
+{% endblock %}

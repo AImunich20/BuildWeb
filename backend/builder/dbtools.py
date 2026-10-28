@@ -145,6 +145,12 @@ def restart_soon(delay=0.8):
     def go():
         time.sleep(delay)
         os.environ.pop("BUILDWEB_DB_FAILED", None)
+        try:
+            from .hosting import server as hosting
+
+            hosting.shutdown()  # free the hosting ports for the new process
+        except Exception:
+            pass
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
     threading.Thread(target=go, daemon=True).start()

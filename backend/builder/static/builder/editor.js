@@ -227,6 +227,8 @@
       editor.store();
     }
     if (!isShared) { insertShared(); editor.UndoManager.clear(); }
+    const cdoc = editor.Canvas.getDocument();
+    if (cdoc && page.body_class) cdoc.body.classList.add(...page.body_class.split(/\s+/).filter(Boolean));
     setState('บันทึกแล้ว', 'ok');
     loadAssets();
     updateRight();
@@ -268,6 +270,10 @@
     preview: () => editor.runCommand('core:preview'),
     open: async () => { await editor.store(); BW.openUrl(location.origin + D.preview_base + (isShared || page.is_home ? '' : page.filename)); },
     save,
+    theme: () => {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      BW.setTheme(dark ? 'light' : 'dark');
+    },
     import: openImport,
     history: openHistory,
     clear: async () => {
@@ -422,9 +428,21 @@
   function openImport() {
     const m = modal(`<header><h2>นำเข้า HTML</h2><button class="btn ghost icon" data-close>✕</button></header><div class="body">
       <div class="muted small" style="margin-bottom:10px">วางโค้ด HTML (ใส่ &lt;style&gt; มาด้วยได้) — จะแปลงเป็นองค์ประกอบที่ลากวางแก้ไขได้</div>
+      <div class="row" style="margin-bottom:8px"><button class="btn sm" id="imp-file">เลือกไฟล์ .html…</button><input type="file" id="imp-file-input" accept=".html,.htm" hidden>
+        <span class="small muted">นำเข้าทั้งเว็บ (หลายหน้า/รูป/CSS) หรือจาก GitHub ได้ที่ <a href="/#import">นำเข้าเว็บ</a></span></div>
       <textarea class="input code imp-area" placeholder="<section>...</section>"></textarea>
       <div class="row" style="margin-top:10px;gap:20px"><label class="check"><input type="radio" name="mode" value="append" checked>ต่อท้ายหน้า</label><label class="check"><input type="radio" name="mode" value="replace">แทนที่ทั้งหน้า</label></div></div>
       <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>นำเข้า</button></footer>`, { wide: true });
+    m.el.querySelector('#imp-file').onclick = () => m.el.querySelector('#imp-file-input').click();
+    m.el.querySelector('#imp-file-input').onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      let text = await f.text();
+      const body = /<body[^>]*>([\s\S]*)<\/body>/i.exec(text);
+      const styles = [...text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map(x => x[0]).join('');
+      text = (body ? body[1] : text).replace(/<script[\s\S]*?<\/script>/gi, '');
+      m.el.querySelector('textarea').value = styles + text;
+      toast(`โหลด ${f.name} แล้ว — กด “นำเข้า”`);
+    };
     m.el.querySelector('[data-ok]').onclick = () => {
       const code = m.el.querySelector('textarea').value;
       if (!code.trim()) return;

@@ -66,6 +66,7 @@ def site_json(site):
         "language": site.language, "theme": site.get_theme(), "favicon": site.favicon, "head_code": site.head_code,
         "custom_css": site.custom_css, "custom_js": site.custom_js, "form_endpoint": site.form_endpoint,
         "published": site.published, "updated_at": site.updated_at.isoformat(),
+        "host_port": site.host_port, "use_base_styles": site.use_base_styles,
         "home_page": home.id if home else None, "page_count": site.pages.count(),
         "shared": [shared_json(sec) for sec in site.shared_sections.order_by("-kind")],
     }
@@ -95,8 +96,20 @@ def site_update(request, site_id):
     for f in ("name", "description", "language", "favicon", "head_code", "custom_css", "custom_js", "form_endpoint"):
         if f in d:
             setattr(site, f, d[f] if d[f] is not None else "")
-    if "published" in d:
+    rehost = False
+    if "published" in d and as_bool(d["published"]) != site.published:
         site.published = as_bool(d["published"])
+        rehost = site.host_port is not None
+    if "host_port" in d:
+        port = int(d["host_port"]) if str(d["host_port"] or "").strip() else None
+        if port is not None:
+            h = config.load()["hosting"]
+            if not 1024 <= port <= 65535 or port in (settings.ADMIN_PORT, int(h["port"])):
+                raise ApiError("พอร์ตต้องอยู่ระหว่าง 1024-65535 และไม่ซ้ำกับพอร์ตของโปรแกรม/พอร์ตโฮสติ้งหลัก", field="host_port")
+            if Site.objects.filter(host_port=port).exclude(pk=site.pk).exists():
+                raise ApiError("มีเว็บอื่นใช้พอร์ตนี้แล้ว", field="host_port")
+        rehost = rehost or port != site.host_port
+        site.host_port = port
     if "slug" in d and d["slug"] != site.slug:
         slug = (d["slug"] or "").strip().lower()
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
@@ -106,10 +119,14 @@ def site_update(request, site_id):
         site.slug = slug
     if "theme" in d and isinstance(d["theme"], dict):
         site.theme = {k: str(v) for k, v in {**site.get_theme(), **d["theme"]}.items() if k in DEFAULT_THEME}
+    if "use_base_styles" in d:
+        site.use_base_styles = as_bool(d["use_base_styles"])
     if not site.name.strip():
         raise ApiError("กรุณาตั้งชื่อเว็บ", field="name")
     site.save()
-    return {"site": site_json(site)}
+    if rehost and hosting.running:
+        hosting.apply_config()
+    return {"site": site_json(site), "hosting": hosting.status(with_tailscale=False) if rehost else None}
 
 
 @require_POST
@@ -563,6 +580,17 @@ def hosting_settings(request):
             values["port"] = port
         if "default_site" in d:
             values["default_site"] = d["default_site"] or None
+        if "tailscale" in d:
+            values["tailscale"] = as_bool(d["tailscale"])
+        if "funnel" in d:
+            values["funnel"] = as_bool(d["funnel"])
+        if "tailscale_port" in d:
+            tp = int(d["tailscale_port"] or 443)
+            if not 1 <= tp <= 65535:
+                raise ApiError("พอร์ต HTTPS ไม่ถูกต้อง", field="tailscale_port")
+            if values.get("funnel", config.load()["hosting"].get("funnel")) and tp not in (443, 8443, 10000):
+                raise ApiError("Funnel ใช้ได้เฉพาะพอร์ต 443, 8443 หรือ 10000", field="tailscale_port")
+            values["tailscale_port"] = tp
         config.update("hosting", values)
         if not hosting.apply_config():
             config.update("hosting", {"enabled": False})

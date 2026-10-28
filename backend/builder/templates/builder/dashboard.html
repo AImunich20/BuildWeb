@@ -1,23 +1,26 @@
 {% extends "builder/base.html" %}
-{% block title %}เว็บไซต์ของฉัน · BuildWeb{% endblock %}
+{% block title %}ภาพรวม · BuildWeb{% endblock %}
 {% block main %}
 <div class="topline">
-  <div><h1>เว็บไซต์ของฉัน</h1><div class="sub">สร้าง แก้ไข และเผยแพร่เว็บไซต์ด้วยการลากวาง</div></div>
-  <button class="btn primary" id="new-site">＋ สร้างเว็บใหม่</button>
+  <div><div class="crumbs">~/sites</div><h1>เว็บไซต์ของฉัน</h1><div class="sub">สร้าง แก้ไข และเผยแพร่เว็บไซต์ด้วยการลากวาง</div></div>
+  <div class="row">
+    <button class="btn" id="import-btn">⇣ นำเข้าเว็บ</button>
+    <button class="btn primary" id="new-site">＋ สร้างเว็บใหม่</button>
+  </div>
 </div>
 
-<div class="grid g4" style="margin-bottom:26px">
-  <div class="card stat"><b>{{ stats.sites }}</b><span>เว็บไซต์</span></div>
-  <div class="card stat"><b>{{ stats.pages }}</b><span>หน้าทั้งหมด</span></div>
-  <div class="card stat"><b>{{ stats.unread }}</b><span>ข้อความฟอร์มที่ยังไม่อ่าน</span></div>
-  <div class="card stat">
-    {% if hosting.running %}<b style="color:var(--ok)">● ออนไลน์</b><span class="mono">{{ hosting.base }}</span>
-    {% else %}<b style="color:var(--muted)">○ ปิดอยู่</b><span><a href="/settings/">เปิดโฮสติ้ง →</a></span>{% endif %}
+<div class="grid g4" style="margin-bottom:24px">
+  <div class="card stat"><span>เว็บไซต์</span><b>{{ stats.sites }}</b></div>
+  <div class="card stat"><span>หน้าทั้งหมด</span><b>{{ stats.pages }}</b></div>
+  <div class="card stat"><span>ข้อความฟอร์มที่ยังไม่อ่าน</span><b>{{ stats.unread }}</b></div>
+  <div class="card stat"><span>โฮสติ้ง</span>
+    {% if hosting.running %}<div style="margin:4px 0 8px"><span class="badge ok"><span class="dot"></span>ออนไลน์</span></div><a class="mono small" href="/settings/" style="word-break:break-all">{{ hosting.base }}</a>
+    {% else %}<div style="margin:4px 0 8px"><span class="badge"><span class="dot"></span>ปิดอยู่</span></div><a class="small muted" href="/settings/">เปิดโฮสติ้ง →</a>{% endif %}
   </div>
 </div>
 
 <div class="sites">
-  <div class="new-card" id="new-site-card"><div><div class="plus">＋</div>สร้างเว็บใหม่</div></div>
+  <div class="new-card" id="new-site-card"><div><div class="plus">＋</div>สร้างเว็บใหม่<div class="small muted" style="margin-top:4px">หรือ <a href="#import" id="import-link">นำเข้าจาก HTML / GitHub</a></div></div></div>
   {% for c in cards %}
   <div class="card site-card">
     <div class="thumb" data-href="/sites/{{ c.site.id }}/edit/">
@@ -25,35 +28,41 @@
     </div>
     <div class="info">
       <div class="row between"><h3 title="{{ c.site.name }}">{{ c.site.name }}</h3>
-        {% if c.site.published %}<span class="badge ok">เผยแพร่</span>{% else %}<span class="badge">ปิด</span>{% endif %}</div>
-      <div class="muted small">{{ c.pages }} หน้า · แก้ไข <span data-ago="{{ c.site.updated_at.isoformat }}"></span>{% if c.unread %} · <span class="badge brand">{{ c.unread }} ข้อความใหม่</span>{% endif %}</div>
+        {% if c.site.published %}<span class="badge ok"><span class="dot"></span>เผยแพร่</span>{% else %}<span class="badge">ปิด</span>{% endif %}</div>
+      <div class="muted small"><span class="mono">/{{ c.site.slug }}</span> · {{ c.pages }} หน้า · <span data-ago="{{ c.site.updated_at.isoformat }}"></span>{% if c.unread %} · <span class="badge brand">{{ c.unread }} ใหม่</span>{% endif %}</div>
       <div class="acts">
-        <a class="btn primary sm" href="/sites/{{ c.site.id }}/edit/">✎ ออกแบบ</a>
+        <a class="btn primary sm" href="/sites/{{ c.site.id }}/edit/">ออกแบบ</a>
         <a class="btn sm" href="/sites/{{ c.site.id }}/">จัดการ</a>
-        <a class="btn sm ghost" href="/preview/{{ c.site.slug }}/" target="_blank" title="ดูตัวอย่าง">👁</a>
+        <a class="btn sm ghost icon" href="/preview/{{ c.site.slug }}/" target="_blank" title="ดูตัวอย่าง">↗</a>
       </div>
     </div>
   </div>
   {% endfor %}
 </div>
 {{ templates|json_script:"tpl-data" }}
+{{ site_choices|json_script:"site-choices" }}
 {% endblock %}
 {% block scripts %}
 <script>
 const TEMPLATES = JSON.parse(document.getElementById('tpl-data').textContent);
+const SITES = JSON.parse(document.getElementById('site-choices').textContent);
+const { api, toast, esc, modal } = BW;
 document.querySelectorAll('[data-ago]').forEach(e => e.textContent = BW.ago(e.dataset.ago));
 document.querySelectorAll('.thumb[data-href]').forEach(t => t.addEventListener('click', () => location.href = t.dataset.href));
+// Scale the 1280px-wide previews to the card width.
+const fitThumbs = () => document.querySelectorAll('.thumb iframe').forEach(f => f.style.transform = `scale(${f.parentElement.clientWidth / 1280})`);
+fitThumbs(); window.addEventListener('resize', fitThumbs);
 
 function newSite() {
   const tpls = TEMPLATES.map((t, i) => `<div class="tpl ${i === 1 ? 'sel' : ''}" data-id="${t.id}">
-      <div class="sw" style="background:${t.preview}"></div><div class="t"><b>${BW.esc(t.name)}</b><span>${BW.esc(t.description)}</span></div></div>`).join('');
-  const m = BW.modal(`<header><h2>สร้างเว็บใหม่</h2><button class="btn ghost icon" data-close>✕</button></header>
+      <div class="sw" style="background:${t.preview}"></div><div class="t"><b>${esc(t.name)}</b><span>${esc(t.description)}</span></div></div>`).join('');
+  const m = modal(`<header><h2>สร้างเว็บใหม่</h2><button class="btn ghost icon sm" data-close>✕</button></header>
     <div class="body">
       <label class="field"><span>ชื่อเว็บไซต์</span><input class="input" name="name" placeholder="เช่น ร้านกาแฟของฉัน" maxlength="200"></label>
-      <label class="field"><span>คำอธิบายสั้นๆ <small>(ใช้เป็นคำอธิบายบน Google)</small></span><input class="input" name="description" maxlength="300"></label>
-      <div class="sect-title">เลือกแม่แบบ</div><div class="tpls">${tpls}</div>
+      <label class="field"><span>คำอธิบายสั้นๆ <small>— ใช้เป็นคำอธิบายบน Google</small></span><input class="input" name="description" maxlength="300"></label>
+      <div class="sect-title">แม่แบบ</div><div class="tpls">${tpls}</div>
     </div>
-    <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-go>สร้างและเริ่มออกแบบ →</button></footer>`, { wide: true });
+    <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-go>สร้างและเริ่มออกแบบ</button></footer>`, { wide: true });
   m.el.querySelectorAll('.tpl').forEach(t => t.addEventListener('click', () => {
     m.el.querySelectorAll('.tpl').forEach(x => x.classList.remove('sel')); t.classList.add('sel');
   }));
@@ -61,14 +70,106 @@ function newSite() {
     const d = BW.formData(m.el);
     d.template = m.el.querySelector('.tpl.sel').dataset.id;
     const btn = m.el.querySelector('[data-go]'); btn.disabled = true;
-    try { const r = await BW.api('/api/sites/create', d); location.href = r.editor; }
+    try { const r = await api('/api/sites/create', d); location.href = r.editor; }
     catch (e) { BW.showFieldError(m.el, e); btn.disabled = false; }
   };
   m.el.querySelector('[data-go]').addEventListener('click', go);
   m.el.querySelector('[name=name]').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
+
+function importSite() {
+  const siteOpts = SITES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const m = modal(`<header><h2>นำเข้าเว็บไซต์</h2><button class="btn ghost icon sm" data-close>✕</button></header>
+    <div class="body">
+      <div class="seg" id="imp-tabs" style="margin-bottom:16px"><button class="on" data-src="files">ไฟล์ / โฟลเดอร์ / .zip</button><button data-src="github">GitHub</button></div>
+      <div data-pane="files">
+        <div class="drop" id="imp-drop">ลากไฟล์ .html, .zip หรือทั้งโฟลเดอร์มาวางที่นี่<br>
+          <span class="small">หรือ <a href="#" id="pick-files">เลือกไฟล์</a> · <a href="#" id="pick-folder">เลือกโฟลเดอร์</a></span>
+          <input type="file" id="imp-files" multiple accept=".html,.htm,.zip,.css,.js,image/*" hidden>
+          <input type="file" id="imp-folder" webkitdirectory hidden></div>
+        <div id="imp-picked" class="small muted" style="margin:-4px 0 12px"></div>
+      </div>
+      <div data-pane="github" class="hidden">
+        <label class="field"><span>ลิงก์ repo</span><input class="input mono" name="url" placeholder="https://github.com/user/repo"><small>รองรับลิงก์โฟลเดอร์ เช่น …/tree/main/docs</small></label>
+        <div class="grid g3" style="gap:0 12px">
+          <label class="field"><span>Branch <small>(ไม่บังคับ)</small></span><input class="input mono" name="branch" placeholder="ค่าเริ่มต้นของ repo"></label>
+          <label class="field"><span>โฟลเดอร์ย่อย <small>(ไม่บังคับ)</small></span><input class="input mono" name="subdir" placeholder="เช่น dist"></label>
+          <label class="field"><span>Token <small>(repo ส่วนตัว)</small></span><input class="input mono" name="token" type="password" placeholder="ghp_…"></label>
+        </div>
+      </div>
+      <div class="grid g2" style="gap:0 12px">
+        <label class="field"><span>นำเข้าเป็น</span><select class="input" name="site_id"><option value="">เว็บใหม่</option>${siteOpts ? `<optgroup label="เพิ่มหน้าเข้าเว็บที่มีอยู่">${siteOpts}</optgroup>` : ''}</select></label>
+        <label class="field"><span>ชื่อเว็บ <small>(เว้นว่าง = ตั้งตามไฟล์/repo)</small></span><input class="input" name="name"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="extract" checked>แยก &lt;header&gt;/&lt;footer&gt; ที่ซ้ำกันทุกหน้าเป็นส่วนหัว/ท้ายร่วม</label>
+      <div class="small muted">ทุกไฟล์ .html จะกลายเป็นหน้าที่แก้ด้วยการลากวางได้ · CSS/JS/รูป/ฟอนต์ถูกเก็บไว้ครบ · ลิงก์ระหว่างหน้าถูกแก้ให้อัตโนมัติ<br>
+        เว็บที่ต้อง build ก่อน (React/Vue/Vite) ให้นำเข้าโฟลเดอร์ <code>dist/</code> ที่ build แล้ว</div>
+      <div id="imp-result" style="margin-top:14px"></div>
+    </div>
+    <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-go>นำเข้า</button></footer>`, { wide: true });
+  let src = 'files', files = [], paths = [];
+  m.el.querySelectorAll('#imp-tabs button').forEach(b => b.onclick = () => {
+    src = b.dataset.src;
+    m.el.querySelectorAll('#imp-tabs button').forEach(x => x.classList.toggle('on', x === b));
+    m.el.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== src));
+  });
+  const picked = () => m.el.querySelector('#imp-picked').textContent = files.length ? `เลือกแล้ว ${files.length} ไฟล์ (${BW.bytes(files.reduce((s, f) => s + f.size, 0))})` : '';
+  const setFiles = (list, rel) => { files = [...list]; paths = files.map(f => rel ? (f.webkitRelativePath || f._path || f.name) : (f._path || f.name)); picked(); };
+  m.el.querySelector('#pick-files').onclick = e => { e.preventDefault(); m.el.querySelector('#imp-files').click(); };
+  m.el.querySelector('#pick-folder').onclick = e => { e.preventDefault(); m.el.querySelector('#imp-folder').click(); };
+  m.el.querySelector('#imp-files').onchange = e => setFiles(e.target.files, false);
+  m.el.querySelector('#imp-folder').onchange = e => setFiles(e.target.files, true);
+  const drop = m.el.querySelector('#imp-drop');
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', async e => {
+    // Walk dropped folders so relative paths are kept.
+    const out = [];
+    const walk = (entry, prefix) => new Promise(res => {
+      if (entry.isFile) entry.file(f => { f._path = prefix + f.name; out.push(f); res(); });
+      else if (entry.isDirectory) {
+        const r = entry.createReader(), all = [];
+        const read = () => r.readEntries(async ents => {
+          if (!ents.length) { for (const en of all) await walk(en, prefix + entry.name + '/'); res(); }
+          else { all.push(...ents); read(); }
+        });
+        read();
+      } else res();
+    });
+    const items = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (items.length) { for (const it of items) await walk(it, ''); setFiles(out, false); }
+    else setFiles(e.dataTransfer.files, false);
+  });
+  const go = async () => {
+    const btn = m.el.querySelector('[data-go]'), out = m.el.querySelector('#imp-result');
+    const d = BW.formData(m.el);
+    btn.disabled = true;
+    out.innerHTML = `<div class="log">${src === 'github' ? 'กำลังดาวน์โหลดจาก GitHub และแปลงหน้า…' : 'กำลังอัปโหลดและแปลงหน้า…'}</div>`;
+    try {
+      let r;
+      if (src === 'github') r = await api('/api/import/github', d);
+      else {
+        if (!files.length) throw new Error('กรุณาเลือกไฟล์หรือโฟลเดอร์');
+        const fd = new FormData();
+        files.forEach((f, i) => { fd.append('files', f, f.name); fd.append('paths', paths[i]); });
+        ['site_id', 'name'].forEach(k => fd.append(k, d[k] || ''));
+        fd.append('extract', d.extract ? '1' : '0');
+        r = await api('/api/import/upload', fd);
+      }
+      out.innerHTML = `<div class="alert ok"><div>✓ นำเข้าแล้ว <b>${r.pages}</b> หน้า · ไฟล์ ${r.assets} ไฟล์ · CSS ${r.css_files} ไฟล์ <span class="muted">(โฟลเดอร์ต้นทาง ${esc(r.root)})</span>
+        ${r.warnings.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + r.warnings.map(w => `<li>${esc(w)}</li>`).join('') + '</ul>' : ''}</div></div>
+        <div class="row"><a class="btn primary sm" href="${r.editor}">เปิดตัวออกแบบ</a><a class="btn sm" href="/sites/${r.site_id}/">จัดการเว็บ</a></div>`;
+      btn.textContent = 'นำเข้าอีก';
+    } catch (e) { out.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; }
+    btn.disabled = false;
+  };
+  m.el.querySelector('[data-go]').onclick = go;
+}
 document.getElementById('new-site').addEventListener('click', newSite);
-document.getElementById('new-site-card').addEventListener('click', newSite);
+document.getElementById('new-site-card').addEventListener('click', e => { if (!e.target.closest('#import-link')) newSite(); });
+document.getElementById('import-btn').addEventListener('click', importSite);
+document.getElementById('import-link').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); importSite(); });
 if (location.hash === '#new') newSite();
+if (location.hash === '#import') importSite();
 </script>
 {% endblock %}

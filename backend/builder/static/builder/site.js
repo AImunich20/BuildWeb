@@ -43,7 +43,7 @@
         <span class="kind-icon">${x.kind === 'header' ? '⬒' : '⬓'}</span>
         <div style="flex:1"><b>${esc(x.label)}</b><div class="muted small">แก้ไข ${ago(x.updated_at)}</div></div>
         <label class="switch" title="เปิด/ปิดทุกหน้า"><input type="checkbox" ${x.enabled ? 'checked' : ''}><span></span></label>
-        <a class="btn sm" href="${x.edit_url}">✎ ออกแบบ</a></div>`).join('') ||
+        <a class="btn sm" href="${x.edit_url}">ออกแบบ</a></div>`).join('') ||
       `<div class="list-row muted">ยังไม่มีส่วนร่วม — <a href="/sites/${site.id}/edit-shared/header/">สร้างส่วนหัว</a> · <a href="/sites/${site.id}/edit-shared/footer/">สร้างส่วนท้าย</a></div>`;
     box.querySelectorAll('[data-id]').forEach(row => {
       row.querySelector('input').onchange = async e => {
@@ -68,9 +68,9 @@
         <td>${p.show_in_nav ? esc(p.nav_label || p.title) : '<span class="muted">ซ่อน</span>'}</td>
         <td class="muted small">${ago(p.updated_at)}</td>
         <td><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
-          <a class="btn sm primary" href="${p.edit_url}">✎ ออกแบบ</a>
+          <a class="btn sm primary" href="${p.edit_url}">ออกแบบ</a>
           <button class="btn sm" data-act="settings">ตั้งค่า</button>
-          <button class="btn sm ghost" data-act="more">⋯</button></div></td>
+          <button class="btn sm ghost icon" data-act="more">⋯</button></div></td>
       </tr>`).join('');
     tb.querySelectorAll('tr').forEach(tr => {
       const p = byId[tr.dataset.id];
@@ -103,11 +103,11 @@
   function pageMenu(p, anchor) {
     const m = modal(`<header><h2>${esc(p.title)}</h2><button class="btn ghost icon" data-close>✕</button></header>
       <div class="body" style="display:grid;gap:8px">
-        <a class="btn" href="/preview/${site.slug}/${p.is_home ? '' : p.slug + '.html'}" target="_blank">👁 ดูตัวอย่างหน้านี้</a>
-        ${p.is_home ? '' : '<button class="btn" data-a="home">🏠 ตั้งเป็นหน้าแรก</button>'}
-        <button class="btn" data-a="status">${p.status === 'published' ? '⏸ เปลี่ยนเป็นฉบับร่าง' : '✓ เผยแพร่หน้านี้'}</button>
-        <button class="btn" data-a="dup">⧉ ทำสำเนาหน้า</button>
-        <button class="btn danger" data-a="del">🗑 ลบหน้า</button>
+        <a class="btn" href="/preview/${site.slug}/${p.is_home ? '' : p.slug + '.html'}" target="_blank">ดูตัวอย่างหน้านี้</a>
+        ${p.is_home ? '' : '<button class="btn" data-a="home">ตั้งเป็นหน้าแรก</button>'}
+        <button class="btn" data-a="status">${p.status === 'published' ? 'เปลี่ยนเป็นฉบับร่าง' : 'เผยแพร่หน้านี้'}</button>
+        <button class="btn" data-a="dup">ทำสำเนาหน้า</button>
+        <button class="btn danger" data-a="del">ลบหน้า</button>
       </div>`);
     const act = async (a) => {
       try {
@@ -166,7 +166,7 @@
           <label class="field"><span>JavaScript เฉพาะหน้านี้</span><textarea class="input code" name="custom_js">${esc(p.custom_js)}</textarea></label>
         </div></details>
       </div>
-      <footer>${isNew ? '' : `<a class="btn" href="${p.edit_url}" style="margin-right:auto">✎ ไปออกแบบ</a>`}<button class="btn" data-close>ยกเลิก</button>
+      <footer>${isNew ? '' : `<a class="btn" href="${p.edit_url}" style="margin-right:auto">ไปออกแบบ</a>`}<button class="btn" data-close>ยกเลิก</button>
         <button class="btn primary" data-save>${isNew ? 'สร้างหน้า' : 'บันทึก'}</button></footer>`, { wide: true });
     const title = m.el.querySelector('[name=title]'), slug = m.el.querySelector('[name=slug]');
     let slugTouched = !isNew;
@@ -329,7 +329,7 @@
   // ---------------------------------------------------------------- forms
   async function renderForms() {
     root.innerHTML = `<div class="row between" style="margin-bottom:14px"><div class="muted">ข้อมูลที่ผู้เข้าชมกรอกในฟอร์มบนเว็บ (บันทึกลงฐานข้อมูลของโปรแกรม — <a href="/settings/database/">ตั้งค่าฐานข้อมูล</a>)</div>
-      <div class="row"><button class="btn" id="read-all">✓ อ่านทั้งหมด</button><a class="btn" href="/sites/${site.id}/forms.csv">⬇ ดาวน์โหลด CSV (Excel)</a></div></div>
+      <div class="row"><button class="btn" id="read-all">อ่านทั้งหมด</button><a class="btn" href="/sites/${site.id}/forms.csv">ดาวน์โหลด CSV</a></div></div>
       <div class="card" id="subs"><div class="empty-state">กำลังโหลด...</div></div>`;
     const r = await api(`/api/sites/${site.id}/submissions`);
     const box = document.getElementById('subs');
@@ -376,6 +376,9 @@
         <label class="field"><span>ภาษา</span><select class="input" name="language"><option value="th" ${site.language === 'th' ? 'selected' : ''}>ไทย</option><option value="en" ${site.language === 'en' ? 'selected' : ''}>English</option></select></label>
         <label class="field"><span>ไอคอนเว็บ (favicon)</span><div class="row" style="flex-wrap:nowrap"><input class="input" name="favicon" value="${esc(site.favicon)}" placeholder="/media/..."><button class="btn sm" type="button" id="pick-fav">เลือก</button></div></label>
         <label class="check"><input type="checkbox" name="published" ${site.published ? 'checked' : ''}>เผยแพร่เว็บนี้บนโฮสติ้ง</label>
+        <label class="field"><span>พอร์ตเฉพาะของเว็บนี้ <small>(ไม่บังคับ)</small></span><input class="input mono" name="host_port" type="number" min="1024" max="65535" value="${site.host_port || ''}" placeholder="เช่น 8101">
+          <small>ใส่แล้วเว็บนี้จะเปิดที่ <code>http://…:พอร์ต/</code> ได้ตรงๆ — ทำให้โฮสต์หลายเว็บที่ “/” พร้อมกันได้</small></label>
+        <label class="check"><input type="checkbox" name="use_base_styles" ${site.use_base_styles ? 'checked' : ''}>ใช้สไตล์พื้นฐาน & ฟอนต์ของธีม <span class="muted small">(ปิดไว้สำหรับเว็บที่นำเข้า)</span></label>
         <label class="field"><span>ที่ส่งฟอร์มเมื่อส่งออกเป็นไฟล์ <small>(ไม่บังคับ)</small></span><input class="input mono" name="form_endpoint" value="${esc(site.form_endpoint)}" placeholder="เช่น http://192.168.1.10:8090/${esc(site.slug)}/__form">
           <small>เว้นว่างไว้ = ฟอร์มส่งเข้า BuildWeb ตอนโฮสต์ และใช้ bw-form.php ตอนส่งออกไป XAMPP</small></label>
       </div>
@@ -394,7 +397,7 @@
         <label class="field"><span>CSS</span><textarea class="input code" name="custom_css">${esc(site.custom_css)}</textarea></label>
         <label class="field"><span>JavaScript</span><textarea class="input code" name="custom_js">${esc(site.custom_js)}</textarea></label></div></div>
     </div>
-    <div class="row between" style="margin-top:20px"><div class="row"><button class="btn" id="dup-site">⧉ ทำสำเนาเว็บ</button><button class="btn danger" id="del-site">🗑 ลบเว็บนี้</button></div>
+    <div class="row between" style="margin-top:20px"><div class="row"><button class="btn" id="dup-site">ทำสำเนาเว็บ</button><button class="btn danger" id="del-site">ลบเว็บนี้</button></div>
       <button class="btn primary" id="save-site">บันทึกการตั้งค่า</button></div>`;
     const theme = { ...t };
     root.querySelectorAll('[data-theme]').forEach(el => el.addEventListener('input', () => {
@@ -426,6 +429,14 @@
   }
 
   // ---------------------------------------------------------------- export
+  function siteUrls(h) {
+    const urls = h.urls.map(u => u + site.slug + '/');
+    if (h.tailscale && h.tailscale.url) urls.push(h.tailscale.url + site.slug + '/');
+    const own = (h.site_ports || []).find(x => x.slug === site.slug);
+    if (own) urls.unshift(...own.urls);
+    return urls;
+  }
+
   function renderExport() {
     const ex = D.export || {};
     const h = D.hosting;
@@ -433,23 +444,23 @@
     const opt = (val, title, desc, disabled) => `<label class="opt ${val === target ? 'sel' : ''}" ${disabled ? 'style="opacity:.5"' : ''}><input type="radio" name="target" value="${val}" ${val === target ? 'checked' : ''} ${disabled ? 'disabled' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`;
     root.innerHTML = `<div class="grid g2">
       <div class="card pad"><h2>ส่งออกเป็นไฟล์ HTML / CSS / JS</h2><div class="hint">ได้โฟลเดอร์เว็บที่ใช้งานได้ทันที เปิดจากเครื่อง อัปขึ้นโฮสต์ใดก็ได้</div>
-        ${opt('downloads', '📁 โฟลเดอร์ดาวน์โหลด', '~/Downloads/BuildWeb/' + esc(site.slug))}
-        ${opt('xampp', '🟧 XAMPP htdocs', D.xampp.htdocs ? `${esc(D.xampp.htdocs)}/${esc(site.slug)} → เปิดที่ http://localhost/${esc(site.slug)}/` : 'ไม่พบ XAMPP ในเครื่อง', !D.xampp.htdocs)}
-        ${opt('custom', '📂 เลือกโฟลเดอร์เอง', 'ระบุตำแหน่งด้านล่าง')}
+        ${opt('downloads', 'โฟลเดอร์ดาวน์โหลด', '~/Downloads/BuildWeb/' + esc(site.slug))}
+        ${opt('xampp', 'XAMPP htdocs', D.xampp.htdocs ? `${esc(D.xampp.htdocs)}/${esc(site.slug)} → เปิดที่ http://localhost/${esc(site.slug)}/` : 'ไม่พบ XAMPP ในเครื่อง', !D.xampp.htdocs)}
+        ${opt('custom', 'เลือกโฟลเดอร์เอง', 'ระบุตำแหน่งด้านล่าง')}
         <input class="input mono ${target === 'custom' ? '' : 'hidden'}" name="custom_path" value="${esc(ex.custom_path || '')}" placeholder="/Users/you/Sites" style="margin-bottom:12px">
         <div class="row" style="gap:20px;margin:6px 0 12px"><label class="check"><input type="radio" name="format" value="folder" checked>โฟลเดอร์</label><label class="check"><input type="radio" name="format" value="zip">ไฟล์ .zip</label></div>
         <label class="check"><input type="checkbox" name="php_forms" ${target === 'xampp' ? 'checked' : ''}>ใส่ตัวรับฟอร์ม PHP (<code>bw-form.php</code>) บันทึกลง MySQL ของ XAMPP</label>
         <label class="check"><input type="checkbox" name="include_drafts">รวมหน้าฉบับร่างด้วย</label>
-        <button class="btn primary" id="do-export" style="margin-top:8px">⬇ ส่งออก</button>
+        <button class="btn primary" id="do-export" style="margin-top:8px">ส่งออก</button>
         <div id="ex-result" style="margin-top:14px"></div>
         <div class="muted small" style="margin-top:12px">โครงสร้าง: <code>index.html</code>, <code>&lt;หน้า&gt;.html</code>, <code>css/</code>, <code>js/site.js</code>, <code>assets/</code></div>
       </div>
       <div class="card pad"><h2>โฮสต์เว็บจากเครื่องนี้</h2><div class="hint">ให้คนในเครือข่ายเดียวกัน (Wi-Fi เดียวกัน) เปิดเว็บได้ทันที</div>
-        ${h.running ? `<div class="alert ok">● โฮสติ้งเปิดอยู่</div>
-          ${h.urls.map(u => `<div class="row" style="margin-bottom:8px"><code style="flex:1">${esc(u + site.slug)}/</code><a class="btn sm" href="${esc(u + site.slug)}/" target="_blank">เปิด</a></div>`).join('')}
+        ${h.running ? `<div class="alert ok"><span class="badge ok"><span class="dot"></span>ออนไลน์</span></div>
+          ${siteUrls(h).map(u => `<div class="row" style="margin-bottom:8px;flex-wrap:nowrap"><code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</code><a class="btn sm" href="${esc(u)}" target="_blank">เปิด</a></div>`).join('')}
           ${site.published ? '' : '<div class="alert warn">เว็บนี้ปิดการเผยแพร่อยู่ — เปิดได้ที่แท็บ “ตั้งค่าเว็บ”</div>'}`
         : `<div class="alert warn">โฮสติ้งยังปิดอยู่</div>`}
-        <a class="btn" href="/settings/">⚙ ตั้งค่าโฮสติ้ง</a>
+        <a class="btn" href="/settings/">ตั้งค่าโฮสติ้ง</a>
         <div class="sect-title">ตัวอย่างในเครื่อง</div>
         <div class="row"><code style="flex:1">${location.origin}/preview/${esc(site.slug)}/</code><a class="btn sm" href="/preview/${esc(site.slug)}/" target="_blank">เปิด</a></div>
         <div class="muted small" style="margin-top:6px">หน้าตัวอย่างแสดงหน้าฉบับร่างด้วย และเปิดได้เฉพาะเครื่องนี้</div>

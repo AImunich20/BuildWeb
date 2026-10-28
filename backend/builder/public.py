@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from buildweb import config
 
 from . import notify, render
+from .middleware import SITE_ENV_KEY
 from .models import FormSubmission, Site
 
 MAX_FIELDS = 60
@@ -94,6 +95,12 @@ def preview(request, slug, path=""):
 
 @csrf_exempt
 def public(request, path=""):
+    pinned = request.META.get(SITE_ENV_KEY)
+    if pinned:
+        site = render.site_for_slug(pinned, published_only=True)
+        if not site:
+            raise Http404
+        return serve(request, site, path, include_drafts=False)
     first, _, rest = path.partition("/")
     site = render.site_for_slug(first, published_only=True) if first else None
     if site:

@@ -1,11 +1,8 @@
 {% load static %}<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+{% include "builder/_head.html" %}
 <title>{% block title %}BuildWeb{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="{% static 'builder/app.css' %}?v={{ app_version }}">
 {% block head %}{% endblock %}
 </head>
@@ -13,18 +10,24 @@
 {% csrf_token %}
 <div class="app">
   <aside class="side">
-    <a class="logo" href="/"><span class="logo-mark">◆</span>BuildWeb</a>
-    <a class="nav {% if nav == 'dashboard' %}active{% endif %}" href="/"><i>⌂</i>เว็บไซต์ของฉัน</a>
-    {% if site %}<a class="nav {% if nav == 'sites' %}active{% endif %}" href="/sites/{{ site.id }}/"><i>▤</i>{{ site.name|truncatechars:20 }}</a>{% endif %}
-    <a class="nav {% if nav == 'settings' %}active{% endif %}" href="/settings/"><i>⚙</i>โฮสติ้ง & ตั้งค่า</a>
+    <a class="logo" href="/"><span class="logo-mark">◆</span>BuildWeb<small>v{{ app_version }}</small></a>
+    <div class="group">เว็บไซต์</div>
+    <a class="nav {% if nav == 'dashboard' %}active{% endif %}" href="/"><i>▦</i>ภาพรวม</a>
+    {% if site %}<a class="nav {% if nav == 'sites' %}active{% endif %}" href="/sites/{{ site.id }}/"><i>◧</i>{{ site.name|truncatechars:22 }}</a>{% endif %}
+    <a class="nav" href="/#import"><i>⇣</i>นำเข้าเว็บ</a>
+    <div class="group">ระบบ</div>
+    <a class="nav {% if nav == 'settings' %}active{% endif %}" href="/settings/"><i>⌁</i>โฮสติ้ง & ตั้งค่า</a>
+    <a class="nav {% if nav == 'notify' %}active{% endif %}" href="/settings/notify/"><i>◔</i>การแจ้งเตือน</a>
     <a class="nav {% if nav == 'database' %}active{% endif %}" href="/settings/database/"><i>⛁</i>ฐานข้อมูล</a>
     <a class="nav" href="/django-admin/"><i>⚑</i>Django Admin</a>
     <div class="spacer"></div>
     <div class="foot">
-      {% if db_failed %}<span class="badge err"><span class="dot"></span>MySQL ไม่เชื่อมต่อ</span>
-      {% elif db_engine == 'mysql' %}<span class="badge ok"><span class="dot"></span>MySQL (XAMPP)</span>
-      {% else %}<span class="badge"><span class="dot"></span>SQLite</span>{% endif %}<br>
-      BuildWeb v{{ app_version }}
+      <div>{% if db_failed %}<span class="badge err"><span class="dot"></span>MySQL ไม่เชื่อมต่อ</span>
+      {% elif db_engine == 'mysql' %}<span class="badge ok"><span class="dot"></span>MySQL</span>
+      {% else %}<span class="badge"><span class="dot"></span>SQLite</span>{% endif %}</div>
+      <div class="theme-switch" id="theme-switch" title="ธีม">
+        <button data-t="light" title="สว่าง">☀</button><button data-t="system" title="ตามระบบ">◐</button><button data-t="dark" title="มืด">☾</button>
+      </div>
     </div>
   </aside>
   <main class="main">{% block main %}{% endblock %}</main>

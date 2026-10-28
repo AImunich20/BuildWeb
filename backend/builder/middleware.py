@@ -6,6 +6,7 @@ from django.utils.html import escape
 from django.shortcuts import redirect
 
 PUBLIC_ENV_KEY = "buildweb.public"
+SITE_ENV_KEY = "buildweb.site"  # set by a site's own hosting port: that site is served at "/"
 
 
 class PublicSiteMiddleware:

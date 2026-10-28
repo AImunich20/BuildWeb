@@ -375,3 +375,51 @@ class ImporterTests(TestCase):
         site = Site.objects.get(pk=d["site_id"])
         self.assertEqual(site.name, "mysite")
         self.assertIn("/media/sites/", site.home_page().html)
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class HostingNotifyTests(TestCase):
+    def test_site_pinned_to_its_own_port(self):
+        a = services.create_site("Alpha", "business")
+        services.create_site("Beta", "landing")
+        pinned = Client(**{"buildweb.public": True, "buildweb.site": a.slug})
+        r = pinned.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("<title>Alpha", r.content.decode())
+        self.assertEqual(pinned.get("/about.html").status_code, 200)
+        self.assertEqual(pinned.get("/beta/").status_code, 404)  # only its own site on that port
+        a.published = False
+        a.save()
+        self.assertEqual(pinned.get("/").status_code, 404)
+
+    def test_site_port_validation(self):
+        c = Client()
+        c.get("/")
+        a = services.create_site("A")
+        b = services.create_site("B")
+        post = lambda sid, d: c.post(f"/api/sites/{sid}/update", json.dumps(d), content_type="application/json")  # noqa: E731
+        self.assertEqual(post(a.id, {"host_port": 8101}).status_code, 200)
+        self.assertEqual(post(b.id, {"host_port": 8101}).json()["field"], "host_port")  # taken
+        self.assertEqual(post(b.id, {"host_port": 5050}).status_code, 400)  # the app's own port
+        self.assertEqual(post(a.id, {"host_port": ""}).status_code, 200)
+        self.assertIsNone(Site.objects.get(pk=a.id).host_port)
+
+    def test_notify_summary_and_channels(self):
+        from . import notify
+
+        text = notify.summary("ร้าน", "contact", "ติดต่อ", {"name": "สมชาย", "tags": ["a", "b"]})
+        self.assertIn("ร้าน", text)
+        self.assertIn("tags: a, b", text)
+        cfg = {"mac": False, "telegram_token": "t", "telegram_chat": "", "discord_webhook": "https://d",
+               "webhook_url": "", "email": {"enabled": True, "host": "smtp", "to": "x@y"}}
+        self.assertEqual(notify.channels(cfg), ["discord", "email"])
+
+    def test_notify_settings_api_hides_secrets(self):
+        c = Client()
+        c.get("/")
+        r = c.post("/api/settings/notify", json.dumps({"mac": False, "email": {"enabled": True, "host": "smtp.x", "password": "pw"}}),
+                   content_type="application/json").json()
+        self.assertNotIn("password", r["notify"]["email"])
+        self.assertTrue(r["notify"]["email"]["password_set"])
+        bad = c.post("/api/settings/notify", json.dumps({"webhook_url": "ftp://x"}), content_type="application/json")
+        self.assertEqual(bad.status_code, 400)

@@ -1,7 +1,7 @@
 {% extends "builder/base.html" %}
 {% block title %}ฐานข้อมูล · BuildWeb{% endblock %}
 {% block main %}
-<div class="topline"><div><h1>ฐานข้อมูล</h1><div class="sub">เก็บเว็บไซต์ หน้า ไฟล์ และข้อมูลฟอร์มไว้ใน SQLite (ในเครื่อง) หรือ MySQL/MariaDB ของ XAMPP</div></div></div>
+<div class="topline"><div><div class="crumbs">~/settings/database</div><h1>ฐานข้อมูล</h1><div class="sub">เก็บเว็บไซต์ หน้า ไฟล์ และข้อมูลฟอร์มไว้ใน SQLite (ในเครื่อง) หรือ MySQL/MariaDB ของ XAMPP</div></div></div>
 {% if db_failed %}
 <div class="alert err"><div><b>เชื่อมต่อ MySQL ไม่ได้ — โปรแกรมอยู่ในโหมดปลอดภัย</b><br>{{ db_failed }}<br>
 เปิด MySQL ใน XAMPP แล้วกด “ลองเชื่อมต่อใหม่” หรือแก้การตั้งค่าด้านล่าง</div></div>

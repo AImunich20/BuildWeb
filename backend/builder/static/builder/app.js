@@ -115,11 +115,29 @@
     toast('ตรวจสอบอัพเดทได้เมื่อเปิดผ่านแอป BuildWeb', 'err');
   }
 
+  // Theme: light | dark | system (saved per device).
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  function getTheme() { try { return localStorage.getItem('bw-theme') || 'system'; } catch (e) { return 'system'; } }
+  function applyTheme() {
+    const t = getTheme();
+    const dark = t === 'dark' || (t === 'system' && mq.matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.querySelectorAll('[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+    window.dispatchEvent(new CustomEvent('bw-theme', { detail: dark ? 'dark' : 'light' }));
+  }
+  function setTheme(t) { try { localStorage.setItem('bw-theme', t); } catch (e) { } applyTheme(); }
+  mq.addEventListener('change', applyTheme);
+  window.addEventListener('storage', e => { if (e.key === 'bw-theme') applyTheme(); });
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.t)));
+    applyTheme();
+  });
+
   // The desktop webview can't open new windows: send target=_blank links to the default browser.
   document.addEventListener('click', e => {
     const a = e.target.closest('a[target=_blank]');
     if (a && window.__TAURI__) { e.preventDefault(); openUrl(a.href); }
   });
 
-  window.BW = { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when, openUrl, reveal, checkUpdates, cookie };
+  window.BW = { setTheme, getTheme, api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when, openUrl, reveal, checkUpdates, cookie };
 })();

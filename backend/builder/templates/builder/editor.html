@@ -1,11 +1,8 @@
 {% load static %}<!doctype html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+{% include "builder/_head.html" %}
 <title>{{ page.title }} · ออกแบบ · BuildWeb</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="{% static 'vendor/grapesjs/grapes.min.css' %}">
 <link rel="stylesheet" href="{% static 'builder/app.css' %}?v={{ app_version }}">
 <link rel="stylesheet" href="{% static 'builder/editor.css' %}?v={{ app_version }}">
@@ -16,16 +13,16 @@
   <header class="ed-top">
     <div class="ed-top-l">
       <a class="btn ghost icon" href="/sites/{{ site.id }}/" title="กลับไปหน้าจัดการเว็บ">←</a>
-      <span class="logo-mark sm">◆</span>
+      <span class="logo-mark">◆</span>
       <div class="ed-title">
         <div class="ed-site">{{ site.name }}</div>
         <button class="ed-page-btn" id="page-switch" title="เปลี่ยนหน้า">{{ page.title }} <span class="mono muted">{{ page.filename }}</span> ▾</button>
       </div>
     </div>
     <div class="ed-top-c" id="devices">
-      <button class="dev active" data-dev="desktop" title="คอมพิวเตอร์">🖥</button>
-      <button class="dev" data-dev="tablet" title="แท็บเล็ต">▭</button>
-      <button class="dev" data-dev="mobile" title="มือถือ">📱</button>
+      <button class="dev active" data-dev="desktop" title="คอมพิวเตอร์">Desktop</button>
+      <button class="dev" data-dev="tablet" title="แท็บเล็ต">Tablet</button>
+      <button class="dev" data-dev="mobile" title="มือถือ">Mobile</button>
     </div>
     <div class="ed-top-r">
       <button class="btn ghost icon" data-cmd="undo" title="เลิกทำ (⌘Z)">↶</button>
@@ -33,12 +30,13 @@
       <span class="sep"></span>
       <button class="btn ghost icon" data-cmd="outline" title="แสดงเส้นขอบ">⬚</button>
       <button class="btn ghost icon" data-cmd="code" title="ดูโค้ด HTML/CSS">&lt;/&gt;</button>
-      <button class="btn ghost icon" data-cmd="import" title="นำเข้า HTML">⇩</button>
-      <button class="btn ghost icon" data-cmd="history" title="เวอร์ชันย้อนหลัง">🕘</button>
-      <button class="btn ghost icon" data-cmd="clear" title="ล้างหน้า">🗑</button>
+      <button class="btn ghost icon" data-cmd="import" title="นำเข้า HTML">⇣</button>
+      <button class="btn ghost icon" data-cmd="history" title="เวอร์ชันย้อนหลัง">⟲</button>
+      <button class="btn ghost icon" data-cmd="clear" title="ล้างหน้า">⌫</button>
+      <button class="btn ghost icon" data-cmd="theme" title="สลับธีมสว่าง/มืด" id="theme-btn">◐</button>
       <span class="sep"></span>
       <span class="save-state" id="save-state">พร้อม</span>
-      <button class="btn sm" data-cmd="preview" title="ดูแบบเต็มจอ">👁 ดูตัวอย่าง</button>
+      <button class="btn sm" data-cmd="preview" title="ดูแบบเต็มจอ">ดูตัวอย่าง</button>
       <button class="btn sm" data-cmd="open" title="เปิดในเบราว์เซอร์">↗</button>
       <select class="input status-sel" id="status" title="สถานะหน้า">
         <option value="published">● เผยแพร่</option><option value="draft">○ ฉบับร่าง</option>
@@ -51,20 +49,20 @@
       <button data-panel="blocks" class="active"><i>＋</i>เพิ่ม</button>
       <button data-panel="pages"><i>▤</i>หน้า</button>
       <button data-panel="layers"><i>☰</i>เลเยอร์</button>
-      <button data-panel="media"><i>🖼</i>รูปภาพ</button>
-      <button data-panel="theme"><i>🎨</i>ธีม</button>
+      <button data-panel="media"><i>▣</i>รูปภาพ</button>
+      <button data-panel="theme"><i>◑</i>ธีม</button>
     </nav>
     <aside class="ed-left">
       <section data-pane="blocks"><div class="pane-head"><input class="input" id="block-search" placeholder="ค้นหาบล็อก..."></div><div id="blocks"></div></section>
       <section data-pane="pages" class="hidden"><div class="pane-head row between"><b>หน้าทั้งหมด</b><button class="btn sm primary" id="add-page">＋ เพิ่มหน้า</button></div><div id="page-list"></div></section>
       <section data-pane="layers" class="hidden"><div class="pane-head"><b>เลเยอร์</b><div class="muted small">ลากเพื่อจัดลำดับ คลิกเพื่อเลือก</div></div><div id="layers"></div></section>
-      <section data-pane="media" class="hidden"><div class="pane-head row between"><b>รูปภาพของเว็บ</b><button class="btn sm" id="upload-btn">⬆ อัปโหลด</button><input type="file" id="upload-input" multiple accept="image/*,video/*" hidden></div>
+      <section data-pane="media" class="hidden"><div class="pane-head row between"><b>รูปภาพของเว็บ</b><button class="btn sm" id="upload-btn">อัปโหลด</button><input type="file" id="upload-input" multiple accept="image/*,video/*" hidden></div>
         <div class="muted small" style="padding:0 14px 10px">ลากรูปไปวางในหน้า หรือเลือกรูปแล้วกดรูปนี้เพื่อเปลี่ยน</div><div id="media-list" class="media-grid"></div></section>
       <section data-pane="theme" class="hidden"><div class="pane-head"><b>ธีมของเว็บ</b><div class="muted small">มีผลกับทุกหน้า</div></div><div id="theme-panel"></div></section>
     </aside>
     <div class="ed-canvas"><div id="gjs"></div></div>
     <aside class="ed-right">
-      <div class="r-tabs"><button data-rt="style" class="active">🖌 สไตล์</button><button data-rt="traits">⚙ ตั้งค่า</button></div>
+      <div class="r-tabs"><button data-rt="style" class="active">สไตล์</button><button data-rt="traits">ตั้งค่า</button></div>
       <div data-rpane="style"><div class="r-empty" id="r-empty">เลือกองค์ประกอบในหน้าเพื่อปรับแต่ง</div><div id="selectors"></div><div id="styles"></div></div>
       <div data-rpane="traits" class="hidden"><div id="traits"></div></div>
     </aside>

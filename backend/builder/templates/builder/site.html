@@ -1,12 +1,13 @@
 {% extends "builder/base.html" %}{% load static %}
 {% block title %}{{ site.name }} · BuildWeb{% endblock %}
 {% block main %}
-<div class="crumbs"><a href="/">เว็บไซต์ของฉัน</a> / {{ site.name }}</div>
-<div class="topline">
-  <div><h1>{{ site.name }}</h1><div class="sub mono">/{{ site.slug }}/</div></div>
+<div class="topline" style="border:0;padding-bottom:8px;margin-bottom:12px">
+  <div><div class="crumbs"><a href="/">~/sites</a>/{{ site.slug }}</div><h1>{{ site.name }}</h1>
+    <div class="sub">{% if site.published %}<span class="badge ok"><span class="dot"></span>เผยแพร่</span>{% else %}<span class="badge">ปิดการเผยแพร่</span>{% endif %}
+      <span class="mono muted" style="margin-left:8px">{{ site.pages.count }} หน้า</span></div></div>
   <div class="row">
-    <a class="btn" href="/preview/{{ site.slug }}/" target="_blank">👁 ดูตัวอย่าง</a>
-    <a class="btn primary" href="/sites/{{ site.id }}/edit/">✎ เปิดตัวออกแบบ</a>
+    <a class="btn" href="/preview/{{ site.slug }}/" target="_blank">↗ ดูตัวอย่าง</a>
+    <a class="btn primary" href="/sites/{{ site.id }}/edit/">เปิดตัวออกแบบ</a>
   </div>
 </div>
 <nav class="tabs">

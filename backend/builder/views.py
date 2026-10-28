@@ -34,6 +34,7 @@ def dashboard(request):
             "unread": FormSubmission.objects.filter(is_read=False).count(),
         },
         "hosting": hosting.status(),
+        "site_choices": [{"id": s.id, "name": s.name} for s in sites],
         "nav": "dashboard",
     })
 
@@ -169,3 +170,7 @@ def submissions_csv(request, site_id):
                     *[s.data.get(k, "") if not isinstance(s.data.get(k), list) else ", ".join(s.data[k]) for k in keys],
                     s.ip])
     return resp
+
+
+def notify_page(request):
+    return render(request, "builder/notify.html", {"nav": "notify"})

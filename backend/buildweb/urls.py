@@ -20,6 +20,7 @@ urlpatterns = [
     path("sites/<int:site_id>/<str:tab>/", views.site_manage, name="site_tab"),
     path("settings/", views.settings_page, name="settings"),
     path("settings/database/", views.database_page, name="database"),
+    path("settings/notify/", views.notify_page, name="notify"),
     path("django-admin/", admin.site.urls),
     # preview (drafts included)
     path("preview/<slug:slug>", public.preview),

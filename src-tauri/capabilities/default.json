@@ -4,5 +4,5 @@
   "description": "Main window, including the local backend page (needs IPC for the update button)",
   "windows": ["main"],
   "remote": { "urls": ["http://127.0.0.1:5050/*", "http://127.0.0.1:5050"] },
-  "permissions": ["core:default", "dialog:default", "updater:default", "process:allow-restart", "opener:default", "allow-check-for-updates"]
+  "permissions": ["core:default", "dialog:default", "updater:default", "process:allow-restart", "opener:default", "allow-check-for-updates", "allow-get-autostart", "allow-set-autostart", "autostart:default"]
 }

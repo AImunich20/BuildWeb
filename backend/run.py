@@ -8,6 +8,7 @@ published sites. Exits when the desktop app that started it goes away.
 """
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -40,6 +41,17 @@ def check_database():
     os.environ["BUILDWEB_DB_FAILED"] = last
 
 
+def shutdown(*_):
+    """Stop hosting (and take Tailscale links down) before exiting."""
+    try:
+        from builder.hosting import server as hosting
+
+        hosting.shutdown()
+    except Exception:
+        pass
+    os._exit(0)
+
+
 def watch_parent():
     ppid = os.environ.get("BUILDWEB_PARENT_PID")
     if not ppid:
@@ -51,7 +63,7 @@ def watch_parent():
             try:
                 os.kill(int(ppid), 0)
             except OSError:
-                os._exit(0)
+                shutdown()
 
     threading.Thread(target=loop, daemon=True).start()
 
@@ -79,6 +91,8 @@ def main():
     from django.core.wsgi import get_wsgi_application
     from waitress import serve
 
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
     watch_parent()
     port = settings.ADMIN_PORT
     log.info("BuildWeb %s on http://127.0.0.1:%s (db: %s)", settings.VERSION, port, settings.DB_ENGINE)
