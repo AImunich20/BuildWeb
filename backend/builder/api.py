@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from buildweb import config
 
-from . import data, dbtools, restapi, schema, exporter, generate, importer, navbar, notify, publish, sections, seo, services, stats, system, widgets
+from . import data, dbtools, members, restapi, schema, exporter, generate, importer, navbar, notify, publish, sections, seo, services, stats, system, widgets
 from .hosting import server as hosting
 from .models import (DEFAULT_THEME, ApiKey, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
                      SharedSection, Site)
@@ -183,7 +183,7 @@ def page_json(p):
         "parent": p.parent_id, "seo_title": p.seo_title, "seo_description": p.seo_description,
         "seo_keywords": p.seo_keywords, "og_image": p.og_image, "noindex": p.noindex, "head_code": p.head_code,
         "custom_css": p.custom_css, "custom_js": p.custom_js, "filename": p.filename,
-        "collection": p.collection_id, "detail_field": p.detail_field,
+        "collection": p.collection_id, "detail_field": p.detail_field, "access": p.access,
         "collection_slug": p.collection.slug if p.collection_id else "",
         "collection_name": p.collection.name if p.collection_id else "",
         "updated_at": p.updated_at.isoformat(), "edit_url": f"/sites/{p.site_id}/edit/{p.id}/",
@@ -208,6 +208,13 @@ def apply_page_fields(page, d):
         page.collection_id = int(cid) if cid else None
     if "detail_field" in d:
         page.detail_field = (d["detail_field"] or "")[:60]
+    if "access" in d:
+        a = (d["access"] or "").strip()
+        if a and a != "members" and not re.fullmatch(r"role:[a-z0-9_,-]+", a):
+            raise ApiError("ตั้งค่าการเข้าถึงไม่ถูกต้อง", field="access")
+        page.access = a
+        if a and page.is_home:
+            raise ApiError("หน้าแรกต้องเปิดให้ทุกคน — สร้างหน้าแยกสำหรับสมาชิก", field="access")
     if "parent" in d:
         pid = d["parent"] or None
         if pid and (int(pid) == page.pk or not page.site.pages.filter(pk=pid).exists()):
@@ -239,7 +246,7 @@ def page_create(request, site_id):
     probe = Page(site=site, title=title)
     apply_page_fields(probe, d)
     fields = {f: getattr(probe, f) for f in PAGE_FIELDS + ("show_in_nav", "noindex", "use_header", "use_footer", "status", "parent_id",
-                                                           "collection_id", "detail_field")
+                                                           "collection_id", "detail_field", "access")
               if f != "title"}
     page = services.create_page(site, title, slug, d.get("layout") or "basic", **fields)
     if as_bool(d.get("is_home")):
@@ -1339,3 +1346,125 @@ def restapi_logs(request, site_id):
     logs = site.api_logs.select_related("key")[:200]
     return {"logs": [{"at": x.at.isoformat(), "method": x.method, "path": x.path, "status": x.status, "ms": x.ms,
                       "key": x.key.name if x.key else "", "ip": x.ip, "error": x.error} for x in logs]}
+
+
+# --- site members ---------------------------------------------------------------------------------
+
+def member_or_404(member_id):
+    from .models import SiteUser
+
+    return get_object_or_404(SiteUser, pk=member_id)
+
+
+@api
+def members_settings(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request).get("settings") or {}
+        cur = {**(site.auth or {})}
+        for k in ("enabled", "signup", "verify_email"):
+            if k in d:
+                cur[k] = as_bool(d[k])
+        if "roles" in d:
+            roles = d["roles"] if isinstance(d["roles"], list) else re.split(r"[,\s]+", str(d["roles"]))
+            roles = [r.strip().lower() for r in roles if r.strip()]
+            bad = [r for r in roles if not members.ROLE_RE.match(r)]
+            if bad:
+                raise ApiError("ชื่อบทบาทใช้ได้เฉพาะ a-z 0-9 _ - เช่น member, vip, staff", field="roles")
+            cur["roles"] = [r for r in dict.fromkeys(roles) if r != "admin"] or ["member"]
+        if "default_role" in d:
+            cur["default_role"] = str(d["default_role"] or "")
+        if "min_password" in d:
+            cur["min_password"] = max(6, min(64, int(d["min_password"] or 8)))
+        if "after_login" in d:
+            cur["after_login"] = str(d["after_login"] or "").strip()[:200]
+        site.auth = cur
+        site.save(update_fields=["auth"])
+    s = members.settings(site)
+    return {"settings": s, "roles": members.all_roles(site), "smtp": notify.smtp_ready(),
+            "pages": {k: site.pages.filter(slug=v[:-5]).exists() for k, v in s["pages"].items()},
+            "count": site.members.count()}
+
+
+@require_GET
+@api
+def members_list(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    qs = site.members.all()
+    q = (request.GET.get("q") or "").strip()
+    if q:
+        from django.db.models import Q
+
+        qs = qs.filter(Q(email__icontains=q) | Q(name__icontains=q))
+    if request.GET.get("role"):
+        qs = qs.filter(role=request.GET["role"])
+    return {"members": [members.user_json(u, full=True) for u in qs[:500]], "total": qs.count()}
+
+
+@require_POST
+@api
+def members_create(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    try:
+        u = members.create_user(site, d.get("email"), d.get("password") or "", d.get("name"), d.get("role"), verified=True)
+    except members.AuthError as e:
+        raise ApiError(str(e), field=next(iter(e.fields or {}), None))
+    return {"member": members.user_json(u, full=True)}
+
+
+@require_POST
+@api
+def member_action(request, member_id, action):
+    u = member_or_404(member_id)
+    d = body(request)
+    if action == "update":
+        if "name" in d:
+            u.name = str(d["name"] or "")[:150]
+        if "role" in d:
+            if d["role"] not in members.all_roles(u.site):
+                raise ApiError("ไม่มีบทบาทนี้", field="role")
+            u.role = d["role"]
+        for k in ("is_active", "email_verified"):
+            if k in d:
+                setattr(u, k, as_bool(d[k]))
+        u.save()
+        if not u.is_active:
+            u.tokens.all().delete()  # log a suspended member out everywhere
+        return {"member": members.user_json(u, full=True)}
+    if action == "reset-link":
+        base = u.site.base_url or (hosting_base(u.site) or f"http://127.0.0.1:{settings.ADMIN_PORT}/preview/{u.site.slug}/")
+        emailed = notify.smtp_ready()
+        try:
+            link = members.send_reset(u.site, u, base)
+        except RuntimeError:
+            emailed = False
+            from .models import UserToken
+
+            link = members.page_url(u.site, base, "reset", members.issue(u, UserToken.RESET))
+        return {"link": link, "emailed": emailed}
+    if action == "logout":
+        u.tokens.all().delete()
+        return {}
+    if action == "delete":
+        u.delete()
+        return {}
+    raise ApiError("unknown action", status=404)
+
+
+def hosting_base(site):
+    st = hosting.status(with_tailscale=False)
+    if not st.get("running"):
+        return ""
+    own = next((x for x in st.get("site_ports", []) if x.get("slug") == site.slug), None)
+    if own and own.get("urls"):
+        return own["urls"][0]
+    return (st.get("urls") or [""])[0] + site.slug + "/" if st.get("urls") else ""
+
+
+@require_POST
+@api
+def members_pages(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    made = generate.create_member_pages(site)
+    return {"created": [page_json(p) for p in made]}

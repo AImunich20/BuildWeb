@@ -120,6 +120,19 @@ curl -X POST 'http://…/api/v1/orders' -H 'X-API-Key: bw_…' -H 'Content-Type:
 
 > API ทำงานบนเซิร์ฟเวอร์โฮสติ้งของ BuildWeb (เครื่องนี้, LAN, Tailscale) · เว็บที่เผยแพร่ไป GitHub Pages/Netlify/FTP เป็นไฟล์อย่างเดียว — การ deploy backend ขึ้นเซิร์ฟเวอร์อยู่ในเฟส 4
 
+### 4.0.1 ระบบสมาชิก — ใหม่ใน v0.3
+
+<img src="docs/images/members.png" alt="ระบบสมาชิก" width="100%">
+
+- สมัคร · เข้าสู่ระบบ · ลืมรหัสผ่าน (อีเมล) · ยืนยันอีเมล · บัญชีของฉัน — กดปุ่มเดียวได้หน้าครบ แก้หน้าตาได้ในตัวออกแบบ
+- **บทบาท** และ **หน้าเฉพาะสมาชิก/บทบาท** (ตั้งที่ “ตั้งค่าหน้า › ใครเปิดหน้านี้ได้”)
+- **ข้อมูลของใครของมัน:** ตั้งสิทธิ์ API เป็น “สมาชิก” หรือ “เจ้าของแถว” เช่น โน้ต, คำสั่งซื้อ, การจองของแต่ละคน
+- ในหน้าเว็บ: `{{user.name}}` · `data-bw-if="user"` / `data-bw-if="!user"` · `<div data-bw-repeat="orders" data-bw-mine>` · ฟอร์ม `data-bw-auth="login|register|forgot|reset|profile|password"` · ปุ่ม `data-bw-logout`
+- API สำหรับแอป: `POST /api/v1/auth/register` `login` `logout` `forgot` `reset` · `GET/PATCH /api/v1/auth/me` · ส่ง `Authorization: Bearer bwu_…`
+- จัดการสมาชิกในแท็บ “สมาชิก”: ค้นหา, เปลี่ยนบทบาท, ระงับ, ออกจากระบบทุกอุปกรณ์, ลิงก์รีเซ็ตรหัสผ่าน
+
+> ระบบสมาชิกต้องรันบนเซิร์ฟเวอร์ BuildWeb (โฮสต์จากเครื่องนี้ หรือ deploy ในเฟส 4) · ส่งอีเมลผ่าน SMTP ที่ตั้งในหน้า “การแจ้งเตือน”
+
 ### 4.1 หน้ารายละเอียด, ค้นหา & บทความ — ใหม่ใน v0.1.4
 
 <img src="docs/images/data-pages.png" alt="หน้ารายการพร้อมค้นหาและหมวดหมู่" width="100%">
@@ -340,7 +353,7 @@ flowchart LR
 - [x] เผยแพร่ขึ้น GitHub Pages / Netlify / FTP ด้วยปุ่มเดียว (v0.1.4)
 - [x] sitemap.xml, robots.txt, คะแนน SEO ต่อหน้า, สถิติผู้เข้าชม, ปุ่มติดต่อลอย (v0.1.4)
 - [x] **เฟส 1 · Backend core (v0.2):** REST API อัตโนมัติ, API key, สิทธิ์, CORS, rate limit, log, OpenAPI, ตัวทดลอง API, ฟิลด์พร้อมกฎและ relation, JS SDK
-- [ ] **เฟส 2 · ผู้ใช้ของเว็บ:** สมัคร/ล็อกอิน/ลืมรหัส, บทบาท, หน้าเฉพาะสมาชิก, ข้อมูลของใครของมัน, บล็อกล็อกอิน
+- [x] **เฟส 2 · ผู้ใช้ของเว็บ (v0.3):** สมัคร/ล็อกอิน/ลืมรหัส, บทบาท, หน้าเฉพาะสมาชิก, ข้อมูลของใครของมัน, บล็อกสมาชิก
 - [ ] **เฟส 3 · Logic:** webhook, งานตั้งเวลา, endpoint เขียนเอง, เชื่อม API ภายนอก + เก็บ secret
 - [ ] **เฟส 4 · Deploy full-stack:** backend ขึ้นเซิร์ฟเวอร์ (Docker/VPS + HTTPS + โดเมน), PostgreSQL, สำรอง/กู้คืน, เข้ารหัส secret
 - [ ] **เฟส 5 · งานทีม:** หลายผู้ใช้ + สิทธิ์, โหมด CMS ให้ลูกค้า, ตัวแก้โค้ด, คอมโพเนนต์เอง, Git
@@ -373,6 +386,7 @@ backend/
     forms.py stats.py    ฟอร์ม → ชุดข้อมูล (อนุมัติ, กันสแปม) · สถิติผู้เข้าชม
     seo.py publish.py    คะแนน SEO · เผยแพร่ GitHub Pages / Netlify / FTP
     schema.py restapi.py ฟิลด์ + การตรวจข้อมูล · REST API (keys, สิทธิ์, CORS, rate limit, OpenAPI)
+    members.py           สมาชิกของเว็บ: รหัสผ่าน, session, ลิงก์อีเมล, สิทธิ์หน้า
     widgets.py           ค้นหา/หมวดหมู่/แบ่งหน้า (JS) · ปุ่มติดต่อลอย
     sections.py          บล็อกสำเร็จรูปและแม่แบบ
     importer.py          นำเข้าเว็บ (html/zip/โฟลเดอร์/GitHub)

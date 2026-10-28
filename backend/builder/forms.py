@@ -63,7 +63,7 @@ def clean_value(field, value):
     return value[:5000]
 
 
-def save_to_collection(site, slug, posted):
+def save_to_collection(site, slug, posted, owner=None):
     col = site.collections.filter(slug=slug).first()
     if not col or not col.opt("forms"):
         raise FormError("ฟอร์มนี้ยังไม่ได้เปิดให้บันทึกลงชุดข้อมูล")
@@ -90,7 +90,7 @@ def save_to_collection(site, slug, posted):
     else:
         pos = (col.records.aggregate(m=Max("position"))["m"] or 0) + 1
         Record.objects.create(collection=col, data={f["name"]: values.get(f["name"], "") for f in col.fields},
-                              position=pos, approved=approved)
+                              position=pos, approved=approved, owner=owner)
         col.save(update_fields=["updated_at"])
         pending = not approved
     return {"label": col.name, "pending": pending}

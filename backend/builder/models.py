@@ -58,6 +58,7 @@ class Site(models.Model):
     contact = models.JSONField("ปุ่มติดต่อลอย", default=dict, blank=True)
     publish = models.JSONField("ปลายทางเผยแพร่", default=dict, blank=True)  # {"github": {...}, "netlify": {...}, "ftp": {...}}
     api = models.JSONField("ตั้งค่า REST API", default=dict, blank=True)  # {"enabled", "cors", "rate", "log"}
+    auth = models.JSONField("ตั้งค่าสมาชิก", default=dict, blank=True)  # see members.SETTINGS
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -112,6 +113,8 @@ class Page(models.Model):
     collection = models.ForeignKey("Collection", null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name="detail_pages", verbose_name="หน้ารายละเอียดของชุดข้อมูล")
     detail_field = models.CharField("ฟิลด์ที่ใช้ตั้งชื่อลิงก์", max_length=60, blank=True)
+    # "" = everyone · "members" = signed-in site users · "role:vip,staff" = those roles only
+    access = models.CharField("ใครเปิดหน้านี้ได้", max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -344,6 +347,8 @@ class Record(models.Model):
     data = models.JSONField(default=dict)
     position = models.IntegerField(default=0)
     approved = models.BooleanField("แสดงบนเว็บ", default=True)  # rows sent from a form wait for approval
+    owner = models.ForeignKey("SiteUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="records",
+                              verbose_name="เจ้าของแถว")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -412,3 +417,40 @@ class ApiLog(models.Model):
         ordering = ["-at"]
         verbose_name = "บันทึกการเรียก API"
         verbose_name_plural = "บันทึกการเรียก API"
+
+
+class SiteUser(models.Model):
+    """A member of one site (visitors who sign up on the site) — not a user of the BuildWeb app."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="members")
+    email = models.EmailField("อีเมล")
+    name = models.CharField("ชื่อ", max_length=150, blank=True)
+    password = models.CharField(max_length=200, blank=True)  # Django password hash
+    role = models.CharField("บทบาท", max_length=40, default="member")
+    is_active = models.BooleanField("ใช้งานได้", default=True)
+    email_verified = models.BooleanField("ยืนยันอีเมลแล้ว", default=False)
+    profile = models.JSONField(default=dict, blank=True)  # extra fields (phone, address...)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["site", "email"], name="unique_member_email")]
+        verbose_name = "สมาชิกของเว็บ"
+        verbose_name_plural = "สมาชิกของเว็บ"
+
+    def __str__(self):
+        return f"{self.email} ({self.site.slug})"
+
+
+class UserToken(models.Model):
+    """Session / email-verification / password-reset tokens of site users (only a SHA-256 hash is stored)."""
+
+    SESSION, VERIFY, RESET = "session", "verify", "reset"
+    user = models.ForeignKey(SiteUser, on_delete=models.CASCADE, related_name="tokens")
+    kind = models.CharField(max_length=10, default=SESSION)
+    token_hash = models.CharField(max_length=64, db_index=True)
+    expires = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+    user_agent = models.CharField(max_length=200, blank=True)

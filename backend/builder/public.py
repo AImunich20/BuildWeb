@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from buildweb import config
 
-from . import forms, notify, render, restapi, stats
+from . import forms, members, notify, render, restapi, stats
 from .middleware import SITE_ENV_KEY
 from .models import FormSubmission, Site
 
@@ -22,7 +22,7 @@ def serve(request, site, path, include_drafts):
     root = request.path[:len(request.path) - len(path)] if path and request.path.endswith(path) else request.path
     base = request.build_absolute_uri(root if root.endswith("/") else root + "/")
     if path == "api" or path.startswith("api/"):
-        return restapi.handle(request, site, path[3:], base_url=site.base_url or base)
+        return restapi.handle(request, site, path[3:], base_url=site.base_url or base, root_path=root or "/")
     found = render.resolve(site, path, include_drafts, base=base)
     if found is None:
         return not_found(site)
@@ -39,8 +39,16 @@ def serve(request, site, path, include_drafts):
         except (FileNotFoundError, IsADirectoryError):
             return not_found(site)
     else:
-        resp = HttpResponse(render.render_page(found[1], "__form", include_drafts=include_drafts, row=found[2]),
+        page = found[1]
+        owner = not getattr(request, "is_public", False)  # the in-app preview sees every page
+        user = members.current_user(request, site)
+        if not owner and not members.can_view(page, user):
+            return members_only(request, site, user, root)
+        resp = HttpResponse(render.render_page(page, "__form", include_drafts=include_drafts, row=found[2],
+                                               user=user, owner_view=owner),
                             content_type="text/html; charset=utf-8")
+        if page.access:
+            resp["Cache-Control"] = "private, no-store"
         if getattr(request, "is_public", False):
             stats.hit(site, request, path)
     resp["Cache-Control"] = "no-cache"
@@ -80,7 +88,8 @@ def receive_form(request, site):
         saved = None
         if request.POST.get("_collection"):
             try:
-                saved = forms.save_to_collection(site, request.POST.get("_collection"), data)
+                saved = forms.save_to_collection(site, request.POST.get("_collection"), data,
+                                                 owner=members.current_user(request, site))
             except forms.FormError as e:
                 return cors(JsonResponse({"ok": False, "error": str(e)}, status=400))
         sub = FormSubmission.objects.create(
@@ -94,6 +103,23 @@ def receive_form(request, site):
         notify.notify_submission(sub)
         resp = JsonResponse({"ok": True, "pending": bool(saved and saved["pending"])})
     return cors(resp)
+
+
+def members_only(request, site, user, root):
+    """A members-only page: send visitors to the login page, show members without the role a polite 403."""
+    s = members.settings(site)
+    if user is None:
+        from urllib.parse import quote
+
+        here = request.path[len(root):] if root and request.path.startswith(root) else request.path.lstrip("/")
+        return HttpResponseRedirect(f"{root.rstrip('/')}/{s['pages']['login']}?next={quote(here)}")
+    body = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>ไม่มีสิทธิ์เข้าถึง</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;'
+            'color:#374151;text-align:center"><div><h1 style="font-size:56px;margin:0">403</h1>'
+            f'<p>หน้านี้สำหรับสมาชิกบางกลุ่มเท่านั้น</p><a href="{root}" style="color:#7c3aed">กลับหน้าแรก</a></div>')
+    resp = HttpResponse(body, status=403)
+    resp["Cache-Control"] = "private, no-store"
+    return resp
 
 
 def client_ip(request):

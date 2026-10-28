@@ -130,6 +130,62 @@ window.bw = window.bw || (function(){
 })();
 """
 
+# Member forms: <form data-bw-auth="login|register|forgot|reset|profile|password"> and [data-bw-logout].
+# They talk to <site>/api/v1/auth/… (the session cookie is set by the server). After logging in the visitor
+# goes to ?next=…, the form's data-bw-redirect, or the page set in the members settings.
+AUTH_JS = r"""
+(function(){
+  var base = new URL('api/v1/auth/', document.baseURI).href, root = new URL('./', document.baseURI).href;
+  var q = new URLSearchParams(location.search);
+  function msg(form, text, ok){
+    var s = form.querySelector('.bw-form-status');
+    if (!s) { s = document.createElement('div'); form.appendChild(s); }
+    s.className = 'bw-form-status ' + (ok ? 'ok' : 'err'); s.textContent = text;
+  }
+  function go(form, fallback){
+    var next = q.get('next'), to = form.getAttribute('data-bw-redirect') || (next && !/^[a-z]+:|^\/\//i.test(next) ? next : '') || fallback;
+    location.href = new URL(to || './', root).href;
+  }
+  function call(action, method, data){
+    return fetch(base + action, {method: method, credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+      body: data ? JSON.stringify(data) : undefined}).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(j){
+        if (!r.ok) { var e = new Error((j.error && j.error.message) || ('เกิดข้อผิดพลาด (' + r.status + ')')); e.fields = j.error && j.error.fields; throw e; }
+        return j;
+      });
+    });
+  }
+  document.querySelectorAll('form[data-bw-auth]').forEach(function(form){
+    var action = form.getAttribute('data-bw-auth');
+    if (action === 'login' && q.get('verified') === '1') msg(form, 'ยืนยันอีเมลแล้ว เข้าสู่ระบบได้เลย', true);
+    if (action === 'login' && q.get('verified') === '0') msg(form, 'ลิงก์ยืนยันหมดอายุหรือใช้ไปแล้ว', false);
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      var d = {}; new FormData(form).forEach(function(v, k){ d[k] = v; });
+      if (action === 'reset') {
+        if (d.password2 != null && d.password !== d.password2) return msg(form, 'รหัสผ่านสองช่องไม่ตรงกัน', false);
+        d.token = q.get('token') || '';
+      }
+      var btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
+      var path = {profile: 'me', password: 'me'}[action] || action, method = path === 'me' ? 'PATCH' : 'POST';
+      call(path, method, d).then(function(j){
+        if (action === 'login' || action === 'reset') return go(form, form.getAttribute('data-bw-after') || document.body.getAttribute('data-bw-after-login') || '');
+        if (action === 'register') { if (j.verify) { form.reset(); return msg(form, j.message, true); } return go(form, document.body.getAttribute('data-bw-after-login') || ''); }
+        if (action === 'forgot') { form.reset(); return msg(form, j.message, true); }
+        if (action === 'password') { form.reset(); return msg(form, 'เปลี่ยนรหัสผ่านแล้ว', true); }
+        msg(form, 'บันทึกแล้ว', true);
+      }).catch(function(err){ msg(form, err.message, false); }).finally(function(){ if (btn) btn.disabled = false; });
+    });
+  });
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-bw-logout]');
+    if (!b) return;
+    e.preventDefault();
+    call('logout', 'POST').finally(function(){ location.href = new URL(b.getAttribute('data-bw-redirect') || './', root).href; });
+  });
+})();
+"""
+
 # --- floating contact buttons ---------------------------------------------------------------------
 
 CHANNELS = [

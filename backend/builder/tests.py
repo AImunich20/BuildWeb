@@ -948,3 +948,128 @@ class RestApiTests(TestCase):
         out = data.render_html('<p data-bw-repeat="posts" data-bw-limit="1">{{title}} by {{author.name}} #{{_id}}</p>', self.site)
         self.assertIn("Post 0 by Ann #", out)
         self.assertIn("window.bw", render.site_js(self.site))
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class MembersTests(TestCase):
+    """v0.2 phase 2: sign up / log in / reset, sessions, members-only pages, user & owner rules."""
+
+    def setUp(self):
+        from . import generate, notify
+
+        notify.OUTBOX.clear()
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Club", "blank")
+        self.site.api = {"enabled": True}
+        self.site.auth = {"enabled": True, "roles": ["member", "vip"]}
+        self.site.save()
+        generate.create_member_pages(self.site)
+        self.site.refresh_from_db()
+        self.notes = Collection.objects.create(site=self.site, name="โน้ต", slug="notes", fields=[
+            {"name": "text", "label": "ข้อความ", "type": "text", "required": True}],
+            options={"api": {"list": "owner", "view": "owner", "create": "user", "update": "owner", "delete": "owner"}})
+        self.root = f"/{self.site.slug}/"
+        self.pub = {"buildweb.public": True}
+
+    def api(self, method, path, data=None, client=None, **kw):
+        cl = client or self.c
+        if method == "get":
+            return cl.get(f"{self.root}api/v1/{path}", **{**self.pub, **kw})
+        return getattr(cl, method)(f"{self.root}api/v1/{path}", json.dumps(data or {}), content_type="application/json",
+                                   **{**self.pub, **kw})
+
+    def test_register_login_session_logout(self):
+        r = self.api("post", "auth/register", {"email": "A@x.io", "password": "secret123", "name": "Ann"})
+        self.assertEqual(r.status_code, 201)
+        self.assertIn(f"bw_u{self.site.id}", r.cookies)
+        self.assertTrue(r.cookies[f"bw_u{self.site.id}"]["httponly"])
+        self.assertEqual(self.api("get", "auth/me").json()["user"]["email"], "a@x.io")
+        self.assertEqual(self.api("post", "auth/register", {"email": "a@x.io", "password": "secret123"}).status_code, 409)
+        self.assertEqual(self.api("post", "auth/register", {"email": "b@x.io", "password": "123"}).status_code, 422)
+        self.api("post", "auth/logout")
+        self.assertEqual(self.api("get", "auth/me").status_code, 401)
+        self.assertEqual(self.api("post", "auth/login", {"email": "a@x.io", "password": "nope"}).status_code, 401)
+        tok = self.api("post", "auth/login", {"email": "a@x.io", "password": "secret123"}).json()["token"]
+        app = Client()  # an app using the bearer token instead of the cookie
+        me = app.get(f"{self.root}api/v1/auth/me", HTTP_AUTHORIZATION=f"Bearer {tok}", **self.pub)
+        self.assertEqual(me.json()["user"]["name"], "Ann")
+
+    def test_forgot_reset_and_verify(self):
+        from . import members, notify
+
+        members.create_user(self.site, "c@x.io", "secret123", "C", verified=True)
+        r = self.api("post", "auth/forgot", {"email": "c@x.io"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.api("post", "auth/forgot", {"email": "nobody@x.io"}).json(), r.json())  # no probing
+        link = notify.OUTBOX[-1]["text"].split("\n")[3]
+        token = link.split("token=")[1]
+        self.assertIn("reset.html?token=", link)
+        self.assertEqual(self.api("post", "auth/reset", {"token": token, "password": "newpass123"}).status_code, 200)
+        self.assertEqual(self.api("post", "auth/reset", {"token": token, "password": "again1234"}).status_code, 400)  # one-time
+        self.assertEqual(self.api("post", "auth/login", {"email": "c@x.io", "password": "newpass123"}).status_code, 200)
+        # email verification
+        self.site.auth = {**self.site.auth, "verify_email": True}
+        self.site.save()
+        r = self.api("post", "auth/register", {"email": "v@x.io", "password": "secret123"}, client=Client())
+        self.assertTrue(r.json()["verify"])
+        self.assertEqual(self.api("post", "auth/login", {"email": "v@x.io", "password": "secret123"}, client=Client()).status_code, 403)
+        vlink = notify.OUTBOX[-1]["text"].split("\n")[3]
+        r = Client().get(vlink.replace("http://testserver", ""), **self.pub)
+        self.assertIn("verified=1", r["Location"])
+        self.assertEqual(self.api("post", "auth/login", {"email": "v@x.io", "password": "secret123"}, client=Client()).status_code, 200)
+
+    def test_members_only_pages_and_roles(self):
+        from . import members
+
+        acc = self.c.get(f"{self.root}account.html", **self.pub)
+        self.assertEqual(acc.status_code, 302)
+        self.assertIn("login.html?next=account.html", acc["Location"])
+        vip = self.site.pages.create(title="VIP", slug="vip", html="<h1>VIP {{user.name}}</h1>", access="role:vip")
+        members.create_user(self.site, "m@x.io", "secret123", "Mem", role="member", verified=True)
+        self.api("post", "auth/login", {"email": "m@x.io", "password": "secret123"})
+        page = self.c.get(f"{self.root}account.html", **self.pub).content.decode()
+        self.assertIn("สวัสดีคุณMem", page)
+        self.assertEqual(self.c.get(f"{self.root}vip.html", **self.pub).status_code, 403)
+        u = self.site.members.get(email="m@x.io")
+        u.role = "vip"
+        u.save()
+        self.assertContains(self.c.get(f"{self.root}vip.html", **self.pub), "VIP Mem")
+        files, _ = render.build_files(self.site)  # static exports never contain members-only pages
+        self.assertNotIn("account.html", files)
+        self.assertNotIn("vip.html", files)
+        self.assertIn("login.html", files)
+        self.assertNotIn(vip.slug, render.sitemap_xml(self.site, "https://x.io/"))
+
+    def test_owner_rules_and_mine(self):
+        from . import members
+
+        a = Client()
+        b = Client()
+        for cl, em in ((a, "a@x.io"), (b, "b@x.io")):
+            members.create_user(self.site, em, "secret123", em[0], verified=True)
+            self.api("post", "auth/login", {"email": em, "password": "secret123"}, client=cl)
+        self.assertEqual(self.api("post", "notes", {"text": "x"}, client=Client()).status_code, 401)  # needs login
+        n1 = self.api("post", "notes", {"text": "A's note"}, client=a).json()
+        self.api("post", "notes", {"text": "B's note"}, client=b)
+        self.assertEqual([x["text"] for x in self.api("get", "notes", client=a).json()["items"]], ["A's note"])
+        self.assertTrue(self.api("get", f"notes/{n1['_id']}", client=a).json()["_mine"])
+        self.assertEqual(self.api("get", f"notes/{n1['_id']}", client=b).status_code, 404)
+        self.assertEqual(self.api("patch", f"notes/{n1['_id']}", {"text": "hack"}, client=b).status_code, 404)
+        self.assertEqual(self.api("delete", f"notes/{n1['_id']}", client=a).status_code, 204)
+        html = data.render_html('<p data-bw-repeat="notes" data-bw-mine>{{text}}</p>', self.site,
+                                user=self.site.members.get(email="b@x.io"))
+        self.assertIn("B&#x27;s note", html)
+        self.assertNotIn("A's", html)
+
+    def test_admin_members_api(self):
+        r = self.c.post(f"/api/sites/{self.site.id}/members/create",
+                        json.dumps({"email": "new@x.io", "password": "secret123", "role": "vip"}), content_type="application/json")
+        mid = r.json()["member"]["id"]
+        link = self.c.post(f"/api/members/{mid}/reset-link", "{}", content_type="application/json").json()
+        self.assertIn("reset.html?token=bwu_", link["link"])
+        self.c.post(f"/api/members/{mid}/update", json.dumps({"is_active": False}), content_type="application/json")
+        self.assertEqual(self.api("post", "auth/login", {"email": "new@x.io", "password": "secret123"}).status_code, 403)
+        s = self.c.get(f"/api/sites/{self.site.id}/members/settings").json()
+        self.assertTrue(all(s["pages"].values()))
+        self.assertEqual(s["roles"], ["admin", "member", "vip"])

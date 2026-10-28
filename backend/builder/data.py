@@ -367,7 +367,7 @@ def rows_for(col):
         with _live_lock:
             _live_cache[col.id] = (now, out)
         return out
-    return [{**r.data, "_id": r.id} for r in col.records.filter(approved=True)]
+    return [{**r.data, "_id": r.id, "_owner": r.owner_id} for r in col.records.filter(approved=True)]
 
 
 # --- detail pages ---------------------------------------------------------------------------------
@@ -723,8 +723,8 @@ def _match_end(html, tag, start):
 class Binder:
     """Fills one page: repeats, {{placeholders}} and data-bw-if. ``row`` is the row a detail page shows."""
 
-    def __init__(self, site, page=None, row=None, include_drafts=False):
-        self.site, self.page, self.row, self.include_drafts = site, page, row, include_drafts
+    def __init__(self, site, page=None, row=None, include_drafts=False, user=None):
+        self.site, self.page, self.row, self.include_drafts, self.user = site, page, row, include_drafts, user
         self._cols = None
         self._rows = {}
         self._detail = None
@@ -791,6 +791,15 @@ class Binder:
             if v is not None:
                 return v
         head, _, rest = key.partition(".")
+        if head == "user":  # the signed-in member ("" when nobody, so data-bw-if="user" hides)
+            if self.user is None:
+                return "" if rest in ("", "name", "email", "role", "id") or rest.startswith("profile.") else None
+            if not rest:
+                return self.user.email
+            if rest.startswith("profile."):
+                return (self.user.profile or {}).get(rest[8:], "")
+            return {"name": self.user.name or self.user.email.split("@")[0], "email": self.user.email,
+                    "role": self.user.role, "id": self.user.id}.get(rest)
         if head == "site" and rest in ("name", "description", "slug"):
             return getattr(self.site, rest)
         if head == "page" and self.page is not None and rest in ("title", "slug", "seo_description"):
@@ -832,6 +841,8 @@ class Binder:
                 out.append(template)
             else:
                 rows = _apply_query(rows, attrs)
+                if re.search(r"(?:^|\s)data-bw-mine(?:\s|=|$)", attrs):  # only the signed-in member's rows
+                    rows = [r for r in rows if self.user is not None and r.get("_owner") == self.user.id]
                 interactive = any(ATTR(a).search(attrs) or re.search(rf"(?:^|\s){a}(?:\s|=|$)", attrs)
                                   for a in ("data-bw-search", "data-bw-facet", "data-bw-paginate"))
                 facet_m = ATTR("data-bw-facet").search(attrs)
@@ -870,5 +881,5 @@ def row_slugs(col, rows, field=""):
     return out
 
 
-def render_html(html, site, page=None, row=None, include_drafts=False):
-    return Binder(site, page, row, include_drafts).render(html)
+def render_html(html, site, page=None, row=None, include_drafts=False, user=None):
+    return Binder(site, page, row, include_drafts, user).render(html)

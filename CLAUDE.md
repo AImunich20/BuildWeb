@@ -46,6 +46,10 @@ user in Thai. The UI copy is in Thai.
     `Collection.options["api"]`, site settings in `Site.api` (off by default), `ApiKey` (SHA-256 only), `ApiLog`.
     In-app preview requests are the owner unless they send `X-BW-As: public`. Live collections write through
     `data.live_insert/update/delete` using the table's primary key.
+  - `members.py`: site members (`SiteUser`, hashed `UserToken`s, cookie `bw_u<site id>` or `Bearer bwu_…`),
+    `Page.access` ("", "members", "role:a,b") checked in `public.serve`; members-only pages are left out of
+    static builds and the sitemap. Auth endpoints are `restapi.route_auth` (`<site>/api/v1/auth/…`); API rules
+    "user"/"owner" use `Record.owner`. Member emails go through `notify.send_mail_to` (`notify.OUTBOX` in tests).
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

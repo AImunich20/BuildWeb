@@ -392,6 +392,19 @@
   });
   const DETAIL = D.page && D.page.collection_slug ? colBySlug[D.page.collection_slug] : null;
 
+  // ------------------------------------------------------------------ member blocks
+  if (D.members && D.members.enabled) {
+    const P = D.members.pages, mb = (id, label, icon, content) => bm.add('bw-member-' + id, { label, category: 'สมาชิก', content, media: `<div class="bw-bicon">${BW_ICON(icon, 20)}</div>` });
+    const formCss = '<style>.bw-mform{display:grid;gap:12px;max-width:420px}.bw-mform label{display:grid;gap:6px;font-weight:600}.bw-mform input{font:inherit;font-weight:400;padding:11px 13px;border:1px solid #d9d9e3;border-radius:10px}.bw-mform button{cursor:pointer;font:inherit;font-weight:600}</style>';
+    mb('status', 'ปุ่มสมาชิก (เข้าสู่ระบบ / ชื่อ)', 'users', `<div class="bw-mstatus" style="display:flex;gap:10px;align-items:center"><a class="bw-btn bw-btn-outline" href="${P.login}" data-bw-if="!user">เข้าสู่ระบบ</a><a class="bw-btn" href="${P.register}" data-bw-if="!user">สมัครสมาชิก</a><a href="${P.account}" data-bw-if="user">สวัสดี {{user.name}}</a><button type="button" class="bw-btn bw-btn-outline" data-bw-logout data-bw-if="user">ออกจากระบบ</button></div>`);
+    mb('login', 'ฟอร์มเข้าสู่ระบบ', 'users', `<section style="padding:40px 20px"><form class="bw-mform" data-bw-auth="login"><label>อีเมล<input type="email" name="email" required></label><label>รหัสผ่าน<input type="password" name="password" required></label><button type="submit" class="bw-btn">เข้าสู่ระบบ</button><a href="${P.forgot}">ลืมรหัสผ่าน?</a></form></section>${formCss}`);
+    mb('register', 'ฟอร์มสมัครสมาชิก', 'users', `<section style="padding:40px 20px"><form class="bw-mform" data-bw-auth="register"><label>ชื่อ<input name="name" required></label><label>อีเมล<input type="email" name="email" required></label><label>รหัสผ่าน<input type="password" name="password" minlength="8" required></label><button type="submit" class="bw-btn">สมัครสมาชิก</button></form></section>${formCss}`);
+    mb('logout', 'ปุ่มออกจากระบบ', 'x', '<button type="button" class="bw-btn bw-btn-outline" data-bw-logout>ออกจากระบบ</button>');
+    mb('only-members', 'กล่องที่เฉพาะสมาชิกเห็น', 'shield', '<div data-bw-if="user" style="padding:24px;border:1px dashed #c4b5fd;border-radius:12px"><h3>สวัสดีคุณ {{user.name}}</h3><p>เนื้อหานี้แสดงเฉพาะสมาชิกที่เข้าสู่ระบบ</p></div>');
+    mb('only-guests', 'กล่องที่เฉพาะคนยังไม่ล็อกอินเห็น', 'eye', `<div data-bw-if="!user" style="padding:24px;border:1px dashed #d9d9e3;border-radius:12px"><p>สมัครสมาชิกเพื่อดูเนื้อหาพิเศษ</p><a class="bw-btn" href="${P.register}">สมัครเลย</a></div>`);
+    mb('mine', 'รายการของฉัน (แถวที่สมาชิกสร้าง)', 'list', `<div data-bw-repeat="${(COLS[0] || { slug: '' }).slug}" data-bw-mine data-bw-empty="ยังไม่มีรายการ" style="display:grid;gap:10px;padding:20px"><div style="padding:14px;border:1px solid #eee;border-radius:10px">{{_id}}</div></div>`);
+  }
+
   function drawData() {
     const box = $('#data-panel');
     if (!COLS.length) {

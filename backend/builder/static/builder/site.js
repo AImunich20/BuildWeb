@@ -5,7 +5,7 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { data: renderData, api: renderApi, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
+  const tabs = { data: renderData, api: renderApi, members: renderMembers, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
 
 
 
@@ -669,7 +669,7 @@
         <td><div class="page-title">${p.is_home ? '<span class="badge" style="height:18px;margin-right:6px">หน้าแรก</span>' : ''}${p.parent ? '<span class="muted">↳ </span>' : ''}${esc(p.title)}
           <small>${p.parent && byId[p.parent] ? 'อยู่ใต้ ' + esc(byId[p.parent].title) + ' · ' : ''}${p.seo_description ? esc(p.seo_description.slice(0, 70)) : 'ยังไม่มีคำอธิบาย SEO'}</small></div></td>
         <td class="mono small">${p.collection ? `${esc(p.slug)}/…html<div><span class="badge brand" title="สร้างหนึ่งหน้าต่อหนึ่งแถวของชุดข้อมูล">รายละเอียด: ${esc(p.collection_name)}</span></div>` : esc(p.filename)}</td>
-        <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}</td>
+        <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}${p.access ? `<div><span class="badge brand" title="หน้านี้ไม่ถูกส่งออกเป็นไฟล์">${p.access === 'members' ? 'สมาชิก' : esc(p.access.slice(5))}</span></div>` : ''}</td>
         <td>${p.show_in_nav && !p.collection ? esc(p.nav_label || p.title) : '<span class="muted">ซ่อน</span>'}</td>
         <td><button class="seo-score sm" data-seo="${p.id}" title="ดูรายละเอียด SEO">…</button></td>
         <td class="muted small">${ago(p.updated_at)}</td>
@@ -788,7 +788,11 @@
           <label class="check"><input type="checkbox" name="use_footer" ${p.use_footer !== false ? 'checked' : ''}>ใช้ส่วนท้ายร่วม</label>
           <label class="check"><input type="checkbox" name="is_home" ${p.is_home ? 'checked disabled' : ''}>ตั้งเป็นหน้าแรก</label>
         </div>
-        <label class="field"><span>ชื่อในเมนู <small>(เว้นว่าง = ใช้ชื่อหน้า)</small></span><input class="input" name="nav_label" value="${esc(p.nav_label)}" maxlength="100"></label>
+        <div class="grid g2" style="gap:0 16px"><label class="field"><span>ชื่อในเมนู <small>(เว้นว่าง = ใช้ชื่อหน้า)</small></span><input class="input" name="nav_label" value="${esc(p.nav_label)}" maxlength="100"></label>
+          <label class="field"><span>ใครเปิดหน้านี้ได้</span><select class="input" name="access" ${p.is_home ? 'disabled' : ''}>
+            <option value="">ทุกคน</option><option value="members" ${p.access === 'members' ? 'selected' : ''}>เฉพาะสมาชิกที่ล็อกอิน</option>
+            ${(D.roles || []).map(r => `<option value="role:${esc(r)}" ${p.access === 'role:' + r ? 'selected' : ''}>เฉพาะบทบาท ${esc(r)}</option>`).join('')}</select>
+            ${D.members_on ? '' : `<small>ต้อง<a href="/sites/${site.id}/members/">เปิดระบบสมาชิก</a>ก่อน</small>`}</label></div>
         ${(D.collections || []).length ? `<div class="grid g2" style="gap:0 16px">
           <label class="field"><span>หน้ารายละเอียดของชุดข้อมูล <small>(หนึ่งหน้าต่อหนึ่งแถว)</small></span><select class="input" name="collection" ${p.is_home ? 'disabled' : ''}>
             <option value="">— หน้าปกติ —</option>${D.collections.map(c => `<option value="${c.id}" ${c.id === p.collection ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
@@ -839,6 +843,7 @@
       const d = formData(m.el);
       if (!p.is_home && !d.is_home) delete d.is_home;
       if (colSel && colSel.disabled) { delete d.collection; delete d.detail_field; }
+      if (p.is_home) delete d.access;
       try {
         const r = isNew ? await api(`/api/sites/${site.id}/pages/create`, d) : await api(`/api/pages/${p.id}/update`, d);
         if (isNew) {
@@ -1091,7 +1096,7 @@
   }
 
   // ---------------------------------------------------------------- REST API
-  const RULE_OPTS = [['public', 'ทุกคน'], ['key', 'ต้องมี key'], ['off', 'ปิด']];
+  const RULE_OPTS = [['public', 'ทุกคน'], ['user', 'สมาชิก'], ['owner', 'เจ้าของแถว'], ['key', 'ต้องมี key'], ['off', 'ปิด']];
   const ACTIONS = [['list', 'ดูรายการ'], ['view', 'ดูทีละแถว'], ['create', 'เพิ่ม'], ['update', 'แก้ไข'], ['delete', 'ลบ']];
   let API = null;
   async function renderApi() {
@@ -1256,6 +1261,122 @@
       ${r.logs.map(x => `<tr title="${esc(x.error || '')}"><td class="muted" style="white-space:nowrap">${when(x.at)}</td><td class="mono" style="word-break:break-all"><b>${esc(x.method)}</b> ${esc(x.path.replace(/^\/(preview\/)?[^/]+\/api\/v1/, ''))}
         <div class="muted">${esc(x.key || x.ip)}</div></td><td><span class="badge ${x.status < 300 ? 'ok' : x.status >= 500 ? 'err' : 'warn'}">${x.status}</span></td><td class="num">${x.ms}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty-state">ยังไม่มีการเรียก API</div>';
+  }
+
+  // ---------------------------------------------------------------- members
+  let MEM = null;
+  async function renderMembers() {
+    root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    MEM = await api(`/api/sites/${site.id}/members/settings`);
+    const s = MEM.settings, missing = Object.entries(MEM.pages).filter(([, ok]) => !ok).map(([k]) => k);
+    root.innerHTML = `<div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);align-items:start" id="mem-grid">
+      <div class="card pad"><div class="row between"><div><h2>ระบบสมาชิก</h2><div class="hint" style="margin:0">ให้ผู้เข้าชมสมัคร/ล็อกอินบนเว็บ ใช้กับหน้าเฉพาะสมาชิกและสิทธิ์ของ API</div></div>
+          <label class="switch"><input type="checkbox" id="m-on" ${s.enabled ? 'checked' : ''}><span></span></label></div>
+        <div style="margin-top:14px">
+          <label class="check"><input type="checkbox" id="m-signup" ${s.signup ? 'checked' : ''}>เปิดรับสมัครสมาชิก <span class="muted small">(ปิด = เพิ่มสมาชิกเองในแอป)</span></label>
+          <label class="check"><input type="checkbox" id="m-verify" ${s.verify_email ? 'checked' : ''}>ต้องยืนยันอีเมลก่อนเข้าสู่ระบบ</label>
+          ${MEM.smtp ? '' : '<div class="alert warn" style="margin:6px 0 10px"><div>ยังไม่ได้ตั้งค่าอีเมล (SMTP) — ลิงก์ลืมรหัส/ยืนยันอีเมลจะส่งไม่ได้ <a href="/settings/notify/">ตั้งค่าอีเมล</a> · ระหว่างนี้สร้างลิงก์รีเซ็ตให้สมาชิกเองได้ในตาราง</div></div>'}
+          <label class="field"><span>บทบาท <small>(คั่นด้วย , · มี admin ให้เสมอ)</small></span><input class="input mono" id="m-roles" value="${esc(s.roles.join(', '))}" placeholder="member, vip, staff"></label>
+          <div class="grid g2" style="gap:0 12px"><label class="field"><span>บทบาทของสมาชิกใหม่</span><select class="input" id="m-default">${s.roles.map(r => `<option ${r === s.default_role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
+            <label class="field"><span>รหัสผ่านยาวอย่างน้อย</span><input class="input mono" type="number" min="6" max="64" id="m-minpw" value="${s.min_password}"></label></div>
+          <label class="field"><span>หลังเข้าสู่ระบบไปที่ <small>(เว้นว่าง = ${esc(s.pages.account)})</small></span><input class="input mono" id="m-after" value="${esc(s.after_login)}" placeholder="account.html"></label>
+          <button class="btn primary" id="m-save">บันทึก</button></div>
+        <div class="sect-title">หน้าสมาชิก</div>
+        ${Object.entries(s.pages).map(([k, f]) => `<div class="row between" style="margin:4px 0"><span>${{ login: 'เข้าสู่ระบบ', register: 'สมัครสมาชิก', forgot: 'ลืมรหัสผ่าน', reset: 'ตั้งรหัสผ่านใหม่', account: 'บัญชีของฉัน (เฉพาะสมาชิก)' }[k]} <code>${esc(f)}</code></span>
+          ${MEM.pages[k] ? '<span class="badge ok">มีแล้ว</span>' : '<span class="badge warn">ยังไม่มี</span>'}</div>`).join('')}
+        ${missing.length ? `<button class="btn" id="m-pages" style="margin-top:10px">${BW_ICON('pages')} สร้างหน้าสมาชิกที่ยังไม่มี</button>` : '<div class="small muted" style="margin-top:8px">แก้หน้าตาได้ในตัวออกแบบ · ฟอร์มใช้ <code>data-bw-auth</code></div>'}
+        <div class="small muted" style="margin-top:12px">ระบบสมาชิกทำงานบนเซิร์ฟเวอร์ของ BuildWeb (โฮสต์จากเครื่องนี้/Tailscale) · หน้าเฉพาะสมาชิกจะไม่ถูกส่งออกเป็นไฟล์</div>
+      </div>
+      <div class="card"><div class="card-head"><div><h2>สมาชิก <span class="muted" id="m-total"></span></h2></div>
+          <div class="row"><input class="input" id="m-q" placeholder="ค้นหาอีเมล/ชื่อ" style="width:200px"><select class="input" id="m-role" style="width:120px"><option value="">ทุกบทบาท</option>${MEM.roles.map(r => `<option>${esc(r)}</option>`).join('')}</select>
+          <button class="btn primary sm" id="m-add">${BW_ICON('plus')} เพิ่มสมาชิก</button></div></div>
+        <div id="m-list" class="data-table-wrap"></div></div></div>`;
+    const saveSettings = async extra => {
+      const d = { enabled: document.getElementById('m-on').checked, signup: document.getElementById('m-signup').checked,
+        verify_email: document.getElementById('m-verify').checked, roles: document.getElementById('m-roles').value,
+        default_role: document.getElementById('m-default').value, min_password: document.getElementById('m-minpw').value,
+        after_login: document.getElementById('m-after').value, ...extra };
+      try { await api(`/api/sites/${site.id}/members/settings`, { settings: d }); toast('บันทึกแล้ว', 'ok'); renderMembers(); }
+      catch (e) { showFieldError(root, e); }
+    };
+    document.getElementById('m-save').onclick = () => saveSettings();
+    document.getElementById('m-on').onchange = () => saveSettings();
+    const mp = document.getElementById('m-pages');
+    if (mp) mp.onclick = async () => {
+      try { const r = await api(`/api/sites/${site.id}/members/pages`, {}); toast(`สร้าง ${r.created.length} หน้าแล้ว`, 'ok'); renderMembers(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    let t = null;
+    document.getElementById('m-q').oninput = () => { clearTimeout(t); t = setTimeout(loadMembers, 250); };
+    document.getElementById('m-role').onchange = loadMembers;
+    document.getElementById('m-add').onclick = addMember;
+    loadMembers();
+  }
+
+  async function loadMembers() {
+    const q = document.getElementById('m-q').value, role = document.getElementById('m-role').value;
+    const r = await api(`/api/sites/${site.id}/members?q=${encodeURIComponent(q)}&role=${encodeURIComponent(role)}`);
+    document.getElementById('m-total').textContent = `(${r.total})`;
+    const box = document.getElementById('m-list');
+    box.innerHTML = r.members.length ? `<table class="table"><thead><tr><th>สมาชิก</th><th>บทบาท</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody>
+      ${r.members.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name || '—')}</b><div class="small muted">${esc(u.email)}</div></td>
+        <td><select class="input sm" data-role>${MEM.roles.map(x => `<option ${x === u.role ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>
+        <td>${u.is_active ? (u.email_verified ? '<span class="badge ok">ใช้งาน</span>' : '<span class="badge warn" title="ยังไม่ยืนยันอีเมล">รอยืนยัน</span>') : '<span class="badge err">ระงับ</span>'}</td>
+        <td class="small muted">${u.last_login ? ago(u.last_login) : 'ยังไม่เคย'}</td>
+        <td><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm ghost icon" data-more>${BW_ICON('more')}</button></div></td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty-state">${BW_ICON('users', 28)}<div style="margin-top:8px">ยังไม่มีสมาชิก</div></div>`;
+    box.querySelectorAll('tr[data-id]').forEach(tr => {
+      const u = r.members.find(x => x.id === +tr.dataset.id);
+      tr.querySelector('[data-role]').onchange = async e => {
+        try { await api(`/api/members/${u.id}/update`, { role: e.target.value }); toast('เปลี่ยนบทบาทแล้ว', 'ok'); } catch (err) { toast(err.message, 'err'); }
+      };
+      tr.querySelector('[data-more]').onclick = () => memberMenu(u);
+    });
+  }
+
+  function memberMenu(u) {
+    const m = modal(`<header><h2>${esc(u.name || u.email)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
+      <div class="body" style="display:grid;gap:8px"><div class="small muted">${esc(u.email)} · สมัคร ${when(u.created_at)}</div>
+        <button class="btn" data-a="reset">สร้างลิงก์ตั้งรหัสผ่านใหม่</button>
+        ${u.email_verified ? '' : '<button class="btn" data-a="verify">ยืนยันอีเมลให้</button>'}
+        <button class="btn" data-a="logout">ออกจากระบบทุกอุปกรณ์</button>
+        <button class="btn" data-a="active">${u.is_active ? 'ระงับบัญชี' : 'เปิดใช้งานบัญชี'}</button>
+        <button class="btn danger" data-a="delete">ลบสมาชิก</button></div>`);
+    m.el.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
+      const a = b.dataset.a;
+      try {
+        if (a === 'reset') {
+          const r = await api(`/api/members/${u.id}/reset-link`, {});
+          m.close();
+          const k = modal(`<header><h2>ลิงก์ตั้งรหัสผ่านใหม่</h2></header><div class="body">${r.emailed ? '<div class="alert ok">ส่งอีเมลให้สมาชิกแล้ว</div>' : '<div class="alert info">ส่งลิงก์นี้ให้สมาชิกเอง (ใช้ได้ 2 ชั่วโมง ครั้งเดียว)</div>'}
+            <code style="display:block;word-break:break-all;padding:8px">${esc(r.link)}</code></div><footer><button class="btn" data-copy>${BW_ICON('copy')} คัดลอก</button><button class="btn primary" data-close>ปิด</button></footer>`);
+          k.el.querySelector('[data-copy]').onclick = () => navigator.clipboard.writeText(r.link).then(() => toast('คัดลอกแล้ว', 'ok'));
+          return;
+        }
+        if (a === 'verify') await api(`/api/members/${u.id}/update`, { email_verified: true });
+        if (a === 'logout') { await api(`/api/members/${u.id}/logout`, {}); toast('ออกจากระบบทุกอุปกรณ์แล้ว', 'ok'); }
+        if (a === 'active') await api(`/api/members/${u.id}/update`, { is_active: !u.is_active });
+        if (a === 'delete') {
+          m.close();
+          if (!await confirmBox('ลบสมาชิก', `ลบ ${esc(u.email)} ถาวร? แถวข้อมูลที่สมาชิกสร้างไว้ยังอยู่แต่ไม่มีเจ้าของ`, { ok: 'ลบ', danger: true })) return;
+          await api(`/api/members/${u.id}/delete`, {});
+        }
+        m.close(); loadMembers();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  }
+
+  function addMember() {
+    const m = modal(`<header><h2>เพิ่มสมาชิก</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <label class="field"><span>อีเมล</span><input class="input" name="email" type="email"></label>
+      <label class="field"><span>ชื่อ</span><input class="input" name="name"></label>
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>รหัสผ่าน <small>(เว้นว่าง = ส่งลิงก์ให้ตั้งเอง)</small></span><input class="input" name="password" type="password" autocomplete="new-password"></label>
+      <label class="field"><span>บทบาท</span><select class="input" name="role">${MEM.roles.map(r => `<option ${r === MEM.settings.default_role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label></div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>เพิ่ม</button></footer>`);
+    m.el.querySelector('[data-ok]').onclick = async () => {
+      try { await api(`/api/sites/${site.id}/members/create`, formData(m.el)); m.close(); toast('เพิ่มสมาชิกแล้ว', 'ok'); loadMembers(); }
+      catch (e) { showFieldError(m.el, e); }
+    };
   }
 
   // ---------------------------------------------------------------- statistics

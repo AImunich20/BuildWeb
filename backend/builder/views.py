@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from buildweb import config
 
-from . import dbtools, generate, render as renderer, sections, services, stats
+from . import dbtools, generate, members, render as renderer, sections, services, stats
 from .render import fonts_url
 from .api import page_json, site_json
 from .hosting import server as hosting
@@ -56,7 +56,7 @@ def spark_svg(values, w=120, h=28):
 
 def site_manage(request, site_id, tab="pages"):
     site = get_object_or_404(Site, pk=site_id)
-    if tab not in ("pages", "data", "api", "files", "forms", "stats", "settings", "export"):
+    if tab not in ("pages", "data", "api", "members", "files", "forms", "stats", "settings", "export"):
         tab = "pages"
     data = {
         "site": site_json(site),
@@ -66,6 +66,7 @@ def site_manage(request, site_id, tab="pages"):
         "xampp": dbtools.xampp_info(),
         "export": config.load()["export"],
         "collections": [{"id": c.id, "name": c.name, "slug": c.slug, "fields": c.fields} for c in site.collections.all()],
+        "roles": members.all_roles(site), "members_on": members.settings(site)["enabled"],
     }
     return render(request, "builder/site.html", {
         "site": site, "tab": tab, "data_json": dump(data),
@@ -104,6 +105,7 @@ def editor_page_data(site):
                          "forms": c.opt("forms"), "form_html": generate.form_html(c, f"ส่ง{c.name}"),
                          "has_detail": c.detail_pages.exists()}
                         for c in site.collections.all()],
+        "members": {"enabled": members.settings(site)["enabled"], "pages": members.settings(site)["pages"]},
         "sections": [{"id": s["id"], "label": s["label"], "category": s["category"], "icon": s["icon"],
                       "content": sections.block_content(s)} for s in sections.SECTIONS],
     }

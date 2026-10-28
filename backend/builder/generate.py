@@ -220,3 +220,84 @@ def form_html(col, title="ส่งข้อมูล", button="ส่ง"):
             f'<form class="bw-form" name="{e(col.slug)}" data-bw-collection="{e(col.slug)}" '
             f'data-bw-success="ขอบคุณ! ได้รับข้อมูลแล้ว" data-bw-pending="ขอบคุณ! ข้อมูลจะแสดงหลังผ่านการตรวจสอบ">'
             f'{"".join(inputs)}<button type="submit" class="bw-btn">{e(button)}</button></form></div></section>')
+
+
+# --- member pages ---------------------------------------------------------------------------------
+
+AUTH_CSS = """.bw-auth{padding:64px 0 80px}
+.bw-auth-card{max-width:440px;margin:0 auto;background:#fff;border:1px solid #ececf1;border-radius:var(--bw-radius);padding:32px 30px;box-shadow:0 24px 60px -40px rgba(0,0,0,.35)}
+.bw-auth-card h1{font-size:28px;margin:0 0 6px}.bw-auth-card>p{color:var(--bw-muted);margin:0 0 22px}
+.bw-auth form{display:grid;gap:14px}
+.bw-auth label{display:grid;gap:6px;font-weight:600;font-size:15px}
+.bw-auth input{font:inherit;font-weight:400;padding:12px 14px;border:1px solid #d9d9e3;border-radius:10px}
+.bw-auth input:focus{outline:2px solid var(--bw-primary);border-color:transparent}
+.bw-auth button{cursor:pointer;font:inherit;font-weight:600;width:100%}
+.bw-auth-links{display:flex;justify-content:space-between;gap:10px;margin-top:16px;font-size:.95em}
+.bw-auth-wide{max-width:640px}
+.bw-auth hr{border:0;border-top:1px solid #ececf1;margin:26px 0}"""
+
+
+def _auth_page(title, intro, form, links="", wide=False):
+    e = htmllib.escape
+    return (f'<section class="bw-auth"><div class="bw-container"><div class="bw-auth-card{" bw-auth-wide" if wide else ""}">'
+            f'<h1>{e(title)}</h1><p>{intro}</p>{form}{f"<div class=bw-auth-links>{links}</div>" if links else ""}</div></div></section>')
+
+
+def member_pages_html(p):
+    """{key: (title, html, access)} for the member pages; ``p`` maps key -> file name."""
+    login = _auth_page("เข้าสู่ระบบ", "ยินดีต้อนรับกลับมา", (
+        '<form data-bw-auth="login"><label>อีเมล<input type="email" name="email" autocomplete="email" required></label>'
+        '<label>รหัสผ่าน<input type="password" name="password" autocomplete="current-password" required></label>'
+        '<button type="submit" class="bw-btn">เข้าสู่ระบบ</button></form>'),
+        f'<a href="{p["register"]}">สมัครสมาชิก</a><a href="{p["forgot"]}">ลืมรหัสผ่าน?</a>')
+    register = _auth_page("สมัครสมาชิก", "สร้างบัญชีใหม่ใช้เวลาไม่ถึงนาที", (
+        '<form data-bw-auth="register"><label>ชื่อ<input name="name" autocomplete="name" required></label>'
+        '<label>อีเมล<input type="email" name="email" autocomplete="email" required></label>'
+        '<label>รหัสผ่าน<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>'
+        '<button type="submit" class="bw-btn">สมัครสมาชิก</button></form>'),
+        f'<span>มีบัญชีแล้ว?</span><a href="{p["login"]}">เข้าสู่ระบบ</a>')
+    forgot = _auth_page("ลืมรหัสผ่าน", "ใส่อีเมลที่สมัครไว้ เราจะส่งลิงก์ตั้งรหัสผ่านใหม่ให้", (
+        '<form data-bw-auth="forgot"><label>อีเมล<input type="email" name="email" autocomplete="email" required></label>'
+        '<button type="submit" class="bw-btn">ส่งลิงก์</button></form>'), f'<a href="{p["login"]}">← กลับไปเข้าสู่ระบบ</a>')
+    reset = _auth_page("ตั้งรหัสผ่านใหม่", "ตั้งรหัสผ่านใหม่ของคุณ", (
+        '<form data-bw-auth="reset"><label>รหัสผ่านใหม่<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>'
+        '<label>ยืนยันรหัสผ่าน<input type="password" name="password2" autocomplete="new-password" minlength="8" required></label>'
+        '<button type="submit" class="bw-btn">บันทึกรหัสผ่าน</button></form>'))
+    account = _auth_page("บัญชีของฉัน", "สวัสดีคุณ{{user.name}} · {{user.email}}", (
+        '<form data-bw-auth="profile"><label>ชื่อ<input name="name" value="{{user.name}}" autocomplete="name"></label>'
+        '<button type="submit" class="bw-btn">บันทึกข้อมูล</button></form><hr>'
+        '<form data-bw-auth="password"><label>รหัสผ่านปัจจุบัน<input type="password" name="current_password" autocomplete="current-password" required></label>'
+        '<label>รหัสผ่านใหม่<input type="password" name="new_password" autocomplete="new-password" minlength="8" required></label>'
+        '<button type="submit" class="bw-btn bw-btn-outline">เปลี่ยนรหัสผ่าน</button></form><hr>'
+        '<button type="button" class="bw-btn bw-btn-outline" data-bw-logout>ออกจากระบบ</button>'), wide=True)
+    return {"login": ("เข้าสู่ระบบ", login, ""), "register": ("สมัครสมาชิก", register, ""),
+            "forgot": ("ลืมรหัสผ่าน", forgot, ""), "reset": ("ตั้งรหัสผ่านใหม่", reset, ""),
+            "account": ("บัญชีของฉัน", account, "members")}
+
+
+@transaction.atomic
+def create_member_pages(site):
+    """Create the member pages that don't exist yet; remembers their file names in Site.auth["pages"]."""
+    from . import members
+
+    s = members.settings(site)
+    names = dict(s["pages"])
+    made = []
+    existing = {p.slug for p in site.pages.all()}
+    for key in ("login", "register", "forgot", "reset", "account"):
+        slug = names[key][:-5]
+        if slug in existing:
+            continue
+        slug = services.unique_page_slug(site, slug)
+        names[key] = f"{slug}.html"
+    html = member_pages_html(names)
+    for key, (title, body, access) in html.items():
+        slug = names[key][:-5]
+        if slug in existing:
+            continue
+        page = _page(site, title, slug, body, AUTH_CSS, show_in_nav=False, access=access, noindex=True)
+        made.append(page)
+    site.auth = {**(site.auth or {}), "pages": names, "enabled": True}
+    site.save(update_fields=["auth"])
+    site.touch()
+    return made

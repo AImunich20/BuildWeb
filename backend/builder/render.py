@@ -51,7 +51,7 @@ SITE_JS = r"""(function(){
     if (t) { var nav = document.querySelector(t.getAttribute('data-bw-menu-toggle')); if (nav) nav.classList.toggle('open'); }
   });
   document.querySelectorAll('form').forEach(function(form){
-    if (form.hasAttribute('data-bw-native')) return;
+    if (form.hasAttribute('data-bw-native') || form.hasAttribute('data-bw-auth')) return;
     var hp = document.createElement('input'); hp.type = 'text'; hp.name = '_hp'; hp.tabIndex = -1; hp.autocomplete = 'off';
     hp.setAttribute('aria-hidden', 'true'); hp.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;opacity:0';
     form.appendChild(hp);
@@ -145,9 +145,9 @@ def site_js(site):
     from .anim import ANIM_JS
     from .navbar import NAV_JS
 
-    from .widgets import DATA_JS, SDK_JS
+    from .widgets import AUTH_JS, DATA_JS, SDK_JS
 
-    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS
+    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS + AUTH_JS
     shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
     return core + "\n" + shared + "\n" + (site.custom_js or "")
 
@@ -201,7 +201,7 @@ def body_html(page):
     return strip_body(page.html)
 
 
-def full_body(page, pages, shared=None, row=None, include_drafts=False):
+def full_body(page, pages, shared=None, row=None, include_drafts=False, user=None):
     """Shared header + page content + shared footer, with auto menus filled in. ``row``: the row a detail
     page shows."""
     shared = shared if shared is not None else shared_sections(page.site)
@@ -214,7 +214,7 @@ def full_body(page, pages, shared=None, row=None, include_drafts=False):
         parts.append(strip_body(foot.html))
     from .data import render_html
 
-    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts)
+    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts, user)
 
 
 def visible_pages(site, include_drafts):
@@ -267,12 +267,17 @@ def absolute(site, rel, base=None):
     return urljoin(base if base.endswith("/") else base + "/", rel or "")
 
 
-def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, pages=None, shared=None, row=None):
+def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, pages=None, shared=None, row=None,
+                user=None, owner_view=True):
     """Full HTML document for a page. ``form_endpoint`` is where forms POST (empty = not configured).
     ``row``: render a detail page for this row (it lives one folder down, so it gets <base href="../">)."""
     site = page.site
     if pages is None:
         pages = visible_pages(site, include_drafts)
+    if not owner_view:  # members-only pages stay out of the menu for those who can't open them
+        from .members import can_view
+
+        pages = [p for p in pages if can_view(p, user)]
     e = htmllib.escape
     title, desc, og_image = page_meta(page, row, include_drafts)
     from .anim import ANIM_HEAD
@@ -323,13 +328,18 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
 
     from .widgets import contact_html
 
-    body = rel_media(full_body(page, pages, shared, row, include_drafts)) + "\n" + rel_media(contact_html(site))
+    body = rel_media(full_body(page, pages, shared, row, include_drafts, user)) + "\n" + rel_media(contact_html(site))
     scripts = [f'<script src="{depth_prefix}js/site.js"></script>']
     if page.js:
         scripts.append(f"<script>\n{page.js}\n</script>")
     if page.custom_js:
         scripts.append(f"<script>\n{page.custom_js}\n</script>")
     attrs = f' data-bw-page="{e(page.slug)}"'
+    if (site.auth or {}).get("enabled"):
+        from .members import settings as member_settings
+
+        ms = member_settings(site)
+        attrs += f' data-bw-after-login="{e(ms["after_login"] or ms["pages"]["account"])}"'
     if page.body_class:
         attrs = f' class="{e(page.body_class)}"' + attrs
     if form_endpoint:
@@ -363,7 +373,8 @@ def build_files(site, mode="export", include_drafts=False, php_forms=False):
     for sec in shared.values():
         if sec:
             referenced |= media_paths(sec.html) | media_paths(sec.css)
-    pages = visible_pages(site, include_drafts)
+    # Members-only pages need the BuildWeb server to check who is asking: they never go into static files.
+    pages = [p for p in visible_pages(site, include_drafts) if not p.access]
     for page in pages:
         if page.collection_id:  # one file per row: <page>/<row>.html
             for row in detail_items(page, include_drafts):
@@ -461,7 +472,7 @@ def site_urls(site, include_drafts=False):
     """[(relative path, lastmod datetime)] of every indexable page, detail rows included."""
     out = []
     for page in visible_pages(site, include_drafts):
-        if page.noindex:
+        if page.noindex or page.access:  # members-only pages are not for search engines
             continue
         if page.collection_id:
             out += [(page_path(page, row), page.updated_at) for row in detail_items(page, include_drafts)]

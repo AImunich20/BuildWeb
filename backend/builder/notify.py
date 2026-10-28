@@ -79,6 +79,39 @@ def send_email(cfg, subject, text):
         server.send_message(msg)
 
 
+OUTBOX = []  # emails "sent" while testing
+
+
+def smtp_ready(cfg=None):
+    e = (cfg or settings()).get("email") or {}
+    return bool(e.get("host") and (e.get("from") or e.get("user")))
+
+
+def send_mail_to(to, subject, text, from_name=""):
+    """Email a site member (password reset, verification) through the SMTP server set in การแจ้งเตือน.
+    Raises RuntimeError when no SMTP server is configured; sending itself happens in the background."""
+    from django.conf import settings as dj
+
+    if dj.TESTING:
+        OUTBOX.append({"to": to, "subject": subject, "text": text})
+        return
+    cfg = settings()
+    if not smtp_ready(cfg):
+        raise RuntimeError("ยังไม่ได้ตั้งค่า SMTP (อีเมล) ในหน้า “การแจ้งเตือน”")
+    e = dict(cfg["email"])
+    sender = e.get("from") or e["user"]
+    if from_name and "<" not in sender:
+        sender = f"{from_name} <{sender}>"
+
+    def run():
+        try:
+            send_email({"email": {**e, "to": to, "from": sender}}, subject, text)
+        except Exception as err:  # logged, never raised into the request
+            log.warning("email to %s failed: %s", to, err)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def channels(cfg):
     out = []
     if cfg.get("mac"):

@@ -10,8 +10,13 @@ preview, where requests count as the site owner unless they send ``X-BW-As: publ
   PATCH  api/v1/<collection>/<_id>     change some fields;  PUT replaces the row
   DELETE api/v1/<collection>/<_id>     → 204
 
-Access per collection and action (Collection.options["api"]): "public" (anyone), "key" (an API key, sent as
-`X-API-Key: bw_…` or `Authorization: Bearer bw_…`) or "off" (only the owner, in the app). The whole API is
+Access per collection and action (Collection.options["api"]): "public" (anyone), "user" (a signed-in member of
+the site), "owner" (the member who created the row; lists show only their rows), "key" (an API key, sent as
+`X-API-Key: bw_…` or `Authorization: Bearer bw_…`) or "off" (only the site owner, in the app). API keys and
+members with the "admin" role pass every rule except "off".
+
+Members: POST auth/register · auth/login · auth/logout · auth/forgot · auth/reset · GET/PATCH auth/me ·
+GET auth/verify?token=…  (see members.py) The whole API is
 off until it is enabled for the site (Site.api["enabled"]). Errors are JSON:
 {"error": {"code": "...", "message": "...", "fields": {...}}}.
 """
@@ -28,12 +33,12 @@ from django.db.models import Max
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 
-from . import data, schema
+from . import data, members, schema
 from .models import ApiKey, ApiLog, Collection, Record
 
 ACTIONS = ("list", "view", "create", "update", "delete")
 WRITE_ACTIONS = {"create", "update", "delete"}
-RULES = ("public", "key", "off")
+RULES = ("public", "user", "owner", "key", "off")
 DEFAULT_RULES = {"list": "public", "view": "public", "create": "key", "update": "key", "delete": "key"}
 SITE_DEFAULTS = {"enabled": False, "cors": "*", "rate": 120, "log": True}
 MAX_PER_PAGE = 200
@@ -76,8 +81,8 @@ def find_key(request, site):
     """The ApiKey sent with the request, None when none was sent. A wrong key is an error, not "no key"."""
     plain = request.META.get("HTTP_X_API_KEY", "").strip()
     auth = request.META.get("HTTP_AUTHORIZATION", "")
-    if not plain and auth.lower().startswith("bearer "):
-        plain = auth[7:].strip()
+    if not plain and auth.lower().startswith("bearer ") and not auth[7:].strip().startswith("bwu_"):
+        plain = auth[7:].strip()  # bwu_… is a member session, not an API key
     if not plain:
         return None
     digest = hash_key(plain)
@@ -140,26 +145,32 @@ def error_response(e):
     return JsonResponse(body, status=e.status, json_dumps_params={"ensure_ascii": False})
 
 
-def handle(request, site, path, base_url=""):
-    """Entry point from public.serve for paths under api/."""
+def handle(request, site, path, base_url="", root_path="/"):
+    """Entry point from public.serve for paths under api/. ``root_path``: URL path of the site root (cookies)."""
     started = time.time()
     key, status, err = None, 500, ""
     owner = is_owner(request)
+    request._bw_base, request._bw_root = base_url, root_path
+    is_auth = path.strip("/").split("/")[:2] == ["v1", "auth"]
     try:
         if request.method == "OPTIONS":
             resp = HttpResponse(status=204)
             status = 204
             return cors(resp, site, request)
         cfg = site_settings(site)
-        if not cfg["enabled"] and not owner:
+        if not cfg["enabled"] and not owner and not is_auth:
             raise ApiError(404, "api_disabled", "API ของเว็บนี้ยังไม่ได้เปิดใช้งาน")
         key = find_key(request, site)
         if not owner:
             check_rate(site, request, key, int(cfg.get("rate") or 0))
-        resp = route(request, site, path.strip("/"), key, owner, base_url)
+        request._bw_user = members.current_user(request, site)
+        resp = route_auth(request, site, "/".join(path.strip("/").split("/")[2:])) if is_auth else route(request, site, path.strip("/"), key, owner, base_url)
         status = resp.status_code
+        set_cookie(resp, site, request)
     except ApiError as e:
         resp, status, err = error_response(e), e.status, str(e)
+    except members.AuthError as e:
+        resp, status, err = error_response(ApiError(e.status, e.code, str(e), e.fields)), e.status, str(e)
     except schema.ValidationError as e:
         resp = error_response(ApiError(422, "validation", "ข้อมูลไม่ถูกต้อง", e.fields))
         status, err = 422, str(e)[:300]
@@ -194,10 +205,11 @@ def route(request, site, path, key, owner, base_url):
     if not parts or parts[0] != "v1":
         raise ApiError(404, "not_found", "ใช้ /api/v1/")
     parts = parts[1:]
+    user = getattr(request, "_bw_user", None)
     if not parts:
         return ok({"site": site.name, "version": "v1",
                    "collections": [collection_info(c, request, key, owner) for c in site.collections.all()
-                                   if owner or allowed(c, "list", key, owner, quiet=True)]})
+                                   if owner or allowed(c, "list", key, owner, quiet=True, user=user)]})
     if parts == ["openapi.json"]:
         return JsonResponse(openapi(site, base_url, owner), json_dumps_params={"ensure_ascii": False, "indent": 2})
     col = site.collections.select_related("connection").filter(slug=parts[0]).first()
@@ -205,23 +217,24 @@ def route(request, site, path, key, owner, base_url):
         raise ApiError(404, "not_found", f"ไม่พบชุดข้อมูล “{parts[0]}”")
     if len(parts) == 1:
         if request.method == "GET":
-            allowed(col, "list", key, owner)
-            return list_rows(request, col, key, owner)
+            who = allowed(col, "list", key, owner, user=user)
+            return list_rows(request, col, key, owner, user if who == "self" else None)
         if request.method == "POST":
-            who = allowed(col, "create", key, owner)
-            return create_row(request, col, who)
+            who = allowed(col, "create", key, owner, user=user)
+            return create_row(request, col, who, user)
         raise ApiError(405, "method_not_allowed", "ใช้ GET หรือ POST")
     if len(parts) == 2:
         rid = parts[1]
         if request.method == "GET":
-            allowed(col, "view", key, owner)
-            return ok(item(col, get_row(col, rid, owner), owner, expand_set(request), fields_set(request), key))
+            who = allowed(col, "view", key, owner, user=user)
+            entry = get_row(col, rid, owner, user if who == "self" else None)
+            return ok(item(col, entry, owner, expand_set(request), fields_set(request), key, user=user))
         if request.method in ("PATCH", "PUT"):
-            allowed(col, "update", key, owner)
-            return update_row(request, col, rid, owner, partial=request.method == "PATCH")
+            who = allowed(col, "update", key, owner, user=user)
+            return update_row(request, col, rid, owner, partial=request.method == "PATCH", mine=user if who == "self" else None)
         if request.method == "DELETE":
-            allowed(col, "delete", key, owner)
-            delete_row(col, rid, owner)
+            who = allowed(col, "delete", key, owner, user=user)
+            delete_row(col, rid, owner, mine=user if who == "self" else None)
             return HttpResponse(status=204)
         raise ApiError(405, "method_not_allowed", "ใช้ GET, PATCH, PUT หรือ DELETE")
     raise ApiError(404, "not_found", "ไม่พบ endpoint นี้")
@@ -231,25 +244,33 @@ def ok(body, status=200):
     return JsonResponse(body, status=status, safe=False, json_dumps_params={"ensure_ascii": False})
 
 
-def allowed(col, action, key, owner, quiet=False):
-    """Raise unless the request may do ``action``; returns "owner", "key" or "public"."""
+def allowed(col, action, key, owner, quiet=False, user=None):
+    """Raise unless the request may do ``action``. Returns who is asking: "app" (the site owner in BuildWeb),
+    "key", "admin" (member with the admin role), "member" (rule "user"), "self" (rule "owner": only own rows)
+    or "public". With quiet=True returns None instead of raising."""
     if owner:
-        return "owner"
+        return "app"
     rule = rules(col)[action]
     write = action in WRITE_ACTIONS
-    if rule == "public":  # a limited key never takes public access away
-        return "key" if key and key.allows(col.slug, write) else "public"
-    if rule == "key":
-        if key and key.allows(col.slug, write):
-            return "key"
+    if rule == "off":
         if quiet:
             return None
-        if not key:
-            raise ApiError(401, "key_required", "ต้องใช้ API key (ส่งใน header X-API-Key)")
-        raise ApiError(403, "forbidden", "API key นี้ไม่มีสิทธิ์" + ("เขียน" if write else "อ่าน") + f"ชุดข้อมูล “{col.slug}”")
+        raise ApiError(403, "forbidden", f"ปิดการ{ {'list': 'อ่าน', 'view': 'อ่าน', 'create': 'เพิ่ม', 'update': 'แก้ไข', 'delete': 'ลบ'}[action]}ข้อมูลผ่าน API")
+    if key and key.allows(col.slug, write):
+        return "key"
+    if user is not None and user.role == "admin":
+        return "admin"
+    if rule == "public":
+        return "public"
+    if rule in ("user", "owner") and user is not None:
+        return "member" if rule == "user" else "self"
     if quiet:
         return None
-    raise ApiError(403, "forbidden", f"ปิดการ{ {'list': 'อ่าน', 'view': 'อ่าน', 'create': 'เพิ่ม', 'update': 'แก้ไข', 'delete': 'ลบ'}[action]}ข้อมูลผ่าน API")
+    if rule in ("user", "owner"):
+        raise ApiError(401, "login_required", "ต้องเข้าสู่ระบบสมาชิกก่อน")
+    if not key:
+        raise ApiError(401, "key_required", "ต้องใช้ API key (ส่งใน header X-API-Key)")
+    raise ApiError(403, "forbidden", "API key นี้ไม่มีสิทธิ์" + ("เขียน" if write else "อ่าน") + f"ชุดข้อมูล “{col.slug}”")
 
 
 def collection_info(c, request, key, owner):
@@ -261,6 +282,89 @@ def collection_info(c, request, key, owner):
 
 def public_field(f):
     return {k: v for k, v in f.items() if k != "source"}
+
+
+# --- members (auth) -------------------------------------------------------------------------------
+
+def set_cookie(resp, site, request):
+    action = getattr(request, "_bw_cookie", None)
+    if action is None:
+        return
+    path = getattr(request, "_bw_root", "/") or "/"
+    secure = request.is_secure()
+    if action == "":
+        resp.delete_cookie(members.cookie_name(site), path=path, samesite="Lax")
+    else:
+        resp.set_cookie(members.cookie_name(site), action, max_age=members.SESSION_DAYS * 86400, path=path,
+                        httponly=True, samesite="Lax", secure=secure)
+
+
+def route_auth(request, site, action):
+    s = members.settings(site)
+    if not s["enabled"]:
+        raise ApiError(404, "members_disabled", "ระบบสมาชิกของเว็บนี้ยังไม่ได้เปิดใช้งาน")
+    action = action.strip("/")
+    ip = client_ip(request)
+    user = getattr(request, "_bw_user", None)
+    base = getattr(request, "_bw_base", "")
+    if action == "verify" and request.method == "GET":
+        ok_ = members.verify_email(site, request.GET.get("token", ""))
+        target = members.page_url(site, base, "login") + ("?verified=1" if ok_ else "?verified=0")
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(target)
+    if action == "me":
+        if not user:
+            raise ApiError(401, "login_required", "ยังไม่ได้เข้าสู่ระบบ")
+        if request.method == "GET":
+            return ok({"user": members.user_json(user)})
+        if request.method in ("PATCH", "POST"):
+            return ok({"user": members.user_json(members.update_me(user, body(request)))})
+        raise ApiError(405, "method_not_allowed", "ใช้ GET หรือ PATCH")
+    if request.method != "POST":
+        raise ApiError(405, "method_not_allowed", "ใช้ POST")
+    d = body(request)
+    ua = request.META.get("HTTP_USER_AGENT", "")
+    if action == "register":
+        new = members.register(site, d, ip)
+        if s["verify_email"]:
+            try:
+                members.send_verify(site, new, base)
+            except RuntimeError:
+                pass  # no SMTP: the owner can verify the member in the app
+            return ok({"user": members.user_json(new), "verify": True,
+                       "message": "สมัครเรียบร้อย กรุณายืนยันอีเมลจากลิงก์ที่ส่งไปก่อนเข้าสู่ระบบ"}, 201)
+        token = members.issue(new, user_agent=ua)
+        request._bw_cookie = token
+        new.last_login = timezone.now()
+        new.save(update_fields=["last_login"])
+        return ok({"user": members.user_json(new), "token": token}, 201)
+    if action == "login":
+        u = members.login(site, d.get("email"), d.get("password"), ip)
+        token = members.issue(u, user_agent=ua)
+        request._bw_cookie = token
+        return ok({"user": members.user_json(u), "token": token})
+    if action == "logout":
+        members.logout(site, request)
+        request._bw_cookie = ""
+        return ok({"ok": True})
+    if action == "forgot":
+        members.throttle(f"forgot:{site.id}:{ip}", limit=5, window=900)
+        members.failed(f"forgot:{site.id}:{ip}")
+        email = (d.get("email") or "").strip().lower()
+        u = site.members.filter(email=email, is_active=True).first()
+        if u:
+            try:
+                members.send_reset(site, u, base)
+            except RuntimeError:
+                pass
+        # same answer whether or not the address exists, so nobody can probe for members
+        return ok({"ok": True, "message": "ถ้ามีบัญชีนี้ ระบบได้ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่อีเมลแล้ว"})
+    if action == "reset":
+        u = members.reset_password(site, d.get("token", ""), d.get("password", ""))
+        token = members.issue(u, user_agent=ua)
+        request._bw_cookie = token
+        return ok({"user": members.user_json(u), "token": token})
+    raise ApiError(404, "not_found", "ไม่พบ endpoint นี้")
 
 
 # --- reading --------------------------------------------------------------------------------------
@@ -282,16 +386,18 @@ def live_pk(col):
     return by_source.get(pk, data.field_key(pk)), pk
 
 
-def all_rows(col, owner):
-    """[(id, row dict, record or None)] in display order."""
+def all_rows(col, owner, mine=None):
+    """[(id, row dict, record or None)] in display order. ``mine``: only rows of this member."""
     if col.mode == Collection.LIVE:
         name, _ = live_pk(col) if data.primary_key(col) else (None, None)
         return [(r.get(name) if name else i + 1, r, None) for i, r in enumerate(data.rows_for(col))]
     qs = col.records.all() if owner else col.records.filter(approved=True)
+    if mine is not None:
+        qs = col.records.filter(owner=mine)  # members see their own rows even before approval
     return [(r.id, r.data, r) for r in qs]
 
 
-def item(col, entry, owner, expand=(), only=(), key=None, _depth=0):
+def item(col, entry, owner, expand=(), only=(), key=None, _depth=0, user=None):
     rid, row, rec = entry
     out = {"_id": rid}
     for f in col.fields:
@@ -308,6 +414,9 @@ def item(col, entry, owner, expand=(), only=(), key=None, _depth=0):
         out["_updated"] = rec.updated_at.isoformat(timespec="seconds")
         if owner:
             out["_approved"] = rec.approved
+            out["_owner"] = rec.owner_id
+        elif user is not None and rec.owner_id == user.id:
+            out["_mine"] = True
     return out
 
 
@@ -347,9 +456,11 @@ def sort_rows(entries, spec):
     return entries
 
 
-def list_rows(request, col, key, owner):
+def list_rows(request, col, key, owner, mine=None):
     g = request.GET
-    entries = all_rows(col, owner)
+    if mine is not None and col.mode == Collection.LIVE:
+        raise ApiError(409, "unsupported", "สิทธิ์ “เจ้าของแถว” ใช้ได้กับชุดข้อมูลที่เก็บใน BuildWeb เท่านั้น")
+    entries = all_rows(col, owner, mine)
     names = set(col.field_names)
     hidden = {f["name"] for f in col.fields if f.get("hidden")} if not owner else set()
     for name, value in g.items():  # ?category=coffee
@@ -371,19 +482,24 @@ def list_rows(request, col, key, owner):
     total = len(entries)
     chunk = entries[(page - 1) * per: page * per]
     exp, only = expand_set(request), fields_set(request)
-    return ok({"items": [item(col, e, owner, exp, only, key) for e in chunk], "page": page, "per_page": per,
+    user = getattr(request, "_bw_user", None)
+    return ok({"items": [item(col, e, owner, exp, only, key, user=user) for e in chunk], "page": page, "per_page": per,
                "total": total, "total_pages": max(1, math.ceil(total / per))})
 
 
-def get_row(col, rid, owner):
+def get_row(col, rid, owner, mine=None):
     if col.mode == Collection.LIVE:
         live_pk(col)  # raises when rows can't be addressed
         for e in all_rows(col, owner):
             if str(e[0]) == str(rid):
                 return e
         raise ApiError(404, "not_found", f"ไม่พบแถว _id {rid}")
+    if mine is not None:
+        lookup = {"owner": mine}
+    else:
+        lookup = {} if owner else {"approved": True}
     try:
-        rec = col.records.get(pk=int(rid), **({} if owner else {"approved": True}))
+        rec = col.records.get(pk=int(rid), **lookup)
     except (ValueError, Record.DoesNotExist):
         raise ApiError(404, "not_found", f"ไม่พบแถว _id {rid}")
     return rec.id, rec.data, rec
@@ -403,8 +519,10 @@ def body(request):
     return {k: (v[0] if len(v) == 1 else v) for k, v in request.POST.lists()}
 
 
-def create_row(request, col, who):
+def create_row(request, col, who, user=None):
     d = body(request)
+    if who in ("self", "member") and col.mode == Collection.LIVE:
+        raise ApiError(409, "unsupported", "สิทธิ์สมาชิกใช้ได้กับชุดข้อมูลที่เก็บใน BuildWeb เท่านั้น")
     clean = schema.full_validate(col, d)
     if col.mode == Collection.LIVE:
         approved = who != "public" or col.opt("auto_approve") or not col.opt("forms")
@@ -412,37 +530,41 @@ def create_row(request, col, who):
         data.invalidate(col)
         return ok({"_id": new_id, **{k: v for k, v in clean.items()}}, 201)
     # Public posts to a moderated collection wait for approval, like the site's forms.
-    approved = who != "public" or not col.opt("forms") or col.opt("auto_approve")
+    approved = who not in ("public", "member", "self") or not col.opt("forms") or col.opt("auto_approve")
     pos = (col.records.aggregate(m=Max("position"))["m"] or 0) + 1
     rec = Record.objects.create(collection=col, data={f["name"]: clean.get(f["name"], "") for f in col.fields},
-                                position=pos, approved=approved)
+                                position=pos, approved=approved, owner=user)
     col.save(update_fields=["updated_at"])
-    return ok(item(col, (rec.id, rec.data, rec), who == "owner"), 201)
+    return ok(item(col, (rec.id, rec.data, rec), who == "app", user=user), 201)
 
 
-def update_row(request, col, rid, owner, partial):
+def update_row(request, col, rid, owner, partial, mine=None):
     d = body(request)
+    if mine is not None and col.mode == Collection.LIVE:
+        raise ApiError(409, "unsupported", "สิทธิ์ “เจ้าของแถว” ใช้ได้กับชุดข้อมูลที่เก็บใน BuildWeb เท่านั้น")
     if col.mode == Collection.LIVE:
         _, row, _ = get_row(col, rid, owner)
         clean = schema.full_validate(col, d, partial=partial, current=row)
         data.live_update(col, rid, clean)
         data.invalidate(col)
         return ok({"_id": rid, **{**row, **clean}})
-    rid_, row, rec = get_row(col, rid, True)
+    rid_, row, rec = get_row(col, rid, True, mine)
     clean = schema.full_validate(col, d, partial=partial, current=row, exclude_id=rec.id)
     rec.data = {**rec.data, **clean} if partial else {f["name"]: clean.get(f["name"], "") for f in col.fields}
     rec.save()
     col.save(update_fields=["updated_at"])
-    return ok(item(col, (rec.id, rec.data, rec), owner))
+    return ok(item(col, (rec.id, rec.data, rec), owner, user=mine))
 
 
-def delete_row(col, rid, owner):
+def delete_row(col, rid, owner, mine=None):
+    if mine is not None and col.mode == Collection.LIVE:
+        raise ApiError(409, "unsupported", "สิทธิ์ “เจ้าของแถว” ใช้ได้กับชุดข้อมูลที่เก็บใน BuildWeb เท่านั้น")
     if col.mode == Collection.LIVE:
         get_row(col, rid, owner)
         data.live_delete(col, rid)
         data.invalidate(col)
         return
-    _, _, rec = get_row(col, rid, True)
+    _, _, rec = get_row(col, rid, True, mine)
     rec.delete()
     col.save(update_fields=["updated_at"])
 
