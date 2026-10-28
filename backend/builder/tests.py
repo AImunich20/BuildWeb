@@ -1359,6 +1359,9 @@ class TeamTests(TestCase):
 
         from .models import TeamMember
 
+        from . import members
+
+        members._attempts.clear()
         Client().get("/")  # creates the owner account
         self.a = services.create_site("Client A", "business")
         self.b = services.create_site("Client B", "business")
@@ -1549,3 +1552,140 @@ class ShopTests(TestCase):
         self.checkout([{"id": self.tee.id, "qty": 1}])
         mine = self.c.get(f"/{self.site.slug}/api/v1/shop/my-orders", **self.pub).json()["items"]
         self.assertEqual(len(mine), 1)
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class HardeningTests(TestCase):
+    """v0.8: security fixes, coupons, product options, customer emails, images, API paging."""
+
+    def setUp(self):
+        from . import generate, notify, shop
+
+        notify.OUTBOX.clear()
+        notify.SENT.clear()
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Harden", "blank")
+        generate.create_shop(self.site)
+        self.site.refresh_from_db()
+        shop.save_settings(self.site, {"promptpay": "0812345678", "cod": True, "shipping": 0, "low_stock": 22})
+        self.prod = shop.products_col(self.site)
+        self.tee = self.prod.records.get(data__slug="t-shirt")
+        self.tee.data["options"] = "ไซซ์: S, M, L"
+        self.tee.save()
+        self.pub = {"buildweb.public": True}
+
+    def checkout(self, items, **extra):
+        d = {"items": items, "payment": "cod", "customer": "A", "phone": "0811111111", "address": "x", **extra}
+        return self.c.post(f"/{self.site.slug}/api/v1/shop/checkout", json.dumps(d), content_type="application/json", **self.pub)
+
+    def test_slip_must_really_be_an_image(self):
+        o = self.checkout([{"id": self.tee.id, "qty": 1, "options": {"ไซซ์": "M"}}], payment="promptpay").json()
+        evil = SimpleUploadedFile("x.html", b"<script>alert(1)</script>", "image/png")
+        r = self.c.post(f"/{self.site.slug}/api/v1/shop/orders/{o['number']}/slip?t={o['token']}", {"slip": evil}, **self.pub)
+        self.assertEqual(r.status_code, 400)
+        good = SimpleUploadedFile("anything.html", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "text/html")
+        self.c.post(f"/{self.site.slug}/api/v1/shop/orders/{o['number']}/slip?t={o['token']}", {"slip": good}, **self.pub)
+        from .models import Asset
+
+        self.assertTrue(Asset.objects.filter(site=self.site, folder="slips").first().name.endswith(".png"))
+
+    def test_team_editor_is_not_owner_on_preview_api_and_login_is_throttled(self):
+        from django.contrib.auth import get_user_model
+
+        from .models import TeamMember
+
+        u = get_user_model().objects.create_user("ed", password="secret123")
+        TeamMember.objects.create(user=u, role="editor", sites=[self.site.id])
+        notes = Collection.objects.create(site=self.site, name="n", slug="notes", fields=[{"name": "t", "type": "text", "hidden": True}],
+                                          options={"api": {"list": "off"}})
+        Record.objects.create(collection=notes, data={"t": "secret"})
+        team = {"buildweb.team": True}
+        ed = Client()
+        ed.post("/login", {"username": "ed", "password": "secret123"}, **team)
+        self.assertEqual(ed.get(f"/preview/{self.site.slug}/api/v1/notes", **team).json()["error"]["code"], "api_disabled")
+        self.site.api = {"enabled": True}
+        self.site.save()
+        self.assertEqual(ed.get(f"/preview/{self.site.slug}/api/v1/notes", **team).status_code, 403)
+        owner = Client()
+        owner.get("/")
+        self.assertEqual(owner.get(f"/preview/{self.site.slug}/api/v1/notes").json()["items"][0]["t"], "secret")
+        attacker = Client()
+        codes = [attacker.post("/login", {"username": "ed", "password": f"wrong{i}"}, **team).status_code for i in range(9)]
+        self.assertEqual(codes[-1], 429)
+        from . import members
+
+        members._attempts.clear()
+
+    def test_options_coupons_emails_low_stock(self):
+        from . import notify, shop
+
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1}]).status_code, 400)  # size not chosen
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1, "options": {"ไซซ์": "XXL"}}]).status_code, 400)
+        r = self.c.post(f"/api/sites/{self.site.id}/shop/coupons", json.dumps({"coupons": [
+            {"code": "sale10", "type": "percent", "value": 10, "min": 500, "limit": 1, "active": True},
+            {"code": "OLD", "type": "amount", "value": 50, "expires": "2020-01-01"}]}), content_type="application/json").json()
+        self.assertEqual(r["coupons"][0]["code"], "SALE10")
+        prev = self.c.get(f"/{self.site.slug}/api/v1/shop/coupon?code=SALE10&subtotal=1170", **self.pub).json()
+        self.assertEqual(prev["discount"], 117.0)
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1, "options": {"ไซซ์": "M"}}], coupon="SALE10").status_code, 400)  # min 500
+        from unittest import mock
+
+        with mock.patch.object(notify, "smtp_ready", return_value=True):
+            o = self.checkout([{"id": self.tee.id, "qty": 3, "options": {"ไซซ์": "L"}}], coupon="sale10", email="c@x.io").json()
+        self.assertEqual(o["total"], 1053.0)  # 1170 − 10%
+        rec = shop.orders_col(self.site).records.get(data__number=o["number"])
+        self.assertEqual(rec.data["items"][0]["options"], {"ไซซ์": "L"})
+        self.assertIn("(ไซซ์: L)", rec.data["items"][0]["name"])
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1, "options": {"ไซซ์": "S"}}], coupon="SALE10").status_code, 400)  # limit 1
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1, "options": {"ไซซ์": "S"}}], coupon="OLD").status_code, 400)  # expired
+        self.assertTrue(any("ยืนยันคำสั่งซื้อ" in m["subject"] and m["to"] == "c@x.io" for m in notify.OUTBOX))
+        self.assertTrue(any("สินค้าใกล้หมด" in t for t in notify.SENT))  # stock 25 → 22 ≤ 22
+        with mock.patch.object(notify, "smtp_ready", return_value=True):
+            self.c.post(f"/api/sites/{self.site.id}/shop/orders/{rec.id}", json.dumps({"status": "shipped"}), content_type="application/json")
+        self.assertTrue(any("จัดส่งแล้ว" in m["subject"] for m in notify.OUTBOX))
+        csv_text = self.c.get(f"/api/sites/{self.site.id}/shop/orders.csv").content.decode("utf-8-sig")
+        self.assertIn(o["number"], csv_text)
+        self.assertIn("SALE10", csv_text)
+        orders = self.c.get(f"/api/sites/{self.site.id}/shop/orders").json()["orders"]
+        self.assertIn("print=1", orders[0]["print_url"])
+
+    def test_image_optimisation(self):
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (3000, 2000), (200, 120, 40)).save(buf, "PNG")
+        up = self.c.post(f"/api/sites/{self.site.id}/assets/upload", {"files": SimpleUploadedFile("big.png", buf.getvalue(), "image/png")}).json()
+        a = up["assets"][0]
+        self.assertTrue(a["name"].endswith(".webp"))
+        img = Image.open(TMP_MEDIA / self.site.assets.get(pk=a["id"]).file.name)
+        self.assertEqual(max(img.size), 2000)
+        svg = self.c.post(f"/api/sites/{self.site.id}/assets/upload", {"files": SimpleUploadedFile("i.svg", b"<svg/>", "image/svg+xml")}).json()
+        self.assertTrue(svg["assets"][0]["name"].endswith(".svg"))
+
+    def test_api_paging_fast_path_and_missing_fields(self):
+        self.site.api = {"enabled": True}
+        self.site.save()
+        col = Collection.objects.create(site=self.site, name="big", slug="big", fields=[{"name": "n", "type": "number"}, {"name": "extra", "type": "text"}])
+        Record.objects.bulk_create([Record(collection=col, data={"n": i}, position=i) for i in range(450)])
+        r = self.c.get(f"/{self.site.slug}/api/v1/big?page=3&per_page=200", **self.pub).json()
+        self.assertEqual((r["total"], r["total_pages"], len(r["items"]), r["items"][0]["n"]), (450, 3, 50, 400))
+        html = data.render_html('<i data-bw-repeat="big" data-bw-limit="1">[{{extra}}]</i>', self.site)
+        self.assertIn("[]", html)
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class ShopReuseTests(TestCase):
+    def test_existing_detail_page_gets_a_buy_box(self):
+        from . import generate
+
+        site = services.create_site("Menu", "blank")
+        col = Collection.objects.create(site=site, name="สินค้า", slug="products", fields=[{"name": "name", "type": "text"}, {"name": "price", "type": "number"}])
+        Record.objects.create(collection=col, data={"name": "Latte", "price": 65})
+        _, detail = generate.create_pages_for(col)
+        generate.create_shop(site)
+        self.assertEqual(col.detail_pages.count(), 1)
+        detail.refresh_from_db()
+        self.assertIn("data-bw-add-to-cart", detail.html)
+        files, _ = render.build_files(site)
+        self.assertIn('data-bw-add-to-cart="', files["product/latte.html"])

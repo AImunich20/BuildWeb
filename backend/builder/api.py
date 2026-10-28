@@ -453,6 +453,13 @@ def asset_upload(request, site_id):
         if f.size > MAX_UPLOAD:
             raise ApiError(f"ไฟล์ {f.name} ใหญ่เกิน 200 MB")
         name = SAFE_NAME_RE.sub("_", PurePosixPath(f.name).name).strip() or "file"
+        from . import images
+
+        opt = images.optimize_upload(name, f) if Asset.kind_for(name) == "image" else None
+        if opt:  # smaller WebP copy of a big photo
+            from django.core.files.base import ContentFile
+
+            name, f = opt[0], ContentFile(opt[1])
         a = Asset(site=site, name=name, folder=folder, kind=Asset.kind_for(name), size=f.size)
         a.file.save(name, f, save=False)
         a.name = PurePosixPath(a.file.name).name
@@ -795,8 +802,9 @@ def notify_test(request):
 def app_settings(request):
     if request.method == "POST":
         d = body(request)
-        if "auto_update" in d:
-            config.update("app", {"auto_update": as_bool(d["auto_update"])})
+        for k in ("auto_update", "auto_backup", "optimize_images"):
+            if k in d:
+                config.update("app", {k: as_bool(d[k])})
     return {"app": config.load()["app"]}
 
 
@@ -1985,9 +1993,46 @@ def shop_orders(request, site_id):
         rows = [r for r in rows if r.get("status") == st]
     if q:
         rows = [r for r in rows if q in f"{r.get('number')} {r.get('customer')} {r.get('phone')} {r.get('email')}".lower()]
+    pages = shop.settings(site)["pages"]
     for r in rows:
-        r.pop("token", None)
+        r["print_url"] = f"/preview/{site.slug}/{pages['order']}?n={r.get('number')}&t={r.pop('token', '')}&print=1"
     return {"orders": rows}
+
+
+def shop_orders_csv(request, site_id):
+    import csv
+
+    from django.http import HttpResponse
+
+    from . import shop
+
+    site = get_object_or_404(Site, pk=site_id)
+    col = shop.orders_col(site)
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="{site.slug}-orders.csv"'
+    resp.write("\ufeff")
+    w = csv.writer(resp)
+    w.writerow(["เลขที่", "วันที่", "สถานะ", "ลูกค้า", "โทร", "อีเมล", "ที่อยู่", "รายการ", "ยอดสินค้า", "ส่วนลด", "คูปอง", "ค่าส่ง",
+                "ยอดรวม", "ชำระโดย", "หมายเหตุ"])
+    for r in (col.records.order_by("id") if col else []):
+        o = r.data
+        w.writerow([o.get("number"), o.get("created", "")[:16].replace("T", " "), shop.STATUS_TH.get(o.get("status"), o.get("status")),
+                    o.get("customer"), o.get("phone"), o.get("email"), o.get("address"),
+                    "; ".join(f"{i['name']} x{i['qty']}" for i in o.get("items") or []), o.get("subtotal"), o.get("discount", 0),
+                    o.get("coupon", ""), o.get("shipping"), o.get("total"), shop.PAYMENTS.get(o.get("payment"), o.get("payment")), o.get("note")])
+    return resp
+
+
+@require_POST
+@api
+def shop_coupons(request, site_id):
+    from . import shop
+
+    site = get_object_or_404(Site, pk=site_id)
+    try:
+        return {"coupons": shop.save_coupons(site, body(request).get("coupons") or [])}
+    except shop.ShopError as e:
+        raise shop_error(e)
 
 
 @require_POST
@@ -2004,3 +2049,22 @@ def shop_order_update(request, site_id, record_id):
     except shop.ShopError as e:
         raise shop_error(e)
     return {"order": {**{k: v for k, v in rec.data.items() if k != "token"}, "_id": rec.id}}
+
+
+@require_POST
+@api
+def assets_optimize(request, site_id):
+    """Scale down oversized images that are already uploaded (same names, so pages keep working)."""
+    from . import images
+
+    site = get_object_or_404(Site, pk=site_id)
+    saved, n = 0, 0
+    for a in site.assets.filter(kind="image"):
+        path = settings.MEDIA_ROOT / a.file.name
+        if path.is_file():
+            s = images.shrink_in_place(path)
+            if s:
+                saved, n = saved + s, n + 1
+                a.size = path.stat().st_size
+                a.save(update_fields=["size"])
+    return {"files": n, "saved": saved}

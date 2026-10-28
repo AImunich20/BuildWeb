@@ -10,6 +10,10 @@
       <div class="hint">ทุกครั้งที่โค้ดถูก push ขึ้น GitHub จะมีแพตช์ใหม่ออกอัตโนมัติ แอปตรวจทุกครั้งที่เปิดและทุกชั่วโมง ข้อมูลเว็บของคุณไม่หายเมื่ออัพเดท</div>
       <div class="list-row" style="padding:10px 0"><div style="flex:1"><b>ติดตั้งอัพเดทอัตโนมัติ</b><div class="small muted">ดาวน์โหลดและติดตั้งเองเบื้องหลัง แล้วถามก่อนเปิดใหม่</div></div>
         <span class="switch"><input type="checkbox" id="auto-update"><span></span></span></div>
+      <div class="list-row" style="padding:10px 0"><div style="flex:1"><b>สำรองทุกเว็บอัตโนมัติ</b><div class="small muted">วันละครั้ง เก็บ 14 ชุดต่อเว็บ (กู้คืนได้ที่แท็บเผยแพร่ & ส่งออก)</div></div>
+        <span class="switch"><input type="checkbox" data-app="auto_backup"><span></span></span></div>
+      <div class="list-row" style="padding:10px 0"><div style="flex:1"><b>ย่อรูปอัตโนมัติ</b><div class="small muted">รูปที่อัปโหลดใหญ่เกิน 2000px ถูกย่อและเก็บเป็น WebP — เว็บโหลดเร็วขึ้นมาก</div></div>
+        <span class="switch"><input type="checkbox" data-app="optimize_images"><span></span></span></div>
       <div class="row" style="margin-top:12px"><span class="badge brand mono">v{{ app_version }}</span><button class="btn primary sm" onclick="BW.checkUpdates()">ตรวจสอบอัพเดทตอนนี้</button></div>
     </div>
     <div class="card pad" id="desktop-card">
@@ -108,7 +112,11 @@ function drawHosting(h) {
 }
 drawHosting(D.hosting);
 
-api('/api/settings/app').then(r => document.getElementById('auto-update').checked = r.app.auto_update);
+api('/api/settings/app').then(r => {
+  document.getElementById('auto-update').checked = r.app.auto_update;
+  document.querySelectorAll('[data-app]').forEach(x => { x.checked = r.app[x.dataset.app] !== false;
+    x.onchange = () => api('/api/settings/app', { [x.dataset.app]: x.checked }).then(() => toast('บันทึกแล้ว', 'ok')).catch(e => toast(e.message, 'err')); });
+});
 document.getElementById('auto-update').onchange = async e => {
   try { await api('/api/settings/app', { auto_update: e.target.checked }); toast(e.target.checked ? 'จะติดตั้งอัพเดทอัตโนมัติ' : 'จะถามก่อนอัพเดท', 'ok'); }
   catch (err) { toast(err.message, 'err'); }

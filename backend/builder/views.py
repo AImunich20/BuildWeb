@@ -62,9 +62,21 @@ def spark_svg(values, w=120, h=28):
 def login_view(request):
     from django.contrib.auth import authenticate, login
 
+    from . import members
+
     error = ""
     if request.method == "POST":
-        user = authenticate(request, username=request.POST.get("username", ""), password=request.POST.get("password", ""))
+        ip = request.META.get("REMOTE_ADDR", "")
+        name = request.POST.get("username", "").strip().lower()
+        try:
+            members.throttle(f"team-ip:{ip}")
+            members.throttle(f"team-user:{name}")
+        except members.AuthError as e:
+            return render(request, "builder/login.html", {"error": str(e)}, status=429)
+        user = authenticate(request, username=name, password=request.POST.get("password", ""))
+        if not user:
+            members.failed(f"team-ip:{ip}")
+            members.failed(f"team-user:{name}")
         if user:
             login(request, user)
             nxt = request.GET.get("next") or "/"

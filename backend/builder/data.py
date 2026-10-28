@@ -786,6 +786,8 @@ class Binder:
     def global_value(self, key):
         if self.row is not None and key in self.row:
             return self.row[key]
+        if self.row is not None and self.page is not None and self.page.collection_id and key in self.page.collection.field_names:
+            return ""
         if self.row is not None and "." in key and self.page is not None and self.page.collection_id:
             v = self.related(self.page.collection, self.row, key)
             if v is not None:
@@ -857,6 +859,8 @@ class Binder:
                             return i
                         if k in row:
                             return row.get(k)
+                        if col is not None and k in col.field_names:
+                            return ""  # a field of the collection that this row leaves empty
                         return self.related(col, row, k) if "." in k else None
 
                     item = _fill(_conditions(template, resolve), resolve)

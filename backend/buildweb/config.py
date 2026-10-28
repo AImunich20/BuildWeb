@@ -59,7 +59,8 @@ DEFAULTS = {
     },
     "app": {
         "auto_update": True,
-        "auto_backup": True,   # one .bwsite copy of every site per day in <data>/backups (14 kept)  # read by the desktop shell: install patches without asking (then offer a restart)
+        "auto_backup": True,
+        "optimize_images": True,  # scale uploads down to 2000 px and store them as WebP   # one .bwsite copy of every site per day in <data>/backups (14 kept)  # read by the desktop shell: install patches without asking (then offer a restart)
     },
     "export": {
         "last_target": "downloads",

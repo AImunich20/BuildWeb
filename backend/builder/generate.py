@@ -319,7 +319,7 @@ SAMPLE_PRODUCTS = [
 
 def product_card_actions():
     return ('<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" '
-            'data-image="{{image}}">ใส่ตะกร้า</button>')
+            'data-image="{{image}}" data-bw-options="{{options|default:}}" data-bw-url="{{_url}}">ใส่ตะกร้า</button>')
 
 
 @transaction.atomic
@@ -365,12 +365,15 @@ def create_shop(site):
               '<h1>{{name}}</h1><p class="bw-price" style="font-size:1.6em">฿{{price|number}} <s data-bw-if="compare_price">฿{{compare_price|number}}</s></p>'
               '<div class="bw-detail-text">{{{description}}}</div>'
               '<div class="bw-buy"><input type="number" min="1" value="1" class="bw-qty" aria-label="จำนวน">'
-              '<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" data-image="{{image}}" data-bw-qty-from=".bw-qty">ใส่ตะกร้า</button></div>'
+              '<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" data-image="{{image}}" data-bw-options="{{options|default:}}" data-bw-qty-from=".bw-qty">ใส่ตะกร้า</button></div>'
               '</div></div>{pn}</div></section>')
     pn = ('<nav class="bw-pn"><a class="bw-prev" href="{{_prev_url}}" data-bw-if="_prev_url"><small>← ก่อนหน้า</small>{{_prev_title}}</a>'
           '<a class="bw-next" href="{{_next_url}}" data-bw-if="_next_url"><small>ถัดไป →</small>{{_next_title}}</a></nav>')
     shop_file = names.get("shop", "shop.html")
-    if detail_slug not in existing:
+    current = prod.detail_pages.first()
+    if current:  # the products already have their own page: give it a buy box instead of a second page
+        add_buy_box(current)
+    elif detail_slug not in existing:
         p = _page(site, "สินค้า (หน้ารายละเอียด)", detail_slug, detail.replace("{shop}", shop_file).replace("{pn}", pn),
                   DETAIL_CSS + "\n.bw-buy{display:flex;gap:10px;margin:22px 0}.bw-qty{width:84px;font:inherit;padding:10px;border:1px solid #d9d9e3;border-radius:10px}",
                   show_in_nav=False, collection=prod)
@@ -397,3 +400,22 @@ def create_shop(site):
     site.save(update_fields=["shop"])
     site.touch()
     return prod, orders, made
+
+
+BUY_BOX = ('<section class="bw-buy-sec"><div class="bw-container"><div class="bw-buy">'
+           '<input type="number" min="1" value="1" class="bw-qty" aria-label="จำนวน">'
+           '<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" '
+           'data-image="{{image}}" data-bw-options="{{options|default:}}" data-bw-qty-from=".bw-qty">ใส่ตะกร้า</button></div></div></section>')
+
+
+def add_buy_box(page):
+    """Add quantity + "add to cart" to an existing product detail page (once)."""
+    if "data-bw-add-to-cart" in (page.html or ""):
+        return False
+    html = page.html or ""
+    i = html.rfind('<nav class="bw-pn"')
+    page.html = (html[:i] + BUY_BOX + html[i:]) if i >= 0 else html + BUY_BOX
+    page.css = (page.css or "") + "\n.bw-buy-sec{padding:0 0 24px}.bw-buy{display:flex;gap:10px;margin:22px 0}.bw-qty{width:84px;font:inherit;padding:10px;border:1px solid #d9d9e3;border-radius:10px}"
+    page.project_data = {}  # the editor rebuilds its project from the HTML
+    page.save(update_fields=["html", "css", "project_data", "updated_at"])
+    return True

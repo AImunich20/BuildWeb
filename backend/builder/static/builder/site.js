@@ -870,8 +870,13 @@
         </div><input type="file" id="file-input" multiple hidden><div class="progress hidden" id="prog"><i></i></div></div>
         <div class="row between" style="margin-bottom:12px"><div class="row"><input class="input" id="q" placeholder="ค้นหาไฟล์..." style="width:220px">
           <select class="input" id="kind" style="width:150px"><option value="">ทุกประเภท</option><option value="image">รูปภาพ</option><option value="video">วิดีโอ</option><option value="audio">เสียง</option><option value="document">เอกสาร</option><option value="other">อื่นๆ</option></select></div>
-          <span class="muted small" id="fm-sum"></span></div>
+          <div class="row"><span class="muted small" id="fm-sum"></span><button class="btn sm" id="fm-opt" title="ย่อรูปที่ใหญ่เกิน 2000px (ชื่อไฟล์เดิม ลิงก์ไม่เสีย)">ย่อรูปที่มีอยู่</button></div></div>
         <div class="fm-grid" id="fm-grid"></div></div></div>`;
+    document.getElementById('fm-opt').onclick = async e => {
+      e.target.disabled = true;
+      try { const r = await api(`/api/sites/${site.id}/assets/optimize`, {}); toast(r.files ? `ย่อ ${r.files} รูป ประหยัด ${bytes(r.saved)}` : 'รูปทั้งหมดขนาดเหมาะสมแล้ว', 'ok'); renderFiles(); }
+      catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+    };
     await loadAssets();
     drawFolders(); drawAssets();
     const input = document.getElementById('file-input');
@@ -1642,7 +1647,8 @@ return {...}  หรือ  return 201, {...}</div></details>
         <div class="card stat"><span>รอตรวจสอบ</span><b>${sm.pending}</b></div><div class="card stat"><span>ยอดขายเดือนนี้</span><b>${baht(sm.month)}</b></div></div>
       <div class="grid" style="grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);align-items:start" id="sh-grid">
         <div class="card"><div class="card-head"><h2>คำสั่งซื้อ</h2><div class="row"><input class="input" id="sh-q" placeholder="เลขที่ / ชื่อ / เบอร์" style="width:180px">
-          <select class="input" id="sh-st" style="width:140px"><option value="">ทุกสถานะ</option>${Object.entries(SH.statuses).map(([k, l]) => `<option value="${k}" ${k === shFilter ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+          <select class="input" id="sh-st" style="width:140px"><option value="">ทุกสถานะ</option>${Object.entries(SH.statuses).map(([k, l]) => `<option value="${k}" ${k === shFilter ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <a class="btn sm" href="/api/sites/${site.id}/shop/orders.csv">CSV</a></div></div>
           <div id="sh-orders" class="data-table-wrap"></div></div>
         <div class="card pad"><div class="row between"><h2>ตั้งค่าร้าน</h2><label class="switch" title="เปิดขาย"><input type="checkbox" data-s="enabled" ${st.enabled ? 'checked' : ''}><span></span></label></div>
           <div class="small muted" style="margin:4px 0 12px">สินค้า ${SH.products.count} รายการ · <a href="/sites/${site.id}/data/?c=${SH.products.id}">จัดการสินค้า</a> · <a href="/preview/${esc(site.slug)}/${esc(st.pages.shop)}" target="_blank">ดูหน้าร้าน</a></div>
@@ -1654,8 +1660,27 @@ return {...}  หรือ  return 201, {...}</div></details>
           <div class="grid g3" style="gap:0 10px"><label class="field"><span>ค่าส่ง</span><input class="input mono" data-s="shipping" value="${st.shipping}"></label>
             <label class="field"><span>ส่งฟรีเมื่อซื้อครบ</span><input class="input mono" data-s="free_over" value="${st.free_over}"></label>
             <label class="field"><span>คำนำหน้าเลขที่</span><input class="input mono" data-s="prefix" value="${esc(st.prefix)}"></label></div>
+          <label class="field"><span>แจ้งเตือนเมื่อสต็อกเหลือ <small>(0 = ไม่แจ้ง)</small></span><input class="input mono" data-s="low_stock" value="${st.low_stock}"></label>
           <button class="btn primary" id="sh-save">บันทึก</button>
-          <div class="small muted" style="margin-top:12px">แจ้งเตือนออเดอร์ใหม่ใช้ช่องทางใน <a href="/settings/notify/">การแจ้งเตือน</a> (LINE, Telegram, Discord, อีเมล)</div></div></div>`;
+          <div class="small muted" style="margin-top:10px">ตัวเลือกสินค้า (ไซซ์/สี): ใส่ในฟิลด์ <code>options</code> ของสินค้า เช่น <code>ไซซ์: S, M, L | สี: ดำ, ขาว</code> · ลูกค้าที่ใส่อีเมลจะได้อีเมลยืนยันและแจ้งสถานะ (ต้องตั้ง SMTP)</div>
+          <div class="small muted" style="margin-top:12px">แจ้งเตือนออเดอร์ใหม่ใช้ช่องทางใน <a href="/settings/notify/">การแจ้งเตือน</a> (LINE, Telegram, Discord, อีเมล)</div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>คูปองส่วนลด</h2><div class="hint" style="margin:0">ลูกค้าใส่โค้ดตอนชำระเงิน · ส่วนลดคำนวณที่เซิร์ฟเวอร์</div></div><button class="btn sm" id="cp-add">${BW_ICON('plus')} เพิ่มคูปอง</button></div>
+        <div class="data-table-wrap"><table class="table"><thead><tr><th>โค้ด</th><th>ประเภท</th><th>มูลค่า</th><th>ซื้อขั้นต่ำ</th><th>ใช้ได้ (ครั้ง)</th><th>หมดอายุ</th><th>ใช้แล้ว</th><th>เปิด</th><th></th></tr></thead><tbody id="cp-rows"></tbody></table></div>
+        <div style="padding:12px 16px;border-top:1px solid var(--line)"><button class="btn primary sm" id="cp-save">บันทึกคูปอง</button></div></div>`;
+    const cpRow = c => `<tr><td><input class="input sm mono" data-c="code" value="${esc(c.code || '')}" placeholder="SALE10"></td>
+      <td><select class="input sm" data-c="type"><option value="percent" ${c.type === 'percent' ? 'selected' : ''}>%</option><option value="amount" ${c.type !== 'percent' ? 'selected' : ''}>บาท</option></select></td>
+      <td><input class="input sm mono" data-c="value" value="${c.value ?? ''}" style="width:80px"></td><td><input class="input sm mono" data-c="min" value="${c.min || ''}" style="width:90px"></td>
+      <td><input class="input sm mono" data-c="limit" value="${c.limit || ''}" placeholder="ไม่จำกัด" style="width:90px"></td><td><input class="input sm" type="date" data-c="expires" value="${esc(c.expires || '')}"></td>
+      <td class="mono small">${c.used || 0}<input type="hidden" data-c="used" value="${c.used || 0}"></td><td><input type="checkbox" data-c="active" ${c.active !== false ? 'checked' : ''}></td>
+      <td><button class="btn sm ghost icon" data-rm>${BW_ICON('x')}</button></td></tr>`;
+    const cpBody = document.getElementById('cp-rows');
+    const bindCp = () => cpBody.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => b.closest('tr').remove());
+    cpBody.innerHTML = (st.coupons || []).map(cpRow).join(''); bindCp();
+    document.getElementById('cp-add').onclick = () => { cpBody.insertAdjacentHTML('beforeend', cpRow({ type: 'percent' })); bindCp(); };
+    document.getElementById('cp-save').onclick = async () => {
+      const coupons = [...cpBody.querySelectorAll('tr')].map(tr => { const c = {}; tr.querySelectorAll('[data-c]').forEach(x => c[x.dataset.c] = x.type === 'checkbox' ? x.checked : x.value); return c; });
+      try { await api(`/api/sites/${site.id}/shop/coupons`, { coupons }); toast('บันทึกคูปองแล้ว', 'ok'); renderShop(); } catch (e) { toast(e.message, 'err'); }
+    };
     document.getElementById('sh-save').onclick = async () => {
       const d = {}; root.querySelectorAll('[data-s]').forEach(x => d[x.dataset.s] = x.type === 'checkbox' ? x.checked : x.value);
       try { await api(`/api/sites/${site.id}/shop`, { settings: d }); toast('บันทึกแล้ว', 'ok'); renderShop(); } catch (e) { showFieldError(root, e); }
@@ -1683,12 +1708,12 @@ return {...}  หรือ  return 201, {...}</div></details>
       <div class="grid g2" style="gap:16px"><div><b>${esc(o.customer)}</b><div class="small">${esc(o.phone)} ${o.email ? '· ' + esc(o.email) : ''}${o.member ? '<br>สมาชิก: ' + esc(o.member) : ''}</div>
         <div class="small" style="white-space:pre-line;margin-top:6px">${esc(o.address || '')}</div>${o.note ? `<div class="alert info" style="margin-top:8px">${esc(o.note)}</div>` : ''}</div>
         <div>${(o.items || []).map(i => `<div class="row between small"><span>${esc(i.name)} × ${i.qty}</span><span>${baht(i.price * i.qty)}</span></div>`).join('')}
-          <div class="row between small"><span>ค่าส่ง</span><span>${baht(o.shipping)}</span></div><div class="row between"><b>รวม</b><b>${baht(o.total)}</b></div>
+          <div class="row between small"><span>ค่าส่ง</span><span>${baht(o.shipping)}</span></div>${o.discount ? `<div class="row between small"><span>ส่วนลด ${esc(o.coupon || '')}</span><span>−${baht(o.discount)}</span></div>` : ''}<div class="row between"><b>รวม</b><b>${baht(o.total)}</b></div>
           <div class="small muted" style="margin-top:6px">${esc(SH.payments[o.payment] || o.payment)} · ${when(o.created)}</div></div></div>
       ${o.slip ? `<div class="sect-title">สลิป</div><a href="${esc(o.slip)}" target="_blank"><img src="${esc(o.slip)}" style="max-width:260px;border-radius:10px;border:1px solid var(--line)"></a>` : ''}
       <div class="sect-title">สถานะ</div><div class="row" style="gap:6px">${Object.entries(SH.statuses).map(([k, l]) => `<button class="btn sm ${k === o.status ? 'primary' : ''}" data-st="${k}">${l}</button>`).join('')}</div>
       <label class="field" style="margin-top:12px"><span>บันทึกของร้าน <small>(ลูกค้าไม่เห็น)</small></span><textarea class="input" rows="2" id="o-note">${esc(o.admin_note || '')}</textarea></label></div>
-      <footer><button class="btn" data-close>ปิด</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+      <footer><a class="btn" href="${esc(o.print_url)}" target="_blank" style="margin-right:auto">พิมพ์ใบเสร็จ</a><button class="btn" data-close>ปิด</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
     let status = o.status;
     m.el.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { status = b.dataset.st; m.el.querySelectorAll('[data-st]').forEach(x => x.classList.toggle('primary', x === b)); });
     m.el.querySelector('[data-save]').onclick = async () => {

@@ -208,6 +208,11 @@ background:var(--bw-primary,#7c3aed);color:#fff;text-decoration:none;font-weight
 .bw-status.paid,.bw-status.shipped,.bw-status.completed{background:#dcfce7;color:#166534}.bw-status.cancelled{background:#fee2e2;color:#991b1b}
 .bw-qr{display:grid;place-items:center;gap:8px;padding:18px;background:#fff;border:1px solid #ececf1;border-radius:14px;max-width:280px;margin:12px auto}
 .bw-qr img,.bw-qr canvas{width:220px!important;height:220px!important}
+.bw-optsel{display:grid;gap:4px;margin:8px 0;font-weight:600;font-size:.95em}.bw-optsel select{font:inherit;font-weight:400;padding:9px 12px;border:1px solid #d9d9e3;border-radius:10px}
+.bw-cart-opt{color:#6b7280;font-size:.88em}.bw-coupon{display:flex;gap:8px;margin:10px 0}.bw-coupon input{flex:1;min-width:0}
+.bw-receipt-head{display:none}
+@media print{header,footer,nav,.bw-fab,.bw-cartfab,.bw-noprint,.bw-nav{display:none!important}.bw-order-card{border:0;padding:0}
+.bw-receipt-head{display:block;margin-bottom:16px}body{background:#fff}}
 @media (max-width:768px){.bw-co-grid{grid-template-columns:1fr}.bw-cart-row{grid-template-columns:52px 1fr auto}.bw-cart-row .bw-cart-sub{display:none}}
 """
 
@@ -222,20 +227,39 @@ SHOP_JS = r"""
   function count(){ return load().reduce(function(n, i){ return n + i.qty; }, 0); }
   function baht(n){ return '฿' + Number(n || 0).toLocaleString('th-TH', {minimumFractionDigits: 0, maximumFractionDigits: 2}); }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function optText(i){ var o = i.options || {}, k = Object.keys(o); return k.length ? '<div class="bw-cart-opt">' + k.map(function(n){ return esc(n) + ': ' + esc(o[n]); }).join(' · ') + '</div>' : ''; }
   function update(){
     var n = count();
     document.querySelectorAll('[data-bw-cart-count]').forEach(function(el){ el.textContent = n; });
     var fab = document.querySelector('.bw-cartfab'); if (fab) fab.hidden = !n || !!document.querySelector('[data-bw-cart],[data-bw-checkout]');
   }
   window.bwCart = {items: load, clear: function(){ save([]); }, count: count};
+  function parseOpts(t){ var o = []; if (/\{\{/.test(t || '')) return o; String(t || '').split('|').forEach(function(p){ var i = p.indexOf(':'); if (i < 0) return;
+    var vals = p.slice(i + 1).split(',').map(function(v){ return v.trim(); }).filter(Boolean); if (p.slice(0, i).trim() && vals.length) o.push([p.slice(0, i).trim(), vals]); }); return o; }
+  document.querySelectorAll('[data-bw-add-to-cart][data-bw-options]').forEach(function(b){
+    var opts = parseOpts(b.getAttribute('data-bw-options'));
+    if (!opts.length || b.hasAttribute('data-bw-url')) return;  // cards send people to the product page instead
+    var box = document.createElement('div'); box.className = 'bw-opts';
+    box.innerHTML = opts.map(function(o){ return '<label class="bw-optsel">' + esc(o[0]) + '<select data-bw-opt="' + esc(o[0]) + '"><option value="">— เลือก' + esc(o[0]) + ' —</option>' +
+      o[1].map(function(v){ return '<option>' + esc(v) + '</option>'; }).join('') + '</select></label>'; }).join('');
+    var at = b.closest('.bw-buy') || b; at.parentNode.insertBefore(box, at);
+  });
   document.addEventListener('click', function(e){
     var b = e.target.closest('[data-bw-add-to-cart]');
     if (!b) return;
     e.preventDefault();
+    var opts = parseOpts(b.getAttribute('data-bw-options')), chosen = {};
+    if (opts.length && b.hasAttribute('data-bw-url')) { location.href = new URL(b.getAttribute('data-bw-url'), root).href; return; }
+    for (var k = 0; k < opts.length; k++) {
+      var sel = [].find.call(document.querySelectorAll('[data-bw-opt]'), function(x){ return x.getAttribute('data-bw-opt') === opts[k][0]; });
+      if (!sel || !sel.value) { alert('กรุณาเลือก' + opts[k][0]); if (sel) sel.focus(); return; }
+      chosen[opts[k][0]] = sel.value;
+    }
     var qty = 1, from = b.getAttribute('data-bw-qty-from');
     if (from) { var q = b.closest('section, div').querySelector(from) || document.querySelector(from); qty = Math.max(1, parseInt(q && q.value, 10) || 1); }
-    var c = load(), id = b.getAttribute('data-bw-add-to-cart'), it = c.find(function(x){ return String(x.id) === String(id); });
-    if (it) it.qty += qty; else c.push({id: id, name: b.getAttribute('data-name'), price: +b.getAttribute('data-price') || 0, image: b.getAttribute('data-image') || '', qty: qty});
+    var c = load(), id = b.getAttribute('data-bw-add-to-cart'), key = id + JSON.stringify(chosen);
+    var it = c.find(function(x){ return (x.key || String(x.id) + '{}') === key; });
+    if (it) it.qty += qty; else c.push({id: id, key: key, options: chosen, name: b.getAttribute('data-name'), price: +b.getAttribute('data-price') || 0, image: b.getAttribute('data-image') || '', qty: qty});
     save(c);
     var old = b.textContent; b.textContent = '✓ เพิ่มแล้ว'; setTimeout(function(){ b.textContent = old; }, 1200);
   });
@@ -245,7 +269,7 @@ SHOP_JS = r"""
       var c = load();
       if (!c.length) { box.innerHTML = '<p>ยังไม่มีสินค้าในตะกร้า</p><a class="bw-btn" href="' + (pages.shop || './') + '">เลือกซื้อสินค้า</a>'; return; }
       var total = c.reduce(function(s, i){ return s + i.price * i.qty; }, 0);
-      box.innerHTML = c.map(function(i, k){ return '<div class="bw-cart-row"><img src="' + esc(i.image) + '" alt=""><div><b>' + esc(i.name) + '</b><div>' + baht(i.price) + '</div></div>' +
+      box.innerHTML = c.map(function(i, k){ return '<div class="bw-cart-row"><img src="' + esc(i.image) + '" alt=""><div><b>' + esc(i.name) + '</b>' + optText(i) + '<div>' + baht(i.price) + '</div></div>' +
         '<div class="bw-qtybox"><button type="button" data-k="' + k + '" data-d="-1">−</button><span>' + i.qty + '</span><button type="button" data-k="' + k + '" data-d="1">+</button></div>' +
         '<b class="bw-cart-sub">' + baht(i.price * i.qty) + '</b></div>'; }).join('') +
         '<div class="bw-cart-total"><span>รวม</span><span>' + baht(total) + '</span></div><a class="bw-btn" href="' + (pages.checkout || 'checkout.html') + '">ไปชำระเงิน</a>';
@@ -256,13 +280,23 @@ SHOP_JS = r"""
   });
   // checkout
   document.querySelectorAll('form[data-bw-checkout]').forEach(function(form){
-    var cfg = null, sum = form.querySelector('[data-bw-cart-summary]'), payBox = form.querySelector('[data-bw-payments]');
+    var cfg = null, sum = form.querySelector('[data-bw-cart-summary]'), payBox = form.querySelector('[data-bw-payments]'), coupon = {code: '', discount: 0};
     function totals(){
       var c = load(), sub = c.reduce(function(s, i){ return s + i.price * i.qty; }, 0);
       var ship = cfg ? ((cfg.free_over && sub >= cfg.free_over) ? 0 : (cfg.shipping || 0)) : 0;
-      sum.innerHTML = c.map(function(i){ return '<div class="bw-co-line"><span>' + esc(i.name) + ' × ' + i.qty + '</span><span>' + baht(i.price * i.qty) + '</span></div>'; }).join('') +
+      sum.innerHTML = c.map(function(i){ return '<div class="bw-co-line"><span>' + esc(i.name) + ' × ' + i.qty + optText(i) + '</span><span>' + baht(i.price * i.qty) + '</span></div>'; }).join('') +
+        (coupon.discount ? '<div class="bw-co-line"><span>ส่วนลด (' + esc(coupon.code) + ')</span><span>−' + baht(coupon.discount) + '</span></div>' : '') +
         '<div class="bw-co-line"><span>ค่าจัดส่ง</span><span>' + (ship ? baht(ship) : 'ฟรี') + '</span></div>' +
-        '<div class="bw-cart-total"><span>ยอดชำระ</span><span>' + baht(sub + ship) + '</span></div>';
+        '<div class="bw-cart-total"><span>ยอดชำระ</span><span>' + baht(Math.max(0, sub - coupon.discount) + ship) + '</span></div>' +
+        (cfg && cfg.coupons ? '<div class="bw-coupon"><input placeholder="โค้ดส่วนลด" data-bw-coupon value="' + esc(coupon.code) + '"><button type="button" class="bw-btn bw-btn-outline" data-bw-coupon-apply>ใช้</button></div>' : '');
+      var ap = sum.querySelector('[data-bw-coupon-apply]');
+      if (ap) ap.onclick = function(){
+        var code = sum.querySelector('[data-bw-coupon]').value.trim();
+        fetch(api + 'coupon?code=' + encodeURIComponent(code) + '&subtotal=' + sub).then(function(r){ return r.json(); }).then(function(j){
+          if (j.error) { alert(j.error.message); coupon = {code: '', discount: 0}; } else coupon = {code: j.code, discount: j.discount};
+          totals();
+        });
+      };
     }
     fetch(api + 'config').then(function(r){ return r.json(); }).then(function(j){
       cfg = j; totals();
@@ -274,7 +308,8 @@ SHOP_JS = r"""
       e.preventDefault();
       var c = load(); if (!c.length) return alert('ตะกร้าว่าง');
       var d = {}; new FormData(form).forEach(function(v, k){ d[k] = v; });
-      d.items = c.map(function(i){ return {id: i.id, qty: i.qty}; });
+      d.items = c.map(function(i){ return {id: i.id, qty: i.qty, options: i.options || {}}; });
+      if (coupon.code) d.coupon = coupon.code;
       var btn = form.querySelector('[type=submit]'); btn.disabled = true;
       fetch(api + 'checkout', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(d)})
         .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error((j.error && j.error.message) || 'สั่งซื้อไม่สำเร็จ'); return j; }); })
@@ -296,8 +331,13 @@ SHOP_JS = r"""
           '<form class="bw-order-card" id="bw-slip"><b>แนบสลิปการโอน</b><input type="file" name="slip" accept="image/*" required style="display:block;margin:10px 0"><button class="bw-btn" type="submit">ส่งสลิป</button></form>';
         box.innerHTML = '<div class="bw-order-card"><h1 style="margin:0 0 6px">ขอบคุณสำหรับคำสั่งซื้อ</h1><p>เลขที่ <b>' + esc(o.number) + '</b> · <span class="bw-status ' + esc(o.status) + '">' + esc(o.status_label) + '</span></p>' +
           o.items.map(function(i){ return '<div class="bw-co-line"><span>' + esc(i.name) + ' × ' + i.qty + '</span><span>' + baht(i.price * i.qty) + '</span></div>'; }).join('') +
+          (o.discount ? '<div class="bw-co-line"><span>ส่วนลด (' + esc(o.coupon) + ')</span><span>−' + baht(o.discount) + '</span></div>' : '') +
           '<div class="bw-co-line"><span>ค่าจัดส่ง</span><span>' + (o.shipping ? baht(o.shipping) : 'ฟรี') + '</span></div><div class="bw-cart-total"><span>ยอดรวม</span><span>' + baht(o.total) + '</span></div>' +
-          '<p>ชำระโดย: ' + esc(o.payment_label) + '</p></div>' + pay + '<p style="color:#6b7280">เก็บลิงก์หน้านี้ไว้เพื่อติดตามสถานะคำสั่งซื้อ</p>';
+          '<p>ชำระโดย: ' + esc(o.payment_label) + '</p><button type="button" class="bw-btn bw-btn-outline bw-noprint" onclick="print()">พิมพ์ใบเสร็จ / บันทึก PDF</button></div>' +
+          '<div class="bw-noprint">' + pay + '<p style="color:#6b7280">เก็บลิงก์หน้านี้ไว้เพื่อติดตามสถานะคำสั่งซื้อ</p></div>';
+        box.insertAdjacentHTML('afterbegin', '<div class="bw-receipt-head"><h2 style="margin:0">' + esc(o.shop) + '</h2><div>ใบเสร็จ / ใบสั่งซื้อ ' + esc(o.number) + ' · ' + esc((o.created || '').slice(0, 16).replace('T', ' ')) +
+          '</div><div>ลูกค้า: ' + esc(o.customer) + ' ' + esc(o.phone || '') + '</div><div style="white-space:pre-line">' + esc(o.address || '') + '</div></div>');
+        if (q.get('print') === '1' && !box.dataset.printed) { box.dataset.printed = '1'; setTimeout(print, 600); }
         if (o.promptpay && document.getElementById('bw-qr')) {
           var draw = function(){ new QRCode(document.getElementById('bw-qr'), {text: o.promptpay, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M}); };
           if (window.QRCode) draw(); else { var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; s.onload = draw; document.head.appendChild(s); }

@@ -37,6 +37,8 @@ SETTINGS = {
     "shipping": 0,                # flat shipping fee
     "free_over": 0,               # free shipping from this subtotal (0 = never)
     "prefix": "BW",
+    "low_stock": 3,               # tell the owner when a product's stock falls to this (0 = never)
+    "coupons": [],                # [{"code", "type": "percent"|"amount", "value", "min", "expires", "limit", "used", "active"}]
     "pages": {},                  # {"cart": "cart.html", "checkout": "checkout.html", "order": "order.html"}
 }
 STATUSES = ["pending", "paid", "shipped", "completed", "cancelled"]
@@ -53,6 +55,7 @@ PRODUCT_FIELDS = [
     {"name": "category", "label": "หมวดหมู่", "type": "text"},
     {"name": "stock", "label": "สต็อก (ว่าง = ไม่จำกัด)", "type": "number", "min": 0},
     {"name": "sku", "label": "รหัสสินค้า", "type": "text"},
+    {"name": "options", "label": "ตัวเลือก (เช่น ไซซ์: S, M, L | สี: ดำ, ขาว)", "type": "text"},
     {"name": "active", "label": "แสดงขาย", "type": "bool", "default": True},
 ]
 ORDER_FIELDS = [
@@ -65,6 +68,8 @@ ORDER_FIELDS = [
     {"name": "items", "label": "รายการ", "type": "json"},
     {"name": "subtotal", "label": "ยอดสินค้า", "type": "number"},
     {"name": "shipping", "label": "ค่าส่ง", "type": "number"},
+    {"name": "coupon", "label": "คูปอง", "type": "text"},
+    {"name": "discount", "label": "ส่วนลด", "type": "number"},
     {"name": "total", "label": "ยอดรวม", "type": "number"},
     {"name": "payment", "label": "การชำระเงิน", "type": "select", "options": list(PAYMENTS)},
     {"name": "slip", "label": "สลิป", "type": "image", "hidden": True},
@@ -92,7 +97,7 @@ def settings(site):
 def save_settings(site, values):
     cur = settings(site)
     for k, default in SETTINGS.items():
-        if k not in values or k == "pages":
+        if k not in values or k in ("pages", "coupons"):
             continue
         v = values[k]
         if isinstance(default, bool):
@@ -175,6 +180,13 @@ def ensure_collections(site):
         orders = Collection.objects.create(site=site, name="คำสั่งซื้อ", slug=data.unique_slug(site, s["orders"]), fields=ORDER_FIELDS,
                                            options={"server": True, "api": {"list": "owner", "view": "owner", "create": "off",
                                                                             "update": "off", "delete": "off"}})
+    for col, wanted in ((prod, ("options",)), (orders, ("coupon", "discount"))):  # collections from older versions
+        names = col.field_names
+        base = PRODUCT_FIELDS if col == prod else ORDER_FIELDS
+        missing = [f for f in base if f["name"] in wanted and f["name"] not in names]
+        if missing:
+            col.fields = col.fields + missing
+            col.save(update_fields=["fields"])
     save_settings(site, {"products": prod.slug, "orders": orders.slug})
     return prod, orders
 
@@ -187,6 +199,7 @@ def public_config(site):
                if (m == "promptpay" and s["promptpay"]) or (m == "transfer" and s["bank"]) or (m == "cod" and s["cod"])
                or (m == "stripe" and s["stripe"])]
     return {"currency": s["currency"], "shipping": s["shipping"], "free_over": s["free_over"], "bank": s["bank"],
+            "coupons": any(c.get("active", True) for c in s.get("coupons") or []),
             "payments": [{"id": m, "label": PAYMENTS[m]} for m in methods], "pages": s["pages"]}
 
 
@@ -194,7 +207,116 @@ def next_number(site, orders):
     prefix = re.sub(r"[^A-Z0-9]", "", settings(site)["prefix"].upper())[:6] or "BW"
     day = timezone.localtime().strftime("%y%m%d")
     n = orders.records.filter(data__number__startswith=f"{prefix}{day}").count() + 1
+    while orders.records.filter(data__number=f"{prefix}{day}{n:03d}").exists():  # deleted orders leave gaps
+        n += 1
     return f"{prefix}{day}{n:03d}"
+
+
+def parse_options(text):
+    """"ไซซ์: S, M, L | สี: ดำ, ขาว" → {"ไซซ์": ["S", "M", "L"], "สี": ["ดำ", "ขาว"]}"""
+    out = {}
+    for part in str(text or "").split("|"):
+        name, _, values = part.partition(":")
+        vals = [v.strip() for v in values.split(",") if v.strip()]
+        if name.strip() and vals:
+            out[name.strip()] = vals
+    return out
+
+
+def clean_options(defined, chosen):
+    opts = parse_options(defined)
+    chosen = chosen if isinstance(chosen, dict) else {}
+    out = {}
+    for name, vals in opts.items():
+        v = str(chosen.get(name, "")).strip()
+        if v not in vals:
+            raise ShopError(400, "options", f"เลือก{name}ให้ถูกต้อง ({', '.join(vals)})")
+        out[name] = v
+    return out
+
+
+def find_coupon(s, code):
+    code = str(code or "").strip().upper()
+    return next((c for c in s.get("coupons") or [] if c.get("code", "").upper() == code), None) if code else None
+
+
+def apply_coupon(s, code, subtotal):
+    """(coupon or None, discount Decimal). Raises ShopError for a code that can't be used."""
+    if not str(code or "").strip():
+        return None, Decimal("0")
+    c = find_coupon(s, code)
+    if not c or not c.get("active", True):
+        raise ShopError(400, "coupon", "ไม่พบคูปองนี้", {"coupon": "ไม่พบคูปอง"})
+    if c.get("expires") and str(c["expires"]) < timezone.localdate().isoformat():
+        raise ShopError(400, "coupon", "คูปองหมดอายุแล้ว", {"coupon": "หมดอายุ"})
+    if c.get("limit") and int(c.get("used") or 0) >= int(c["limit"]):
+        raise ShopError(400, "coupon", "คูปองถูกใช้ครบแล้ว", {"coupon": "ใช้ครบแล้ว"})
+    if c.get("min") and subtotal < Decimal(str(c["min"])):
+        raise ShopError(400, "coupon", f"ใช้ได้เมื่อซื้อครบ {float(c['min']):,.0f} บาท", {"coupon": "ยอดไม่ถึง"})
+    value = Decimal(str(c.get("value") or 0))
+    discount = (subtotal * value / 100) if c.get("type") == "percent" else value
+    return c, min(subtotal, discount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def use_coupon(site, code):
+    s = settings(site)
+    coupons = [dict(c) for c in s.get("coupons") or []]
+    for c in coupons:
+        if c.get("code", "").upper() == code.upper():
+            c["used"] = int(c.get("used") or 0) + 1
+    site.shop = {**(site.shop or {}), "coupons": coupons}
+    site.save(update_fields=["shop"])
+
+
+def save_coupons(site, coupons):
+    out, seen = [], set()
+    for c in coupons or []:
+        code = re.sub(r"[^A-Z0-9_-]", "", str(c.get("code") or "").upper())[:30]
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        try:
+            value = float(c.get("value") or 0)
+            minimum = float(c.get("min") or 0)
+            limit = int(c.get("limit") or 0)
+        except ValueError:
+            raise ShopError(400, "validation", f"คูปอง {code}: ตัวเลขไม่ถูกต้อง")
+        ctype = "percent" if c.get("type") == "percent" else "amount"
+        if value <= 0 or (ctype == "percent" and value > 100):
+            raise ShopError(400, "validation", f"คูปอง {code}: มูลค่าไม่ถูกต้อง")
+        out.append({"code": code, "type": ctype, "value": value, "min": minimum, "limit": limit,
+                    "expires": str(c.get("expires") or "")[:10], "used": int(c.get("used") or 0),
+                    "active": c.get("active", True) in (True, "1", "true", "on", 1)})
+    site.shop = {**(site.shop or {}), "coupons": out}
+    site.save(update_fields=["shop"])
+    return out
+
+
+def email_customer(site, order, base, kind):
+    """Order confirmation / status update to the customer (when SMTP is set up and they gave an email)."""
+    from . import notify
+
+    to = (order.get("email") or "").strip()
+    if not to or not notify.smtp_ready():
+        return
+    s = settings(site)
+    link = (base.rstrip("/") + "/" if base else "") + f"{s['pages']['order']}?n={order['number']}&t={order.get('token', '')}"
+    items = "\n".join(f"- {i['name']} x {i['qty']}  {i['price'] * i['qty']:,.2f}" for i in order.get("items") or [])
+    if kind == "confirm":
+        subject = f"ยืนยันคำสั่งซื้อ {order['number']} · {site.name}"
+        body = (f"ขอบคุณที่สั่งซื้อกับ {site.name}\n\nเลขที่ {order['number']}\n{items}\n"
+                + (f"ส่วนลด ({order.get('coupon')}) -{order.get('discount', 0):,.2f}\n" if order.get("discount") else "")
+                + f"ค่าส่ง {order.get('shipping', 0):,.2f}\nยอดรวม {order['total']:,.2f} บาท\nชำระโดย {PAYMENTS.get(order['payment'], order['payment'])}\n"
+                + (f"\nโอนเข้าบัญชี:\n{s['bank']}\n" if order["payment"] == "transfer" and s["bank"] else "")
+                + (f"\nติดตามคำสั่งซื้อ / ชำระเงิน / แนบสลิป:\n{link}\n" if base else ""))
+    else:
+        subject = f"คำสั่งซื้อ {order['number']}: {STATUS_TH.get(order['status'], order['status'])} · {site.name}"
+        body = (f"คำสั่งซื้อ {order['number']} ของคุณ{order.get('customer', '')} เปลี่ยนสถานะเป็น “{STATUS_TH.get(order['status'])}”\n"
+                + (f"\nดูรายละเอียด: {link}\n" if base else ""))
+    try:
+        notify.send_mail_to(to, subject, body + f"\n— {site.name}", from_name=site.name)
+    except RuntimeError:
+        pass
 
 
 @transaction.atomic
@@ -232,14 +354,17 @@ def checkout(site, d, user=None, base=""):
         stock = rec.data.get("stock")
         if stock not in (None, "") and int(float(stock)) < qty:
             raise ShopError(409, "out_of_stock", f"“{name}” เหลือ {int(float(stock))} ชิ้น")
+        chosen = clean_options(rec.data.get("options"), it.get("options"))
         price = Decimal(str(rec.data.get("price") or 0))
         subtotal += price * qty
-        lines.append((rec, {"id": rec.id, "name": name, "price": float(price), "qty": qty, "image": rec.data.get("image", ""),
-                            "sku": rec.data.get("sku", "")}))
+        label = name + (" (" + ", ".join(f"{k}: {v}" for k, v in chosen.items()) + ")" if chosen else "")
+        lines.append((rec, {"id": rec.id, "name": label, "price": float(price), "qty": qty, "image": rec.data.get("image", ""),
+                            "sku": rec.data.get("sku", ""), "options": chosen}))
+    coupon, discount = apply_coupon(s, d.get("coupon"), subtotal)
     shipping = Decimal(str(s["shipping"] or 0))
     if s["free_over"] and subtotal >= Decimal(str(s["free_over"])):
         shipping = Decimal("0")
-    total = subtotal + shipping
+    total = max(Decimal("0"), subtotal - discount) + shipping
     for rec, line in lines:  # take the stock now; cancelled orders give it back
         if rec.data.get("stock") not in (None, ""):
             rec.data["stock"] = int(float(rec.data["stock"])) - line["qty"]
@@ -248,11 +373,15 @@ def checkout(site, d, user=None, base=""):
     order = {"number": next_number(site, orders), "status": "pending", "customer": str(d.get("customer"))[:150],
              "phone": str(d.get("phone"))[:40], "email": str(d.get("email") or "")[:200], "address": str(d.get("address") or "")[:2000],
              "items": [l for _, l in lines], "subtotal": money(subtotal), "shipping": money(shipping), "total": money(total),
+             "coupon": coupon.get("code", "") if coupon else "", "discount": money(discount),
              "payment": pay, "slip": "", "note": str(d.get("note") or "")[:2000], "admin_note": "", "token": token,
              "stripe_session": "", "created": timezone.localtime().isoformat(timespec="seconds")}
     pos = (orders.records.aggregate(m=Max("position"))["m"] or 0) + 1
     rec = Record.objects.create(collection=orders, data=order, position=pos, owner=user)
     data.invalidate(prod)
+    if coupon:
+        use_coupon(site, coupon["code"])
+    low = [r for r, _ in lines if s["low_stock"] and r.data.get("stock") not in (None, "") and int(float(r.data["stock"])) <= s["low_stock"]]
     out = {"number": order["number"], "token": token, "total": order["total"], "payment": pay,
            "url": f"{s['pages']['order']}?n={order['number']}&t={token}"}
     if pay == "promptpay":
@@ -263,6 +392,12 @@ def checkout(site, d, user=None, base=""):
 
     logic.emit(site, "record.created", {"_id": rec.id, **{k: v for k, v in order.items() if k != "token"}}, orders.slug)
     notify_order(site, order)
+    if low:
+        from . import notify
+
+        notify.notify_text(site.name, "สินค้าใกล้หมด\n" + "\n".join(f"• {r.data.get('name')}: เหลือ {int(float(r.data['stock']))}" for r in low),
+                           {"event": "low_stock", "site": site.slug})
+    email_customer(site, order, base, "confirm")
     return out
 
 
@@ -277,7 +412,9 @@ def find_order(site, number, token):
 def order_public(site, rec):
     o = rec.data
     s = settings(site)
-    out = {k: o.get(k) for k in ("number", "status", "customer", "items", "subtotal", "shipping", "total", "payment", "created", "note")}
+    out = {k: o.get(k) for k in ("number", "status", "customer", "items", "subtotal", "shipping", "total", "payment", "created",
+                                 "note", "coupon", "discount", "phone", "address")}
+    out["shop"] = site.name
     out["status_label"] = STATUS_TH.get(o.get("status"), o.get("status"))
     out["payment_label"] = PAYMENTS.get(o.get("payment"), o.get("payment"))
     out["has_slip"] = bool(o.get("slip"))
@@ -293,14 +430,28 @@ def attach_slip(site, rec, upload):
 
     if not upload or upload.size > 8 * 1024 * 1024:
         raise ShopError(400, "bad_file", "แนบรูปสลิป (ไม่เกิน 8 MB)")
-    if not (upload.content_type or "").startswith("image/"):
-        raise ShopError(400, "bad_file", "สลิปต้องเป็นรูปภาพ")
-    ext = (upload.name.rsplit(".", 1)[-1] if "." in upload.name else "jpg").lower()[:5]
+    head = upload.read(16)
+    upload.seek(0)
+    ext = image_kind(head)
+    if not ext:  # judged by the file's bytes, never by the name or type the visitor sent
+        raise ShopError(400, "bad_file", "สลิปต้องเป็นรูป JPG, PNG, WebP หรือ HEIC")
     upload.name = f"slip-{rec.data['number']}-{int(time.time())}.{ext}"
     asset = Asset.objects.create(site=site, file=upload, name=upload.name, folder="slips", kind="image", size=upload.size)
     rec.data["slip"] = asset.url
     rec.save(update_fields=["data", "updated_at"])
     notify_order(site, rec.data, "แนบสลิปแล้ว")
+
+
+def image_kind(head):
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if head[4:8] == b"ftyp" and head[8:12] in (b"heic", b"heix", b"mif1", b"msf1"):
+        return "heic"
+    return None
 
 
 def set_status(site, rec, status, note=None):
@@ -319,6 +470,8 @@ def set_status(site, rec, status, note=None):
     if note is not None:
         rec.data["admin_note"] = str(note)[:2000]
     rec.save(update_fields=["data", "updated_at"])
+    if status != old and status in ("paid", "shipped", "completed", "cancelled"):
+        email_customer(site, rec.data, site.base_url, "status")
     from . import logic
 
     logic.emit(site, "record.updated", {"_id": rec.id, "number": rec.data.get("number"), "status": status}, rec.collection.slug)

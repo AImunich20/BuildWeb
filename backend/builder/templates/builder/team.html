@@ -18,7 +18,7 @@
       <div class="card pad"><div class="row between"><h2>เปิดให้ทีมเข้าใช้</h2><label class="switch"><input type="checkbox" id="t-on" ${T.settings.enabled ? 'checked' : ''}><span></span></label></div>
         <label class="field" style="margin-top:12px"><span>พอร์ต</span><input class="input mono" id="t-port" type="number" value="${T.settings.port || 5055}"></label>
         ${st.running ? `<div class="alert ok"><div>เปิดอยู่ — ให้ทีมเปิด<br>${st.urls.map(u => `<code>${esc(u)}</code>`).join('<br>')}</div></div>` : st.error ? `<div class="alert err">${esc(st.error)}</div>` : '<div class="alert">ปิดอยู่ — ใช้ได้เฉพาะเครื่องนี้</div>'}
-        <div class="small muted">ผ่านอินเทอร์เน็ต: ใช้ Tailscale แล้วเปิด <code>http://ชื่อเครื่อง:${T.settings.port || 5055}/</code> · เครื่องนี้ยังใช้ได้โดยไม่ต้องล็อกอิน</div>
+        <div class="small" style="color:var(--warn);margin-bottom:6px">การเชื่อมต่อผ่าน Wi-Fi เป็น HTTP ไม่เข้ารหัส — ใช้ในเครือข่ายที่ไว้ใจได้ หรือใช้ผ่าน Tailscale (เข้ารหัสให้)</div><div class="small muted">ผ่านอินเทอร์เน็ต: ใช้ Tailscale แล้วเปิด <code>http://ชื่อเครื่อง:${T.settings.port || 5055}/</code> · เครื่องนี้ยังใช้ได้โดยไม่ต้องล็อกอิน</div>
         <button class="btn primary" id="t-save" style="margin-top:12px">บันทึก</button>
         <div class="sect-title">บทบาท</div>${Object.entries(T.roles).map(([k, l]) => `<div style="margin-bottom:6px"><b>${l}</b><div class="small muted">${ROLE_HINT[k]}</div></div>`).join('')}</div>
       <div class="card"><div class="card-head"><h2>สมาชิกทีม</h2><button class="btn sm primary" id="t-add">${BW_ICON('plus')} เพิ่มคน</button></div>

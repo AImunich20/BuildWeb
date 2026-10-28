@@ -99,7 +99,12 @@ def find_key(request, site):
 def is_owner(request):
     """Requests through the in-app preview (127.0.0.1 only) are the site owner, unless they ask to be treated
     as the public (the API playground does that to show what visitors get)."""
-    return not getattr(request, "is_public", False) and request.META.get("HTTP_X_BW_AS", "").lower() != "public"
+    if getattr(request, "is_public", False) or request.META.get("HTTP_X_BW_AS", "").lower() == "public":
+        return False
+    from . import team
+
+    # over the team server only admins and developers act as the owner; content editors get public rights
+    return team.role_of(request) in ("owner", "admin", "developer")
 
 
 def client_ip(request):
@@ -332,6 +337,15 @@ def route_shop(request, site, action):
     user = getattr(request, "_bw_user", None)
     if parts == ["config"]:
         return ok(shop.public_config(site))
+    if parts == ["coupon"]:  # preview of a discount at checkout (the real one is computed in checkout)
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            sub = Decimal(str(request.GET.get("subtotal") or "0"))
+        except InvalidOperation:
+            sub = Decimal("0")
+        c, disc = shop.apply_coupon(s, request.GET.get("code"), sub)
+        return ok({"code": c["code"] if c else "", "discount": float(disc)})
     if parts == ["checkout"] and request.method == "POST":
         if not is_owner(request):
             members.throttle(f"checkout:{site.id}:{client_ip(request)}", limit=20, window=600)
@@ -532,8 +546,22 @@ def list_rows(request, col, key, owner, mine=None):
     g = request.GET
     if mine is not None and col.mode == Collection.LIVE:
         raise ApiError(409, "unsupported", "สิทธิ์ “เจ้าของแถว” ใช้ได้กับชุดข้อมูลที่เก็บใน BuildWeb เท่านั้น")
-    entries = all_rows(col, owner, mine)
     names = set(col.field_names)
+    try:
+        per = max(1, min(MAX_PER_PAGE, int(g.get("per_page") or 20)))
+        page = max(1, int(g.get("page") or 1))
+    except ValueError:
+        raise ApiError(400, "bad_request", "page และ per_page ต้องเป็นตัวเลข")
+    plain = col.mode == Collection.COPY and not (g.get("filter") or g.get("q") or g.get("sort") or any(n in names for n in g))
+    if plain:  # nothing to filter or sort: let the database page (fast on big collections)
+        qs = col.records.filter(owner=mine) if mine is not None else (col.records.all() if owner else col.records.filter(approved=True))
+        total = qs.count()
+        exp, only = expand_set(request), fields_set(request)
+        user = getattr(request, "_bw_user", None)
+        chunk = [(r.id, r.data, r) for r in qs.order_by("position", "id")[(page - 1) * per: page * per]]
+        return ok({"items": [item(col, e, owner, exp, only, key, user=user) for e in chunk], "page": page, "per_page": per,
+                   "total": total, "total_pages": max(1, math.ceil(total / per))})
+    entries = all_rows(col, owner, mine)
     hidden = {f["name"] for f in col.fields if f.get("hidden")} if not owner else set()
     for name, value in g.items():  # ?category=coffee
         if name in names and name not in hidden:
@@ -546,11 +574,6 @@ def list_rows(request, col, key, owner, mine=None):
         entries = [e for e in entries if any(q in str(v).lower() for k, v in e[1].items() if k not in hidden)]
     if g.get("sort"):
         entries = sort_rows(entries, g["sort"])
-    try:
-        per = max(1, min(MAX_PER_PAGE, int(g.get("per_page") or 20)))
-        page = max(1, int(g.get("page") or 1))
-    except ValueError:
-        raise ApiError(400, "bad_request", "page และ per_page ต้องเป็นตัวเลข")
     total = len(entries)
     chunk = entries[(page - 1) * per: page * per]
     exp, only = expand_set(request), fields_set(request)
