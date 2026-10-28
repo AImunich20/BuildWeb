@@ -54,6 +54,13 @@ user in Thai. The UI copy is in Thai.
     signed, retried, synchronous in tests), `Connector` (external JSON → collection), schedules + `Job`s run by
     `start_scheduler()` (started in run.py), `RunLog`. Functions (`Function`) run via `fn_runner.py` in a
     `python -I` subprocess that calls the site's API on 127.0.0.1 as owner; tests mock `logic.http_request`.
+  - `backup.py`: .bwsite bundles (`export_site`/`import_site` modes new/replace/deploy; deploy keeps
+    `server_owned()` collections' rows, members, submissions, stats), daily `backup_all_due()` from the scheduler.
+    `crypto.py`: Fernet ("enc:" prefix) for Site.secrets, DataConnection.password, publish password/token.
+  - Server mode: `backend/server.py` sets `BUILDWEB_SERVER=1` (settings.SERVER_MODE: no auto sign-in, DB from
+    `BUILDWEB_DATABASE_URL`, `BUILDWEB_DOMAINS` host→site). `server_api.py` = /__bw/health|deploy|pull (Bearer
+    `BUILDWEB_DEPLOY_TOKEN`); `serverkit.py` builds the Docker kit. Desktop deploys through publish target "server".
+    Docker itself is not available on the dev Mac: the kit is tested by running server.py directly.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

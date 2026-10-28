@@ -1191,3 +1191,160 @@ class LogicTests(TestCase):
             ok, msg = logic.run_job(ping)
         self.assertTrue(ok)
         self.assertEqual(h.call_args[0][1], "https://ping.example/s3cret")
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class ServerTests(TestCase):
+    """v0.5 phase 4: encrypted secrets, backups, deploy to a server, server kit, database URLs."""
+
+    def setUp(self):
+        from . import generate
+
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Deploy Shop", "business")
+        self.authors = Collection.objects.create(site=self.site, name="A", slug="authors", fields=[{"name": "name", "type": "text"}])
+        a = Record.objects.create(collection=self.authors, data={"name": "Ann"})
+        self.posts = Collection.objects.create(site=self.site, name="P", slug="posts", fields=[
+            {"name": "title", "type": "text"}, {"name": "author", "type": "relation", "relation": "authors"}])
+        Record.objects.create(collection=self.posts, data={"title": "Hello", "author": a.id})
+        self.orders = Collection.objects.create(site=self.site, name="Orders", slug="orders", fields=[{"name": "item", "type": "text"}],
+                                                options={"forms": True})
+        Record.objects.create(collection=self.orders, data={"item": "desktop test order"})
+        generate.create_pages_for(self.posts)
+        from . import members
+
+        members.create_user(self.site, "m@x.io", "secret123", "M", verified=True)
+        self.c.post(f"/api/sites/{self.site.id}/logic/secrets", json.dumps({"name": "TOKEN", "value": "abc123"}), content_type="application/json")
+        self.c.post(f"/api/sites/{self.site.id}/logic/functions", json.dumps({"slug": "hi", "code": "def handler(r, bw):\n    return {}\n"}),
+                    content_type="application/json")
+        up = self.c.post(f"/api/sites/{self.site.id}/assets/upload", {"file": SimpleUploadedFile("logo.png", b"\x89PNG fake", "image/png")})
+        self.assertEqual(up.status_code, 200)
+        self.site.refresh_from_db()
+
+    def test_secrets_are_encrypted_at_rest(self):
+        from . import crypto, logic
+
+        stored = Site.objects.get(pk=self.site.pk).secrets["TOKEN"]
+        self.assertTrue(stored.startswith("enc:"))
+        self.assertNotIn("abc123", stored)
+        self.assertEqual(logic.fill_secrets(self.site, "x {{secret.TOKEN}}"), "x abc123")
+        self.assertEqual(crypto.decrypt("enc:garbage"), "")
+        self.assertEqual(crypto.decrypt("plain"), "plain")  # values from older versions still work
+
+    def test_backup_roundtrip_new_and_replace(self):
+        from . import backup
+
+        data = backup.export_bytes(self.site)
+        copy = backup.import_site(BytesIO(data), mode="new")
+        self.assertNotEqual(copy.slug, self.site.slug)
+        self.assertEqual(copy.pages.count(), self.site.pages.count())
+        self.assertEqual(copy.members.get().email, "m@x.io")
+        self.assertEqual(copy.functions.get().slug, "hi")
+        self.assertEqual(crypto_value(copy, "TOKEN"), "abc123")
+        post = copy.collections.get(slug="posts").records.get()
+        self.assertEqual(copy.collections.get(slug="authors").records.get().id, post.data["author"])  # relation remapped
+        self.assertTrue(copy.pages.filter(collection__slug="posts", collection__site=copy).exists())
+        asset = copy.assets.get()
+        self.assertTrue((TMP_MEDIA / asset.file.name).is_file())
+        # replace = restore in place
+        self.site.pages.update(html="<p>broken</p>")
+        restored = backup.import_site(BytesIO(data), mode="replace")
+        self.assertEqual(restored.slug, self.site.slug)
+        self.assertNotIn("broken", restored.home_page().html)
+        self.assertEqual(Site.objects.filter(slug=self.site.slug).count(), 1)
+
+    def test_deploy_keeps_server_data(self):
+        from . import backup, members
+
+        backup.import_site(BytesIO(backup.export_bytes(self.site)), mode="deploy")  # the same DB plays the server
+        live = Site.objects.get(slug=self.site.slug)
+        Record.objects.create(collection=live.collections.get(slug="orders"), data={"item": "real customer order"})
+        members.create_user(live, "customer@x.io", "secret123", "C", verified=True)
+        home = live.home_page()
+        home.html = "<h1>NEW DESIGN</h1>"
+        home.save()
+        live.collections.get(slug="posts").records.update(data={"title": "Edited post", "author": None})
+        bundle = backup.export_bytes(live)
+        # meanwhile the live site took one more order
+        Record.objects.create(collection=live.collections.get(slug="orders"), data={"item": "late order"})
+        site = backup.import_site(BytesIO(bundle), mode="deploy")
+        self.assertIn("NEW DESIGN", site.home_page().html)
+        self.assertEqual(site.collections.get(slug="posts").records.get().data["title"], "Edited post")
+        items = sorted(r["item"] for r in site.collections.get(slug="orders").records.values_list("data", flat=True))
+        self.assertIn("late order", items)  # server-side rows survive the deploy
+        self.assertTrue(site.members.filter(email="customer@x.io").exists())
+
+    def test_server_api_and_publish_server(self):
+        import os
+        from unittest import mock
+
+        from django.test import RequestFactory
+
+        from . import backup, publish, server_api
+
+        rf = RequestFactory()
+        bundle = backup.export_bytes(self.site)
+        with mock.patch.dict(os.environ, {"BUILDWEB_DEPLOY_TOKEN": "t" * 32}):
+            bad = server_api.deploy(rf.post("/__bw/deploy", bundle, content_type="application/zip", HTTP_AUTHORIZATION="Bearer nope"))
+            self.assertEqual(bad.status_code, 401)
+            ok = server_api.deploy(rf.post("/__bw/deploy", bundle, content_type="application/zip", HTTP_AUTHORIZATION="Bearer " + "t" * 32))
+            self.assertEqual(json.loads(ok.content)["site"], self.site.slug)
+            h = json.loads(server_api.health(rf.get("/__bw/health", HTTP_AUTHORIZATION="Bearer " + "t" * 32)).content)
+            self.assertIn(self.site.slug, [s["slug"] for s in h["sites"]])
+            pulled = json.loads(server_api.pull(rf.get(f"/__bw/pull?site={self.site.slug}", HTTP_AUTHORIZATION="Bearer " + "t" * 32)).content)
+            self.assertEqual(list(pulled["collections"]), ["orders"])
+            self.assertNotIn("password", json.dumps(pulled.get("secrets", {})))
+        # desktop side: deploy through publish.run with the HTTP layer mocked
+        self.c.post(f"/api/sites/{self.site.id}/publish", json.dumps({"target": "server", "url": "https://shop.example", "token": "t" * 32}),
+                    content_type="application/json")
+        self.site.refresh_from_db()
+        self.assertTrue(self.site.publish["server"]["token"].startswith("enc:"))
+        calls = []
+
+        def fake(method, url, token, data=None, raw=None, content_type=None, timeout=60):
+            calls.append((method, url, token))
+            return (200, {"version": "x", "database": "postgresql"}) if url.endswith("/health") else (200, {"site": self.site.slug, "pages": 3, "collections": 3})
+
+        with mock.patch.object(publish, "http", side_effect=fake):
+            res = publish.run(self.site, "server")
+        self.assertEqual(res["url"], "https://shop.example/")
+        self.assertEqual(calls[1][2], "t" * 32)
+        apply = backup.apply_pull(self.site, pulled)
+        self.assertEqual(apply["rows"], 1)
+
+    def test_server_kit_and_database_urls(self):
+        import zipfile
+
+        from buildweb import config
+
+        r = self.c.get(f"/api/sites/{self.site.id}/server/kit.zip?domain=shop.example")
+        z = zipfile.ZipFile(BytesIO(r.content))
+        names = z.namelist()
+        for n in ("buildweb-server/Dockerfile", "buildweb-server/docker-compose.yml", "buildweb-server/Caddyfile",
+                  "buildweb-server/backend/server.py", f"buildweb-server/seed/{self.site.slug}.bwsite"):
+            self.assertIn(n, names)
+        self.assertFalse(any(n.endswith("tests.py") or "/.venv/" in n for n in names))
+        env = z.read("buildweb-server/.env").decode()
+        self.assertIn(f"BUILDWEB_DOMAINS=shop.example={self.site.slug}", env)
+        self.assertRegex(env, r"BUILDWEB_DEPLOY_TOKEN=\S{30,}")
+        pg = config.database_from_url("postgres://bw:p%40ss@db:5432/shop")
+        self.assertEqual((pg["ENGINE"], pg["PASSWORD"], pg["HOST"], pg["NAME"]), ("django.db.backends.postgresql", "p@ss", "db", "shop"))
+        self.assertEqual(config.database_from_url("mysql://root@127.0.0.1:3307/bw")["ENGINE"], "builder.db.mysql")
+        self.assertEqual(config.database_from_url("sqlite:////data/x.sqlite3")["NAME"], "/data/x.sqlite3")
+
+    def test_backups_api(self):
+        r = self.c.post(f"/api/sites/{self.site.id}/backups", json.dumps({"action": "create"}), content_type="application/json").json()
+        self.assertEqual(len(r["backups"]), 1)
+        name = r["backups"][0]["name"]
+        self.assertEqual(self.c.get(f"/api/sites/{self.site.id}/backups/{name}").status_code, 200)
+        dl = self.c.get(f"/api/sites/{self.site.id}/backup.bwsite")
+        up = self.c.post("/api/import/bwsite", {"file": SimpleUploadedFile("x.bwsite", dl.content)}).json()
+        self.assertTrue(up["ok"])
+        self.assertEqual(Site.objects.count(), 2)
+
+
+def crypto_value(site, name):
+    from . import crypto
+
+    return crypto.decrypt(site.secrets[name])

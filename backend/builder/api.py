@@ -82,6 +82,8 @@ def publish_json(site):
         cfg = dict(cfg or {})
         if cfg.pop("password", None):
             cfg["password_set"] = True
+        if cfg.pop("token", None):
+            cfg["token_set"] = True
         out[target] = cfg
     return out
 
@@ -966,7 +968,9 @@ def connection_save(request):
     c.port = int(d.get("port") or 3306)
     c.user = (d.get("user") or "root").strip()
     if d.get("password") or not c.pk:
-        c.password = d.get("password") or ""
+        from .crypto import encrypt
+
+        c.password = encrypt(d.get("password") or "")
     c.database = (d.get("database") or "").strip()
     c.socket = (d.get("socket") or "").strip()
     data.list_databases(c.as_config(""))  # fails with a clear message when unreachable
@@ -1158,6 +1162,7 @@ PUBLISH_FIELDS = {
     "github": ("repo", "branch", "url", "pages"),
     "netlify": ("site_id", "name", "url"),
     "ftp": ("host", "port", "user", "password", "path", "tls", "url"),
+    "server": ("url", "token", "site_url"),
 }
 
 
@@ -1178,8 +1183,12 @@ def publish_settings(request, site_id):
                 v = as_bool(v)
             elif k == "port":
                 v = int(v or 21)
-            elif k == "password" and not v:
+            elif k in ("password", "token") and not v:
                 continue  # empty = keep the saved one
+            elif k in ("password", "token"):
+                from .crypto import encrypt
+
+                v = encrypt(str(v))
             else:
                 v = str(v or "").strip()
             cur[k] = v
@@ -1220,7 +1229,10 @@ def publish_job(request, job_id):
 @api
 def publish_test_ftp(request, site_id):
     site = get_object_or_404(Site, pk=site_id)
+    from .crypto import decrypt
+
     cfg = {**((site.publish or {}).get("ftp") or {}), **{k: v for k, v in body(request).items() if v not in ("", None)}}
+    cfg["password"] = decrypt(cfg.get("password", ""))
     try:
         ftp = publish.ftp_connect(cfg)
         where = ftp.pwd()
@@ -1487,7 +1499,7 @@ def logic_state(site):
     from . import logic
 
     return {
-        "secrets": [{"name": k, "preview": (v[:3] + "…" if len(v) > 6 else "•••")} for k, v in sorted((site.secrets or {}).items())],
+        "secrets": [{"name": k, "preview": "•" * 8} for k in sorted((site.secrets or {}))],
         "webhooks": [{"id": h.id, "name": h.name, "url": h.url, "events": h.events, "collections": h.collections,
                       "headers": h.headers, "signing": bool(h.signing_secret), "active": h.active} for h in site.webhooks.all()],
         "connectors": [{"id": c.id, "name": c.name, "url": c.url, "method": c.method, "headers": c.headers, "body": c.body,
@@ -1526,7 +1538,9 @@ def secret_save(request, site_id):
             raise ApiError("ชื่อใช้ A-Z 0-9 _ และขึ้นต้นด้วยตัวอักษร เช่น LINE_TOKEN", field="name")
         if not d.get("value"):
             raise ApiError("ใส่ค่าลับ", field="value")
-        secrets_[name] = str(d["value"])[:4000]
+        from .crypto import encrypt
+
+        secrets_[name] = encrypt(str(d["value"])[:4000])
     site.secrets = secrets_
     site.save(update_fields=["secrets"])
     return logic_state(site)
@@ -1694,3 +1708,113 @@ def run_logs(request, site_id):
         qs = qs.filter(kind=request.GET["kind"])
     return {"logs": [{"id": x.id, "kind": x.kind, "ref": x.ref, "ok": x.ok, "status": x.status, "ms": x.ms,
                       "message": x.message, "detail": x.detail[:6000], "at": x.at.isoformat()} for x in qs[:150]]}
+
+
+# --- backups & BuildWeb server --------------------------------------------------------------------
+
+def download(data, filename, ctype="application/zip"):
+    from django.http import HttpResponse
+
+    resp = HttpResponse(data, content_type=ctype)
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
+def site_backup_download(request, site_id):
+    from . import backup
+
+    site = get_object_or_404(Site, pk=site_id)
+    data = backup.export_bytes(site, include_secrets=request.GET.get("secrets", "1") == "1")
+    return download(data, f"{site.slug}-{timezone_now():%Y%m%d-%H%M}.bwsite")
+
+
+def timezone_now():
+    from django.utils import timezone
+
+    return timezone.localtime()
+
+
+@api
+def site_backups(request, site_id):
+    from . import backup
+
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request)
+        if d.get("action") == "create":
+            backup.auto_backup(site)
+        elif d.get("action") == "restore":
+            path = backup.backup_dir(site) / Path(d.get("name", "")).name
+            if not path.is_file():
+                raise ApiError("ไม่พบไฟล์สำรองนี้")
+            backup.auto_backup(site)  # what is there now can be restored too
+            site = backup.import_site(path, mode="replace")
+            return {"site_id": site.id, "backups": backup.list_backups(site)}
+    return {"backups": backup.list_backups(site), "folder": str(backup.backup_dir(site)),
+            "auto": config.load()["app"].get("auto_backup", True)}
+
+
+def site_backup_file(request, site_id, name):
+    from . import backup
+
+    site = get_object_or_404(Site, pk=site_id)
+    path = backup.backup_dir(site) / Path(name).name
+    if not path.is_file():
+        from django.http import Http404
+
+        raise Http404
+    return download(path.read_bytes(), path.name)
+
+
+@require_POST
+@api
+def import_bwsite(request):
+    from . import backup
+
+    f = request.FILES.get("file")
+    if not f:
+        raise ApiError("เลือกไฟล์ .bwsite")
+    site = backup.import_site(f, mode="new")
+    return {"site": site_json(site), "url": f"/sites/{site.id}/"}
+
+
+def server_cfg(site):
+    from .crypto import decrypt
+
+    cfg = dict((site.publish or {}).get("server") or {})
+    cfg["token"] = decrypt(cfg.get("token", ""))
+    return cfg
+
+
+@require_POST
+@api
+def server_test(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    try:
+        info = publish.server_call(server_cfg(site), "GET", "/__bw/health", timeout=15)
+    except publish.PublishError as e:
+        raise ApiError(str(e))
+    on = any(s["slug"] == site.slug for s in info.get("sites", []))
+    return {"message": f"เชื่อมต่อได้ · BuildWeb {info.get('version')} · ฐานข้อมูล {info.get('database')} · "
+                       + ("มีเว็บนี้แล้ว" if on else "ยังไม่มีเว็บนี้ (กด Deploy)")}
+
+
+@require_POST
+@api
+def server_pull(request, site_id):
+    from . import backup
+
+    site = get_object_or_404(Site, pk=site_id)
+    try:
+        d = publish.server_call(server_cfg(site), "GET", f"/__bw/pull?site={site.slug}", timeout=120)
+    except publish.PublishError as e:
+        raise ApiError(str(e))
+    n = backup.apply_pull(site, d)
+    return {"message": f"ดึงข้อมูลจากเซิร์ฟเวอร์แล้ว: {n['rows']} แถว · สมาชิก {n['members']} · ข้อความฟอร์ม {n['submissions']}"}
+
+
+def server_kit(request, site_id):
+    from . import serverkit
+
+    site = get_object_or_404(Site, pk=site_id)
+    return download(serverkit.build_kit(site, request.GET.get("domain", "")), f"buildweb-server-{site.slug}.zip")

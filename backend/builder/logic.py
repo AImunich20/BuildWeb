@@ -39,8 +39,14 @@ RETRIES = (2, 10, 30)  # seconds before the 2nd, 3rd and 4th attempt
 
 # --- secrets & logs -------------------------------------------------------------------------------
 
+def site_secrets(site):
+    from .crypto import decrypt_dict
+
+    return decrypt_dict(site.secrets)
+
+
 def fill_secrets(site, value):
-    secrets_ = site.secrets or {}
+    secrets_ = site_secrets(site)
     if isinstance(value, dict):
         return {k: fill_secrets(site, v) for k, v in value.items()}
     if not isinstance(value, str):
@@ -268,7 +274,7 @@ def call_function(fn, payload):
     (status, body, logs)."""
     site = fn.site
     api_base = f"http://127.0.0.1:{settings.ADMIN_PORT}/preview/{site.slug}/api/v1/"
-    job = {"code": fn.code, "request": payload, "api_base": api_base, "secrets": site.secrets or {}}
+    job = {"code": fn.code, "request": payload, "api_base": api_base, "secrets": site_secrets(site)}
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "LANG")}
     env["PYTHONIOENCODING"] = "utf-8"
     started = time.time()
@@ -390,16 +396,22 @@ def start_scheduler(interval=30):
         return
 
     def loop():
+        ticks = 0
         while True:
             time.sleep(interval)
             close_old_connections()
             try:
                 for job in Job.objects.select_related("site").filter(enabled=True, next_run__lte=timezone.now()):
                     run_job(job)
+                if ticks % max(1, 3600 // interval) == 0:  # hourly check, one backup per site per day
+                    from .backup import backup_all_due
+
+                    backup_all_due()
             except Exception as e:
                 log.warning("scheduler: %s", e)
             finally:
                 close_old_connections()
+                ticks += 1
 
     _scheduler["thread"] = threading.Thread(target=loop, daemon=True, name="buildweb-jobs")
     _scheduler["thread"].start()

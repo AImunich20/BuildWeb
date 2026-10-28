@@ -70,6 +70,18 @@ if DB_FAILED and not os.environ.get("BUILDWEB_DB_OVERRIDE"):
 DATABASES = {"default": config.django_database(_db)}
 DB_ENGINE = _db.get("engine", "sqlite")
 
+# --- server mode (server.py: Docker/VPS) ----------------------------------------------------------
+# The same app, headless: every request is a public site request, the BuildWeb editor is not served, and the
+# desktop app deploys to /__bw/deploy with BUILDWEB_DEPLOY_TOKEN. The database can come from a URL
+# (postgres://, mysql://, sqlite:///path).
+SERVER_MODE = os.environ.get("BUILDWEB_SERVER") == "1"
+if os.environ.get("BUILDWEB_DATABASE_URL"):
+    DATABASES = {"default": config.database_from_url(os.environ["BUILDWEB_DATABASE_URL"])}
+    DB_ENGINE = DATABASES["default"]["ENGINE"].rsplit(".", 1)[-1]
+# "shop.com=bean-cafe,www.shop.com=bean-cafe": which site answers on which domain
+DOMAINS = {k.strip().lower(): v.strip() for k, _, v in
+           (x.partition("=") for x in os.environ.get("BUILDWEB_DOMAINS", "").split(",") if "=" in x)}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_PASSWORD_VALIDATORS = []
 
@@ -92,6 +104,14 @@ SESSION_COOKIE_NAME = "buildweb_session"
 CSRF_COOKIE_NAME = "buildweb_csrf"
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 365
 X_FRAME_OPTIONS = "SAMEORIGIN"
+
+if SERVER_MODE:
+    STATIC_URL = "/__bw/static/"
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # Caddy terminates HTTPS
+    CSRF_TRUSTED_ORIGINS = [f"{s}://{d}" for d in DOMAINS for s in ("https", "http")] + [
+        o.strip() for o in os.environ.get("BUILDWEB_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = os.environ.get("BUILDWEB_HTTPS", "1") == "1"
+    SESSION_COOKIE_AGE = 60 * 60 * 12
 
 LOGGING = {
     "version": 1,

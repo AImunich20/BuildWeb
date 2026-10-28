@@ -1,0 +1,2 @@
+# Extra packages for the Docker/VPS server image (server.py)
+psycopg[binary]==3.2.3

@@ -56,7 +56,8 @@ DEFAULTS = {
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "", "from": "", "to": "", "tls": True},
     },
     "app": {
-        "auto_update": True,  # read by the desktop shell: install patches without asking (then offer a restart)
+        "auto_update": True,
+        "auto_backup": True,   # one .bwsite copy of every site per day in <data>/backups (14 kept)  # read by the desktop shell: install patches without asking (then offer a restart)
     },
     "export": {
         "last_target": "downloads",
@@ -120,6 +121,25 @@ def update(section, values):
     raw[section] = _merge(raw.get(section, {}), values)
     _write(raw)
     return load()
+
+
+def database_from_url(url):
+    """postgres://user:pass@host:5432/name · mysql://user:pass@host:3306/name · sqlite:////data/db.sqlite3"""
+    from urllib.parse import unquote, urlparse
+
+    u = urlparse(url)
+    if u.scheme in ("postgres", "postgresql"):
+        return {"ENGINE": "django.db.backends.postgresql", "NAME": u.path.lstrip("/"), "USER": unquote(u.username or ""),
+                "PASSWORD": unquote(u.password or ""), "HOST": u.hostname or "localhost", "PORT": str(u.port or 5432),
+                "CONN_MAX_AGE": 60, "CONN_HEALTH_CHECKS": True}
+    if u.scheme == "mysql":
+        return django_database({"engine": "mysql", "host": u.hostname or "127.0.0.1", "port": u.port or 3306,
+                                "user": unquote(u.username or "root"), "password": unquote(u.password or ""),
+                                "name": u.path.lstrip("/") or "buildweb"})
+    if u.scheme == "sqlite":
+        return {"ENGINE": "django.db.backends.sqlite3", "NAME": ("/" + u.path.lstrip("/")) if u.path.strip("/") else str(DATA_DIR / "db.sqlite3"),
+                "OPTIONS": {"timeout": 20}}
+    raise ValueError(f"BUILDWEB_DATABASE_URL ไม่รองรับ: {u.scheme}")
 
 
 def django_database(db):

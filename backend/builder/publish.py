@@ -292,7 +292,39 @@ def publish_ftp(site, cfg, token, log):
     return {"url": cfg.get("url") or "", "files": len(files)}
 
 
-RUNNERS = {"github": publish_github, "netlify": publish_netlify, "ftp": publish_ftp}
+# --- BuildWeb server (server.py on a VPS/Docker) ---------------------------------------------------
+
+def server_call(cfg, method, path, raw=None, timeout=60):
+    url = (cfg.get("url") or "").rstrip("/")
+    if not url.startswith(("https://", "http://")):
+        raise PublishError("ใส่ที่อยู่เซิร์ฟเวอร์ เช่น https://myshop.com")
+    token = cfg.get("token") or ""
+    if not token:
+        raise PublishError("ใส่ deploy token (BUILDWEB_DEPLOY_TOKEN ในไฟล์ .env ของเซิร์ฟเวอร์)")
+    st, body = http(method, url + path, token, raw=raw, content_type="application/zip" if raw is not None else None, timeout=timeout)
+    if st == 401:
+        raise PublishError("deploy token ไม่ถูกต้อง")
+    if st == 404:
+        raise PublishError("ไม่พบ BuildWeb server ที่ที่อยู่นี้ (ตรวจว่าใช้ชุดติดตั้งเซิร์ฟเวอร์และ docker compose ทำงานอยู่)")
+    if st >= 400:
+        raise PublishError(f"เซิร์ฟเวอร์ตอบ {st}: {_msg(body)}")
+    return body
+
+
+def publish_server(site, cfg, token, log):
+    from . import backup
+
+    info = server_call(cfg, "GET", "/__bw/health", timeout=20)
+    log(f"เชื่อมต่อเซิร์ฟเวอร์ได้ (BuildWeb {info.get('version')}, ฐานข้อมูล {info.get('database', '?')})")
+    data = backup.export_bytes(site)
+    log(f"ส่งเว็บ {len(data) // 1024:,} KB")
+    res = server_call(cfg, "POST", f"/__bw/deploy?site={site.slug}", raw=data, timeout=600)
+    log(("สร้างเว็บใหม่บนเซิร์ฟเวอร์" if res.get("created") else "อัปเดตเว็บบนเซิร์ฟเวอร์") +
+        f" · {res.get('pages')} หน้า · {res.get('collections')} ชุดข้อมูล (ข้อมูลที่เกิดบนเซิร์ฟเวอร์ไม่ถูกทับ)")
+    return {"url": cfg.get("site_url") or cfg["url"].rstrip("/") + "/", "files": res.get("pages", 0)}
+
+
+RUNNERS = {"github": publish_github, "netlify": publish_netlify, "ftp": publish_ftp, "server": publish_server}
 
 
 # --- settings & jobs ------------------------------------------------------------------------------
@@ -303,7 +335,12 @@ def tokens():
 
 def run(site, target, log=lambda m: None):
     """Publish synchronously; returns the result dict (also stored in Site.publish[target]["last"])."""
+    from .crypto import decrypt
+
     cfg = dict((site.publish or {}).get(target) or {})
+    for k in ("password", "token"):
+        if cfg.get(k):
+            cfg[k] = decrypt(cfg[k])
     token = tokens().get(f"{target}_token", "")
     if not site.base_url and cfg.get("url"):
         site.base_url = cfg["url"]  # so this very upload already has sitemap.xml / absolute share links
@@ -371,4 +408,4 @@ def job(job_id):
     return _jobs.get(job_id)
 
 
-LABELS = {"github": "GitHub Pages", "netlify": "Netlify", "ftp": "FTP"}
+LABELS = {"github": "GitHub Pages", "netlify": "Netlify", "ftp": "FTP", "server": "เซิร์ฟเวอร์ของฉัน"}

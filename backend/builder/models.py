@@ -297,7 +297,9 @@ class DataConnection(models.Model):
         return f"{self.name} ({self.user}@{self.host}:{self.port}/{self.database})"
 
     def as_config(self, database=None):
-        return {"host": self.host, "port": self.port, "user": self.user, "password": self.password,
+        from .crypto import decrypt
+
+        return {"host": self.host, "port": self.port, "user": self.user, "password": decrypt(self.password),
                 "name": database if database is not None else self.database, "socket": self.socket}
 
 

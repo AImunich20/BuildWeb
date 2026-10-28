@@ -1747,7 +1747,8 @@ return {...}  หรือ  return 201, {...}</div></details>
   const PUB_TARGETS = [
     ['github', 'GitHub Pages', 'ฟรี · ได้ลิงก์ ชื่อ.github.io · ใช้กับ Cloudflare Pages ได้', 'github'],
     ['netlify', 'Netlify', 'ฟรี · ได้ลิงก์ ชื่อ.netlify.app · ผูกโดเมนเองได้', 'cloud'],
-    ['ftp', 'FTP / โฮสติ้งที่เช่า', 'cPanel, Plesk, DirectAdmin หรือโฮสต์ใดก็ได้', 'server'],
+    ['ftp', 'FTP / โฮสติ้งที่เช่า', 'cPanel, Plesk, DirectAdmin หรือโฮสต์ใดก็ได้', 'folder'],
+    ['server', 'เซิร์ฟเวอร์ของฉัน', 'VPS + Docker · backend ครบ (API, สมาชิก, ฟังก์ชัน)', 'server'],
   ];
   let pubSel = null;
   async function drawPublish() {
@@ -1759,7 +1760,7 @@ return {...}  หรือ  return 201, {...}</div></details>
     box.innerHTML = `<div class="row between"><div><h2>เผยแพร่ขึ้นอินเทอร์เน็ตด้วยปุ่มเดียว</h2>
         <div class="hint" style="margin:0">อัปโหลดเว็บไปโฮสต์ฟรีหรือโฮสต์ที่เช่าไว้ — เว็บออนไลน์ตลอดโดยไม่ต้องเปิดเครื่องนี้ทิ้งไว้</div></div>
         ${P.base_url ? `<a class="btn sm" href="${esc(P.base_url)}" target="_blank">${BW_ICON('external')} ${esc(P.base_url)}</a>` : ''}</div>
-      <div class="pub-tiles">${PUB_TARGETS.map(([k, l, d, ic]) => { const last = (P.publish[k] || {}).last;
+      <div class="pub-tiles" style="grid-template-columns:repeat(4,1fr)">${PUB_TARGETS.map(([k, l, d, ic]) => { const last = (P.publish[k] || {}).last;
         return `<button class="pub-tile ${k === pubSel ? 'sel' : ''}" data-t="${k}">${BW_ICON(ic, 20)}<div><b>${l}</b><span>${d}</span>
           ${last ? `<span class="badge ok" style="margin-top:6px">เผยแพร่ ${ago(last.at)}</span>` : ''}</div></button>`; }).join('')}</div>
       <div id="pub-form"></div><div id="pub-log"></div>`;
@@ -1791,15 +1792,32 @@ return {...}  หรือ  return 201, {...}</div></details>
         <label class="field"><span>รหัสผ่าน ${cfg.password_set ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span><input class="input mono" type="password" name="password" placeholder="${cfg.password_set ? 'เว้นว่าง = ใช้รหัสเดิม' : ''}" autocomplete="off"></label>
         <label class="field"><span>ที่อยู่เว็บ</span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://www.myshop.com/"></label></div>
       <label class="check"><input type="checkbox" name="tls" ${cfg.tls ? 'checked' : ''}>ใช้ FTPS (เข้ารหัส) — แนะนำถ้าโฮสต์รองรับ</label>`;
+    if (t === 'server') html = `<div class="alert info" style="margin-bottom:10px"><div>เว็บแบบมี backend: REST API, สมาชิก, ฟอร์ม, ฟังก์ชัน และงานตั้งเวลา ทำงานบนเซิร์ฟเวอร์ของคุณตลอด 24 ชม. · Deploy แล้วข้อมูลที่เกิดบนเซิร์ฟเวอร์ (คำสั่งซื้อ สมาชิก ข้อความฟอร์ม) ไม่ถูกทับ</div></div>
+      <div class="row" style="margin-bottom:12px;flex-wrap:nowrap;gap:8px"><input class="input mono" id="kit-domain" placeholder="โดเมน เช่น myshop.com (ไม่บังคับ)" style="max-width:320px">
+        <a class="btn" id="kit-dl" href="#">${BW_ICON('download')} ดาวน์โหลดชุดติดตั้งเซิร์ฟเวอร์</a><span class="small muted">Docker + HTTPS อัตโนมัติ · มีคู่มือภาษาไทยในไฟล์</span></div>
+      <div class="grid g3" style="gap:0 14px"><label class="field"><span>ที่อยู่เซิร์ฟเวอร์</span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://myshop.com"></label>
+        <label class="field"><span>Deploy token ${cfg.token_set ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span><input class="input mono" type="password" name="token" placeholder="${cfg.token_set ? 'เว้นว่าง = ใช้ค่าเดิม' : 'BUILDWEB_DEPLOY_TOKEN จากไฟล์ .env'}" autocomplete="off"></label>
+        <label class="field"><span>ที่อยู่ของเว็บนี้ <small>(ถ้าต่างจากเซิร์ฟเวอร์)</small></span><input class="input mono" name="site_url" value="${esc(cfg.site_url || '')}" placeholder="https://myshop.com/"></label></div>
+      <div class="row" style="gap:8px"><button class="btn sm" type="button" id="srv-test">ทดสอบการเชื่อมต่อ</button><button class="btn sm" type="button" id="srv-pull">${BW_ICON('import')} ดึงข้อมูลจากเซิร์ฟเวอร์</button>
+        ${cfg.url ? `<a class="btn sm" href="${esc(cfg.url.replace(/\/$/, ''))}/__bw/admin/" target="_blank">หลังบ้านบนเซิร์ฟเวอร์</a>` : ''}</div>`;
     const last = cfg.last;
     f.innerHTML = `<div class="pub-form">${html}
-      ${site.form_endpoint ? '' : '<div class="alert info" style="margin-top:10px">ฟอร์มบนเว็บที่เผยแพร่จะส่งข้อมูลได้เมื่อตั้ง “ที่ส่งฟอร์ม” ในแท็บตั้งค่าเว็บ (เช่นลิงก์ Tailscale Funnel ของเครื่องนี้)</div>'}
+      ${site.form_endpoint || t === 'server' ? '' : '<div class="alert info" style="margin-top:10px">ฟอร์มบนเว็บที่เผยแพร่จะส่งข้อมูลได้เมื่อตั้ง “ที่ส่งฟอร์ม” ในแท็บตั้งค่าเว็บ (เช่นลิงก์ Tailscale Funnel ของเครื่องนี้) — หรือใช้ “เซิร์ฟเวอร์ของฉัน” ที่มี backend ในตัว</div>'}
       <div class="row" style="margin-top:12px"><button class="btn primary" id="pub-go">${BW_ICON('cloud')} เผยแพร่เลย</button><button class="btn" id="pub-save">บันทึกการตั้งค่า</button>
         ${t === 'ftp' ? '<button class="btn" id="pub-test">ทดสอบการเชื่อมต่อ</button>' : ''}
         ${last ? `<span class="small muted" style="margin-left:auto">ล่าสุด ${when(last.at)} · ${last.files} ไฟล์ ${last.url ? `· <a href="${esc(last.url)}" target="_blank">${esc(last.url)}</a>` : ''}</span>` : ''}</div></div>`;
     const collect = () => { const d = formData(f); d.target = t; return d; };
     const save = async () => { const r = await api(`/api/sites/${site.id}/publish`, collect()); Object.assign(P, r); return r; };
     document.getElementById('pub-save').onclick = async () => { try { await save(); toast('บันทึกแล้ว', 'ok'); drawPublish(); } catch (e) { showFieldError(f, e); } };
+    if (t === 'server') {
+      const kd = document.getElementById('kit-dl');
+      kd.onclick = e => { e.preventDefault(); location.href = `/api/sites/${site.id}/server/kit.zip?domain=${encodeURIComponent(document.getElementById('kit-domain').value)}`; };
+      document.getElementById('srv-test').onclick = async () => { try { await save(); const r = await api(`/api/sites/${site.id}/server/test`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); } };
+      document.getElementById('srv-pull').onclick = async () => {
+        if (!await confirmBox('ดึงข้อมูลจากเซิร์ฟเวอร์', 'แทนที่ข้อมูลในเครื่องนี้ด้วยข้อมูลที่เกิดบนเซิร์ฟเวอร์: แถวของชุดข้อมูลฝั่งเซิร์ฟเวอร์, สมาชิก, ข้อความจากฟอร์ม และสถิติ', { ok: 'ดึงข้อมูล' })) return;
+        try { await save(); const r = await api(`/api/sites/${site.id}/server/pull`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); }
+      };
+    }
     const test = document.getElementById('pub-test');
     if (test) test.onclick = async () => { try { await save(); const r = await api(`/api/sites/${site.id}/publish/test-ftp`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); } };
     document.getElementById('pub-go').onclick = async (e) => {
@@ -1808,6 +1826,24 @@ return {...}  หรือ  return 201, {...}</div></details>
       catch (err) { showFieldError(f, err); btn.disabled = false; }
     };
   }
+  async function drawBackups() {
+    const box = document.getElementById('bk-card');
+    const r = await api(`/api/sites/${site.id}/backups`);
+    box.innerHTML = `<div class="row between"><div><h2>สำรอง & กู้คืน</h2><div class="hint" style="margin:0">ทั้งเว็บในไฟล์เดียว (.bwsite): หน้า, ธีม, ชุดข้อมูล, ไฟล์, สมาชิก, API keys, ฟังก์ชัน, ข้อความฟอร์ม · ${r.auto ? 'สำรองอัตโนมัติวันละครั้ง เก็บ 14 ชุด' : 'ปิดสำรองอัตโนมัติอยู่'}</div></div>
+        <div class="row"><a class="btn" href="/api/sites/${site.id}/backup.bwsite">${BW_ICON('download')} ดาวน์โหลดไฟล์สำรอง</a><button class="btn" id="bk-now">สำรองตอนนี้</button></div></div>
+      ${r.backups.length ? `<table class="table" style="margin-top:12px"><thead><tr><th>ไฟล์</th><th>เมื่อ</th><th class="num">ขนาด</th><th></th></tr></thead><tbody>
+        ${r.backups.map(b => `<tr><td class="mono small">${esc(b.name)}</td><td class="small">${when(b.at)}</td><td class="num small">${bytes(b.size)}</td>
+          <td><div class="row" style="justify-content:flex-end"><a class="btn sm" href="/api/sites/${site.id}/backups/${encodeURIComponent(b.name)}">ดาวน์โหลด</a><button class="btn sm" data-restore="${esc(b.name)}">กู้คืน</button></div></td></tr>`).join('')}</tbody></table>`
+        : '<div class="small muted" style="margin-top:10px">ยังไม่มีไฟล์สำรองในเครื่อง</div>'}
+      <div class="small muted" style="margin-top:8px">นำไฟล์ .bwsite ไปเปิดในเครื่องอื่น: หน้าภาพรวม › นำเข้าเว็บ · เก็บที่ <code>${esc(r.folder)}</code></div>`;
+    document.getElementById('bk-now').onclick = async () => { await api(`/api/sites/${site.id}/backups`, { action: 'create' }); toast('สำรองแล้ว', 'ok'); drawBackups(); };
+    box.querySelectorAll('[data-restore]').forEach(b => b.onclick = async () => {
+      if (!await confirmBox('กู้คืนเว็บ', `แทนที่เว็บนี้ทั้งหมดด้วย ${esc(b.dataset.restore)}? (ระบบสำรองสภาพปัจจุบันไว้ก่อน กู้กลับได้)`, { ok: 'กู้คืน', danger: true })) return;
+      try { const x = await api(`/api/sites/${site.id}/backups`, { action: 'restore', name: b.dataset.restore }); toast('กู้คืนแล้ว', 'ok'); setTimeout(() => location.href = `/sites/${x.site_id}/export/`, 600); }
+      catch (e) { toast(e.message, 'err'); }
+    });
+  }
+
   function watchJob(job) {
     const out = document.getElementById('pub-log');
     const draw = j => {
@@ -1857,6 +1893,7 @@ return {...}  หรือ  return 201, {...}</div></details>
         <div id="ex-result" style="margin-top:14px"></div>
         <div class="muted small" style="margin-top:12px">โครงสร้าง: <code>index.html</code>, <code>&lt;หน้า&gt;.html</code>, <code>css/</code>, <code>js/site.js</code>, <code>assets/</code></div>
       </div>
+      <div class="card pad" style="grid-column:1/-1" id="bk-card"><div class="muted">กำลังโหลด…</div></div>
       <div class="card pad"><h2>โฮสต์เว็บจากเครื่องนี้</h2><div class="hint">ให้คนในเครือข่ายเดียวกัน (Wi-Fi เดียวกัน) เปิดเว็บได้ทันที</div>
         ${h.running ? `<div class="alert ok"><span class="badge ok"><span class="dot"></span>ออนไลน์</span></div>
           ${siteUrls(h).map(u => `<div class="row" style="margin-bottom:8px;flex-wrap:nowrap"><code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u)}</code><a class="btn sm" href="${esc(u)}" target="_blank">เปิด</a></div>`).join('')}
@@ -1868,6 +1905,7 @@ return {...}  หรือ  return 201, {...}</div></details>
         <div class="muted small" style="margin-top:6px">หน้าตัวอย่างแสดงหน้าฉบับร่างด้วย และเปิดได้เฉพาะเครื่องนี้</div>
       </div></div>`;
     drawPublish();
+    drawBackups();
     const custom = root.querySelector('[name=custom_path]');
     root.querySelectorAll('[name=target]').forEach(r => r.addEventListener('change', () => {
       root.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o.querySelector('input').checked));

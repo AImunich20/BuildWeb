@@ -157,6 +157,27 @@ def handler(request, bw):
 | ดึงข้อมูลจาก API | JSON จาก URL ใดก็ได้ → ชุดข้อมูล · `data.items` · อัปเดตตามคีย์ · ตั้งเวลาดึงซ้ำ |
 | ค่าลับ | `{{secret.NAME}}` ในเซิร์ฟเวอร์เท่านั้น |
 
+### 4.0.3 เซิร์ฟเวอร์ของฉัน, สำรอง & กู้คืน — ใหม่ใน v0.5
+
+<img src="docs/images/server.png" alt="Deploy ไปเซิร์ฟเวอร์" width="100%">
+
+ให้เว็บที่มี backend (API, สมาชิก, ฟอร์ม, ฟังก์ชัน, งานตั้งเวลา) ออนไลน์ 24 ชม. บน VPS ของคุณ:
+
+1. แท็บ “เผยแพร่ & ส่งออก” › **เซิร์ฟเวอร์ของฉัน** › ใส่โดเมน › **ดาวน์โหลดชุดติดตั้งเซิร์ฟเวอร์**
+2. บน VPS: `curl -fsSL https://get.docker.com | sh` แล้ว `docker compose up -d --build` ในโฟลเดอร์ที่อัปโหลด (Caddy ขอ HTTPS ให้เอง)
+3. ในแอปใส่ที่อยู่เซิร์ฟเวอร์ + deploy token (จาก `.env`) แล้วกด **เผยแพร่เลย**
+
+| | |
+|---|---|
+| Deploy | อัปเดตหน้า, ธีม, เนื้อหา, ฟังก์ชัน, API keys · **ไม่ทับ** แถวที่เกิดบนเซิร์ฟเวอร์ (ฟอร์ม/เขียนผ่าน API), สมาชิก, ข้อความฟอร์ม, สถิติ · สำรองบนเซิร์ฟเวอร์ก่อนทุกครั้ง |
+| ดึงข้อมูลกลับ | คำสั่งซื้อ, สมาชิก, ข้อความฟอร์ม, สถิติ จากเซิร์ฟเวอร์มาดูในแอป |
+| ฐานข้อมูล | SQLite (ค่าเริ่มต้น) · PostgreSQL (มีใน docker-compose) · MySQL — ตั้งด้วย `BUILDWEB_DATABASE_URL` |
+| หลายเว็บ | `BUILDWEB_DOMAINS=shop.com=my-shop,blog.com=my-blog` |
+| หลังบ้าน | `https://โดเมน/__bw/admin/` (Django admin, รหัสผ่านใน `.env`) |
+| ความปลอดภัย | deploy ด้วย token · editor ไม่เปิดบนเซิร์ฟเวอร์ · คุกกี้ Secure · รันในคอนเทนเนอร์ด้วยผู้ใช้ที่ไม่ใช่ root |
+
+**สำรอง & กู้คืน:** ทั้งเว็บในไฟล์ `.bwsite` · สำรองอัตโนมัติวันละครั้ง (เก็บ 14 ชุด) · กู้คืนในคลิกเดียว · ย้ายเครื่องด้วย “นำเข้าเว็บ” · ค่าลับและรหัสผ่านในฐานข้อมูลถูกเข้ารหัส
+
 ### 4.1 หน้ารายละเอียด, ค้นหา & บทความ — ใหม่ใน v0.1.4
 
 <img src="docs/images/data-pages.png" alt="หน้ารายการพร้อมค้นหาและหมวดหมู่" width="100%">
@@ -379,7 +400,7 @@ flowchart LR
 - [x] **เฟส 1 · Backend core (v0.2):** REST API อัตโนมัติ, API key, สิทธิ์, CORS, rate limit, log, OpenAPI, ตัวทดลอง API, ฟิลด์พร้อมกฎและ relation, JS SDK
 - [x] **เฟส 2 · ผู้ใช้ของเว็บ (v0.3):** สมัคร/ล็อกอิน/ลืมรหัส, บทบาท, หน้าเฉพาะสมาชิก, ข้อมูลของใครของมัน, บล็อกสมาชิก
 - [x] **เฟส 3 · Logic (v0.4):** webhook, งานตั้งเวลา, ฟังก์ชัน Python, ดึงข้อมูลจาก API ภายนอก, ค่าลับ, บันทึกการทำงาน
-- [ ] **เฟส 4 · Deploy full-stack:** backend ขึ้นเซิร์ฟเวอร์ (Docker/VPS + HTTPS + โดเมน), PostgreSQL, สำรอง/กู้คืน, เข้ารหัส secret
+- [x] **เฟส 4 · Deploy full-stack (v0.5):** เซิร์ฟเวอร์ Docker + HTTPS + โดเมน, deploy ไม่ทับข้อมูลจริง, PostgreSQL, สำรอง/กู้คืน, เข้ารหัสค่าลับ
 - [ ] **เฟส 5 · งานทีม:** หลายผู้ใช้ + สิทธิ์, โหมด CMS ให้ลูกค้า, ตัวแก้โค้ด, คอมโพเนนต์เอง, Git
 - [ ] **เฟส 6 · E-commerce:** สินค้า/ตะกร้า/คำสั่งซื้อ, PromptPay/Omise/Stripe, LINE Messaging API
 - [ ] คลังรูปฟรี + WebP · แม่แบบเพิ่ม · หลายภาษา · ผู้ช่วย AI
@@ -412,6 +433,9 @@ backend/
     schema.py restapi.py ฟิลด์ + การตรวจข้อมูล · REST API (keys, สิทธิ์, CORS, rate limit, OpenAPI)
     members.py           สมาชิกของเว็บ: รหัสผ่าน, session, ลิงก์อีเมล, สิทธิ์หน้า
     logic.py fn_runner.py webhooks, งานตั้งเวลา, ดึง API, ค่าลับ · ตัวรันฟังก์ชัน Python (โปรเซสแยก)
+    backup.py crypto.py  ไฟล์ .bwsite (สำรอง/กู้คืน/deploy) · เข้ารหัสค่าลับ
+    server_api.py serverkit.py   endpoint ของเซิร์ฟเวอร์ (/__bw/deploy, pull, health) · ชุดติดตั้ง Docker
+  server.py              BuildWeb แบบเซิร์ฟเวอร์ (Docker/VPS)
     widgets.py           ค้นหา/หมวดหมู่/แบ่งหน้า (JS) · ปุ่มติดต่อลอย
     sections.py          บล็อกสำเร็จรูปและแม่แบบ
     importer.py          นำเข้าเว็บ (html/zip/โฟลเดอร์/GitHub)

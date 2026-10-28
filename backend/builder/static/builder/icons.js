@@ -5,6 +5,7 @@
     overview: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
     site: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/>',
     import: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>',
+    download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/>',
     chart: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
     cloud: '<path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19.5 10 4 4 0 0 1 18 18z"/><path d="M12 12v6M9.5 14.5 12 12l2.5 2.5"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',

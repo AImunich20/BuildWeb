@@ -153,7 +153,7 @@ def preview(request, slug, path=""):
 
 @csrf_exempt
 def public(request, path=""):
-    pinned = request.META.get(SITE_ENV_KEY)
+    pinned = request.META.get(SITE_ENV_KEY) or settings.DOMAINS.get(request.get_host().split(":")[0].lower())
     if pinned:
         site = render.site_for_slug(pinned, published_only=True)
         if not site:

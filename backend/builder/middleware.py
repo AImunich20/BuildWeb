@@ -30,8 +30,8 @@ class LocalAdminMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.path.startswith(("/api/system/restart", "/api/system/shutdown")):
-            return self.get_response(request)
+        if request.path.startswith(("/api/system/restart", "/api/system/shutdown")) or settings.SERVER_MODE:
+            return self.get_response(request)  # a server never signs anyone in automatically
         try:
             if not request.is_public and not request.user.is_authenticated and not settings.DB_FAILED:
                 User = get_user_model()

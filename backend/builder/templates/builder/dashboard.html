@@ -86,7 +86,7 @@ function importSite() {
       <div data-pane="files">
         <div class="drop" id="imp-drop">ลากไฟล์ .html, .zip หรือทั้งโฟลเดอร์มาวางที่นี่<br>
           <span class="small">หรือ <a href="#" id="pick-files">เลือกไฟล์</a> · <a href="#" id="pick-folder">เลือกโฟลเดอร์</a></span>
-          <input type="file" id="imp-files" multiple accept=".html,.htm,.zip,.css,.js,image/*" hidden>
+          <input type="file" id="imp-files" multiple accept=".html,.htm,.zip,.bwsite,.css,.js,image/*" hidden>
           <input type="file" id="imp-folder" webkitdirectory hidden></div>
         <div id="imp-picked" class="small muted" style="margin:-4px 0 12px"></div>
       </div>
@@ -149,7 +149,12 @@ function importSite() {
     try {
       let r;
       if (src === 'github') r = await api('/api/import/github', d);
-      else {
+      else if (files.length === 1 && /\.bwsite$/i.test(files[0].name)) { // a BuildWeb backup: the whole site as it was
+        const fd = new FormData(); fd.append('file', files[0], files[0].name);
+        const b = await api('/api/import/bwsite', fd);
+        out.innerHTML = `<div class="alert ok"><div>✓ กู้คืนเว็บ “${esc(b.site.name)}” จากไฟล์สำรองแล้ว</div></div><div class="row"><a class="btn primary sm" href="${b.url}">จัดการเว็บ</a></div>`;
+        btn.disabled = false; return;
+      } else {
         if (!files.length) throw new Error('กรุณาเลือกไฟล์หรือโฟลเดอร์');
         const fd = new FormData();
         files.forEach((f, i) => { fd.append('files', f, f.name); fd.append('paths', paths[i]); });
