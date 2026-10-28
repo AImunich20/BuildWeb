@@ -87,6 +87,9 @@ def main():
 
         hosting.apply_config()
         hosting.watch_tailscale()
+        from builder import logic
+
+        logic.start_scheduler()
 
     from django.core.wsgi import get_wsgi_application
     from waitress import serve

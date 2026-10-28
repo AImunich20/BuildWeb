@@ -13,7 +13,7 @@ from datetime import date
 
 from django.db.models import Max
 
-from . import data, schema
+from . import data, logic, schema
 from .models import Collection, Record
 
 RATE_WINDOW = 60  # seconds
@@ -89,8 +89,9 @@ def save_to_collection(site, slug, posted, owner=None):
         pending = not approved and "approved" in col.field_names
     else:
         pos = (col.records.aggregate(m=Max("position"))["m"] or 0) + 1
-        Record.objects.create(collection=col, data={f["name"]: values.get(f["name"], "") for f in col.fields},
-                              position=pos, approved=approved, owner=owner)
+        rec = Record.objects.create(collection=col, data={f["name"]: values.get(f["name"], "") for f in col.fields},
+                                    position=pos, approved=approved, owner=owner)
+        logic.emit(site, "record.created", {"_id": rec.id, **rec.data, "_approved": approved}, col.slug)
         col.save(update_fields=["updated_at"])
         pending = not approved
     return {"label": col.name, "pending": pending}

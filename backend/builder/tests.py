@@ -1073,3 +1073,121 @@ class MembersTests(TestCase):
         s = self.c.get(f"/api/sites/{self.site.id}/members/settings").json()
         self.assertTrue(all(s["pages"].values()))
         self.assertEqual(s["roles"], ["admin", "member", "vip"])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class LogicTests(TestCase):
+    """v0.4 phase 3: secrets, webhooks, connectors, functions, scheduled jobs."""
+
+    def setUp(self):
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Logic", "blank")
+        self.site.api = {"enabled": True}
+        self.site.secrets = {"HOOK_TOKEN": "s3cret", "GREETING": "สวัสดี"}
+        self.site.save()
+        self.col = Collection.objects.create(site=self.site, name="Orders", slug="orders", fields=[
+            {"name": "item", "label": "item", "type": "text", "required": True}],
+            options={"api": {"create": "public"}})
+
+    def post(self, url, d):
+        return self.c.post(url, json.dumps(d), content_type="application/json")
+
+    def test_webhook_signed_with_secrets(self):
+        from unittest import mock
+
+        from . import logic
+
+        self.post(f"/api/sites/{self.site.id}/logic/webhooks", {"name": "n8n", "url": "https://hooks.example/x",
+                  "events": ["record.created"], "headers": "Authorization: Bearer {{secret.HOOK_TOKEN}}", "signing_secret": "k1"})
+        sent = []
+        with mock.patch.object(logic, "http_request", side_effect=lambda m, u, h, b, timeout=20: sent.append((u, h, b)) or (200, "ok")):
+            r = self.c.post(f"/{self.site.slug}/api/v1/orders", json.dumps({"item": "latte"}), content_type="application/json",
+                            **{"buildweb.public": True})
+        self.assertEqual(r.status_code, 201)
+        url, headers, raw = sent[0]
+        self.assertEqual(headers["Authorization"], "Bearer s3cret")
+        self.assertEqual(headers["X-BuildWeb-Signature"], logic.signature("k1", raw))
+        body = json.loads(raw)
+        self.assertEqual((body["event"], body["data"]["item"]), ("record.created", "latte"))
+        log = self.c.get(f"/api/sites/{self.site.id}/logic/logs?kind=webhook").json()["logs"][0]
+        self.assertTrue(log["ok"])
+        self.assertNotIn("s3cret", json.dumps(self.c.get(f"/api/sites/{self.site.id}/logic").json()["secrets"]))
+
+    def test_connector_preview_run_and_upsert(self):
+        from unittest import mock
+
+        from . import logic
+
+        payload = {"data": {"items": [{"code": "A1", "name": "Latte", "price": {"amount": 65}}, {"code": "B2", "name": "Mocha", "price": {"amount": 70}}]}}
+        self.post(f"/api/sites/{self.site.id}/logic/connectors", {"name": "เมนูจาก POS", "url": "https://pos.example/api?key={{secret.HOOK_TOKEN}}",
+                                                                 "items_path": "data.items", "key_field": "code"})
+        conn = self.site.connectors.get()
+        calls = []
+        with mock.patch.object(logic, "http_request", side_effect=lambda m, u, h, b, timeout=20: calls.append(u) or (200, json.dumps(payload))):
+            prev = self.c.post(f"/api/logic/connector/{conn.id}/preview", "{}", content_type="application/json").json()
+            self.assertEqual(prev["columns"], ["code", "name", "price_amount"])
+            self.c.post(f"/api/logic/connector/{conn.id}/run", "{}", content_type="application/json")
+            payload["data"]["items"][0]["name"] = "Latte Hot"
+            payload["data"]["items"].append({"code": "C3", "name": "Tea", "price": {"amount": 50}})
+            self.c.post(f"/api/logic/connector/{conn.id}/run", "{}", content_type="application/json")
+        self.assertIn("key=s3cret", calls[0])
+        conn.refresh_from_db()
+        rows = sorted(r["name"] for r in conn.collection.records.values_list("data", flat=True))
+        self.assertEqual(rows, ["Latte Hot", "Mocha", "Tea"])
+
+    def test_function_runs_in_subprocess(self):
+        code = ('def handler(request, bw):\n'
+                '    print("log line")\n'
+                '    return {"hi": bw.secret("GREETING") + " " + request["query"].get("name", ""), "m": request["method"]}\n')
+        r = self.post(f"/api/sites/{self.site.id}/logic/functions", {"slug": "hello", "code": code, "access": "public"})
+        self.assertEqual(r.status_code, 200)
+        out = self.c.get(f"/{self.site.slug}/api/v1/fn/hello?name=Ann", **{"buildweb.public": True})
+        self.assertEqual(out.json(), {"hi": "สวัสดี Ann", "m": "GET"})
+        fn = self.site.functions.get()
+        t = self.c.post(f"/api/logic/function/{fn.id}/test", json.dumps({"query": {"name": "B"}}), content_type="application/json").json()
+        self.assertIn("log line", t["logs"])
+        bad = self.post(f"/api/sites/{self.site.id}/logic/functions", {"slug": "bad", "code": "def handler(:\n"})
+        self.assertIn("บรรทัด", bad.json()["error"])
+        self.post(f"/api/sites/{self.site.id}/logic/functions", {"slug": "slow", "timeout": 1, "access": "public",
+                  "code": "import time\ndef handler(r, bw):\n    time.sleep(5)\n"})
+        self.assertEqual(self.c.get(f"/{self.site.slug}/api/v1/fn/slow", **{"buildweb.public": True}).status_code, 504)
+        self.post(f"/api/sites/{self.site.id}/logic/functions", {"slug": "err", "access": "public",
+                  "code": "def handler(r, bw):\n    return (418, {'tea': True})\n"})
+        self.assertEqual(self.c.get(f"/{self.site.slug}/api/v1/fn/err", **{"buildweb.public": True}).status_code, 418)
+        self.post(f"/api/sites/{self.site.id}/logic/functions", {"slug": "locked", "access": "key", "code": code})
+        self.assertEqual(self.c.get(f"/{self.site.slug}/api/v1/fn/locked", **{"buildweb.public": True}).status_code, 401)
+
+    def test_schedules_and_jobs(self):
+        from datetime import datetime, timedelta
+        from unittest import mock
+
+        from django.utils import timezone
+
+        from . import logic
+
+        base = timezone.make_aware(datetime(2026, 10, 29, 10, 0))  # a Thursday
+        self.assertEqual(logic.next_run("every 15m", base), base + timedelta(minutes=15))
+        self.assertEqual(logic.next_run("daily 09:00", base).day, 30)
+        self.assertEqual(logic.next_run("daily 11:30", base).hour, 11)
+        self.assertEqual(logic.next_run("weekly mon 08:00", base).weekday(), 0)
+        for bad in ("every 1m", "daily 25:00", "sometimes"):
+            with self.assertRaises(ValueError):
+                logic.parse_schedule(bad)
+        old = Record.objects.create(collection=self.col, data={"item": "old"})
+        Record.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=40))
+        Record.objects.create(collection=self.col, data={"item": "new"})
+        r = self.post(f"/api/sites/{self.site.id}/logic/jobs", {"name": "ล้างคำสั่งซื้อเก่า", "schedule": "daily 03:00",
+                      "action": "purge_rows", "params": {"collection": "orders", "days": 30}}).json()
+        job = r["jobs"][0]
+        self.assertTrue(job["next_run"])
+        res = self.c.post(f"/api/logic/job/{job['id']}/run", "{}", content_type="application/json").json()
+        self.assertEqual(res["message"], "ลบ 1 แถวที่เก่ากว่า 30 วัน")
+        self.assertEqual(self.col.records.count(), 1)
+        self.post(f"/api/sites/{self.site.id}/logic/jobs", {"name": "ping", "schedule": "every 30m", "action": "call_url",
+                  "params": {"url": "https://ping.example/{{secret.HOOK_TOKEN}}"}})
+        ping = self.site.jobs.get(name="ping")
+        with mock.patch.object(logic, "http_request", return_value=(200, "pong")) as h:
+            ok, msg = logic.run_job(ping)
+        self.assertTrue(ok)
+        self.assertEqual(h.call_args[0][1], "https://ping.example/s3cret")

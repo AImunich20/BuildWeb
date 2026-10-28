@@ -101,6 +101,9 @@ def receive_form(request, site):
             sub.data = {**sub.data, "_บันทึกลง": saved["label"]}
             sub.save(update_fields=["data"])
         notify.notify_submission(sub)
+        from . import logic
+
+        logic.emit(site, "form.submitted", {"form": sub.form_name, "page": page.slug if page else "", "data": data})
         resp = JsonResponse({"ok": True, "pending": bool(saved and saved["pending"])})
     return cors(resp)
 

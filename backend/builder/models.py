@@ -59,6 +59,7 @@ class Site(models.Model):
     publish = models.JSONField("ปลายทางเผยแพร่", default=dict, blank=True)  # {"github": {...}, "netlify": {...}, "ftp": {...}}
     api = models.JSONField("ตั้งค่า REST API", default=dict, blank=True)  # {"enabled", "cors", "rate", "log"}
     auth = models.JSONField("ตั้งค่าสมาชิก", default=dict, blank=True)  # see members.SETTINGS
+    secrets = models.JSONField("ค่าลับ", default=dict, blank=True)  # {"NAME": "value"} used as {{secret.NAME}} server-side
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -454,3 +455,93 @@ class UserToken(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_used = models.DateTimeField(null=True, blank=True)
     user_agent = models.CharField(max_length=200, blank=True)
+
+
+class Webhook(models.Model):
+    """POST a JSON event to a URL when data changes (n8n, Make, Zapier, LINE bots, your own server)."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="webhooks")
+    name = models.CharField(max_length=100)
+    url = models.CharField(max_length=500)
+    events = models.JSONField(default=list, blank=True)       # [] = every event
+    collections = models.JSONField(default=list, blank=True)  # [] = every collection
+    headers = models.JSONField(default=dict, blank=True)      # values may use {{secret.NAME}}
+    signing_secret = models.CharField(max_length=80, blank=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+
+class Connector(models.Model):
+    """Pull rows from an external JSON API into a collection (on demand or on a schedule)."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="connectors")
+    name = models.CharField(max_length=100)
+    url = models.CharField(max_length=1000)
+    method = models.CharField(max_length=8, default="GET")
+    headers = models.JSONField(default=dict, blank=True)
+    body = models.TextField(blank=True)
+    items_path = models.CharField(max_length=200, blank=True)  # e.g. "data.items"; empty = the response itself
+    collection = models.ForeignKey("Collection", null=True, blank=True, on_delete=models.SET_NULL, related_name="connectors")
+    key_field = models.CharField(max_length=100, blank=True)  # update rows with the same key instead of replacing all
+    last_run = models.DateTimeField(null=True, blank=True)
+    last_status = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+
+class Function(models.Model):
+    """A server function written in Python, served at <site>/api/v1/fn/<slug>."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="functions")
+    slug = models.SlugField(max_length=60)
+    name = models.CharField(max_length=100, blank=True)
+    code = models.TextField(blank=True)
+    access = models.CharField(max_length=10, default="key")  # public | user | key | off
+    timeout = models.PositiveSmallIntegerField(default=10)
+    enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["slug"]
+        constraints = [models.UniqueConstraint(fields=["site", "slug"], name="unique_function_slug")]
+
+
+class Job(models.Model):
+    """Something to run on a schedule: "every 15m", "every 2h", "daily 09:00", "weekly mon 09:00"."""
+
+    ACTIONS = ["call_url", "sync_mysql", "run_connector", "run_function", "purge_rows"]
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="jobs")
+    name = models.CharField(max_length=100)
+    schedule = models.CharField(max_length=60, default="daily 09:00")
+    action = models.CharField(max_length=20, default="call_url")
+    params = models.JSONField(default=dict, blank=True)
+    enabled = models.BooleanField(default=True)
+    last_run = models.DateTimeField(null=True, blank=True)
+    next_run = models.DateTimeField(null=True, blank=True)
+    last_ok = models.BooleanField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+
+class RunLog(models.Model):
+    """History of webhook deliveries, scheduled jobs, connector syncs and function calls."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="run_logs")
+    kind = models.CharField(max_length=12)  # webhook | job | connector | function
+    ref = models.CharField(max_length=100, blank=True)  # name of the webhook/job/...
+    ok = models.BooleanField(default=True)
+    status = models.CharField(max_length=40, blank=True)
+    ms = models.PositiveIntegerField(default=0)
+    message = models.CharField(max_length=300, blank=True)
+    detail = models.TextField(blank=True)
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-at"]

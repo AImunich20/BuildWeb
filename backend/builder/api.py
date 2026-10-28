@@ -1094,9 +1094,15 @@ def record_save(request, col_id):
     if r:
         r.data = {**r.data, **values}
         r.save()
+        from . import logic
+
+        logic.emit(c.site, "record.updated", {"_id": r.id, **r.data}, c.slug)
     else:
         pos = (c.records.order_by("-position").values_list("position", flat=True).first() or 0) + 1
         r = Record.objects.create(collection=c, data=values, position=pos)
+        from . import logic
+
+        logic.emit(c.site, "record.created", {"_id": r.id, **r.data}, c.slug)
     c.save(update_fields=["updated_at"])
     return {"row": {**r.data, "_id": r.id, "_approved": r.approved}}
 
@@ -1229,7 +1235,12 @@ def publish_test_ftp(request, site_id):
 def record_delete(request, col_id):
     c = get_object_or_404(Collection, pk=col_id)
     ids = [int(i) for i in body(request).get("ids", [])]
+    gone = [{"_id": r.id, **r.data} for r in c.records.filter(id__in=ids)]
     n, _ = c.records.filter(id__in=ids).delete()
+    from . import logic
+
+    for g in gone:
+        logic.emit(c.site, "record.deleted", g, c.slug)
     return {"deleted": n}
 
 
@@ -1468,3 +1479,218 @@ def members_pages(request, site_id):
     site = get_object_or_404(Site, pk=site_id)
     made = generate.create_member_pages(site)
     return {"created": [page_json(p) for p in made]}
+
+
+# --- logic: secrets, webhooks, connectors, functions, jobs ------------------------------------------
+
+def logic_state(site):
+    from . import logic
+
+    return {
+        "secrets": [{"name": k, "preview": (v[:3] + "…" if len(v) > 6 else "•••")} for k, v in sorted((site.secrets or {}).items())],
+        "webhooks": [{"id": h.id, "name": h.name, "url": h.url, "events": h.events, "collections": h.collections,
+                      "headers": h.headers, "signing": bool(h.signing_secret), "active": h.active} for h in site.webhooks.all()],
+        "connectors": [{"id": c.id, "name": c.name, "url": c.url, "method": c.method, "headers": c.headers, "body": c.body,
+                        "items_path": c.items_path, "collection": c.collection.slug if c.collection else "",
+                        "key_field": c.key_field, "last_run": c.last_run.isoformat() if c.last_run else None,
+                        "last_status": c.last_status} for c in site.connectors.select_related("collection")],
+        "functions": [{"id": f.id, "slug": f.slug, "name": f.name, "code": f.code, "access": f.access, "timeout": f.timeout,
+                       "enabled": f.enabled, "updated_at": f.updated_at.isoformat()} for f in site.functions.all()],
+        "jobs": [{"id": j.id, "name": j.name, "schedule": j.schedule, "action": j.action, "params": j.params,
+                  "enabled": j.enabled, "last_run": j.last_run.isoformat() if j.last_run else None,
+                  "next_run": j.next_run.isoformat() if j.next_run else None, "last_ok": j.last_ok} for j in site.jobs.all()],
+        "events": logic.EVENTS, "template": logic.FN_TEMPLATE,
+        "collections": [{"slug": c.slug, "name": c.name, "fields": c.field_names, "mode": c.mode} for c in site.collections.all()],
+    }
+
+
+@require_GET
+@api
+def logic_overview(request, site_id):
+    return logic_state(get_object_or_404(Site, pk=site_id))
+
+
+@require_POST
+@api
+def secret_save(request, site_id):
+    from . import logic
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    name = (d.get("name") or "").strip().upper()
+    secrets_ = dict(site.secrets or {})
+    if d.get("delete"):
+        secrets_.pop(name, None)
+    else:
+        if not logic.NAME_RE.match(name):
+            raise ApiError("ชื่อใช้ A-Z 0-9 _ และขึ้นต้นด้วยตัวอักษร เช่น LINE_TOKEN", field="name")
+        if not d.get("value"):
+            raise ApiError("ใส่ค่าลับ", field="value")
+        secrets_[name] = str(d["value"])[:4000]
+    site.secrets = secrets_
+    site.save(update_fields=["secrets"])
+    return logic_state(site)
+
+
+def _clean_headers(h):
+    if isinstance(h, str):
+        out = {}
+        for line in h.splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                out[k.strip()[:100]] = v.strip()[:2000]
+        return out
+    return {str(k)[:100]: str(v)[:2000] for k, v in (h or {}).items()}
+
+
+@require_POST
+@api
+def webhook_save(request, site_id):
+    from . import logic
+    from .models import Webhook
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    h = site.webhooks.filter(pk=d.get("id")).first() if d.get("id") else Webhook(site=site)
+    h.name = (d.get("name") or "Webhook").strip()[:100]
+    h.url = (d.get("url") or "").strip()[:500]
+    if not re.match(r"^https?://", logic.fill_secrets(site, h.url)):
+        raise ApiError("URL ต้องขึ้นต้นด้วย https://", field="url")
+    h.events = [e for e in d.get("events") or [] if e in logic.EVENTS]
+    h.collections = [c for c in d.get("collections") or [] if site.collections.filter(slug=c).exists()]
+    h.headers = _clean_headers(d.get("headers"))
+    if "signing_secret" in d and d["signing_secret"] is not None:
+        h.signing_secret = str(d["signing_secret"]).strip()[:80]
+    h.active = as_bool(d.get("active", True))
+    h.save()
+    return logic_state(site)
+
+
+@require_POST
+@api
+def logic_item_action(request, kind, item_id, action):
+    """POST /api/logic/<webhook|connector|function|job>/<id>/<test|run|delete>"""
+    from . import logic
+    from .models import Connector, Function, Job, Webhook
+
+    model = {"webhook": Webhook, "connector": Connector, "function": Function, "job": Job}.get(kind)
+    if not model:
+        raise ApiError("unknown", status=404)
+    obj = get_object_or_404(model, pk=item_id)
+    site = obj.site
+    if action == "delete":
+        obj.delete()
+        return logic_state(site)
+    if kind == "webhook" and action == "test":
+        ok = logic.deliver(obj, {"event": "test", "site": site.slug, "collection": None,
+                                 "at": "", "data": {"message": "ทดสอบจาก BuildWeb"}}, retries=())
+        last = site.run_logs.filter(kind="webhook", ref=obj.name).first()
+        return {"ok_delivery": ok, "message": last.message if last else ""}
+    if kind == "connector" and action == "preview":
+        try:
+            rows = logic.fetch_connector(obj)
+        except RuntimeError as e:
+            raise ApiError(str(e))
+        return {"rows": rows[:20], "total": len(rows), "columns": list(dict.fromkeys(k for r in rows[:200] for k in r))}
+    if kind == "connector" and action == "run":
+        try:
+            n = logic.run_connector(obj)
+        except RuntimeError as e:
+            raise ApiError(str(e))
+        return {"message": f"นำเข้า {n} แถว", **logic_state(site)}
+    if kind == "function" and action == "test":
+        d = body(request)
+        payload = {"method": d.get("method") or "GET", "query": d.get("query") or {}, "body": d.get("body") or {},
+                   "headers": {}, "user": None}
+        status, out, logs = logic.call_function(obj, payload)
+        return {"status": status, "body": out, "logs": logs}
+    if kind == "job" and action == "run":
+        ok, msg = logic.run_job(obj)
+        return {"ok_run": ok, "message": msg, **logic_state(site)}
+    raise ApiError("unknown action", status=404)
+
+
+@require_POST
+@api
+def connector_save(request, site_id):
+    from .models import Connector
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    c = site.connectors.filter(pk=d.get("id")).first() if d.get("id") else Connector(site=site)
+    c.name = (d.get("name") or "").strip()[:100]
+    if not c.name:
+        raise ApiError("ตั้งชื่อก่อน", field="name")
+    c.url = (d.get("url") or "").strip()[:1000]
+    if not re.match(r"^https?://|^\{\{\s*secret\.", c.url):
+        raise ApiError("URL ต้องขึ้นต้นด้วย https://", field="url")
+    c.method = (d.get("method") or "GET").upper() if (d.get("method") or "GET").upper() in ("GET", "POST") else "GET"
+    c.headers = _clean_headers(d.get("headers"))
+    c.body = str(d.get("body") or "")[:20000]
+    c.items_path = (d.get("items_path") or "").strip()[:200]
+    c.key_field = (d.get("key_field") or "").strip()[:100]
+    slug = (d.get("collection") or "").strip()
+    c.collection = site.collections.filter(slug=slug).first() if slug else None
+    c.save()
+    return logic_state(site)
+
+
+@require_POST
+@api
+def function_save(request, site_id):
+    from .models import Function
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    f = site.functions.filter(pk=d.get("id")).first() if d.get("id") else Function(site=site)
+    slug = (d.get("slug") or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,59}", slug):
+        raise ApiError("ชื่อใช้ a-z 0-9 - เช่น send-order", field="slug")
+    if site.functions.filter(slug=slug).exclude(pk=f.pk).exists():
+        raise ApiError("มีฟังก์ชันชื่อนี้แล้ว", field="slug")
+    f.slug, f.name = slug, (d.get("name") or "").strip()[:100]
+    f.code = str(d.get("code") or "")[:200000]
+    try:
+        compile(f.code, "function.py", "exec")
+    except SyntaxError as e:
+        raise ApiError(f"โค้ดผิดที่บรรทัด {e.lineno}: {e.msg}", field="code")
+    f.access = d.get("access") if d.get("access") in ("public", "user", "key", "off") else "key"
+    f.timeout = max(1, min(60, int(d.get("timeout") or 10)))
+    f.enabled = as_bool(d.get("enabled", True))
+    f.save()
+    return logic_state(site)
+
+
+@require_POST
+@api
+def job_save(request, site_id):
+    from . import logic
+    from .models import Job
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    j = site.jobs.filter(pk=d.get("id")).first() if d.get("id") else Job(site=site)
+    j.name = (d.get("name") or "").strip()[:100] or "งานตั้งเวลา"
+    j.schedule = (d.get("schedule") or "").strip()
+    try:
+        j.next_run = logic.next_run(j.schedule)
+    except ValueError as e:
+        raise ApiError(str(e), field="schedule")
+    if d.get("action") not in Job.ACTIONS:
+        raise ApiError("เลือกสิ่งที่จะทำ", field="action")
+    j.action = d["action"]
+    j.params = d.get("params") if isinstance(d.get("params"), dict) else {}
+    j.enabled = as_bool(d.get("enabled", True))
+    j.save()
+    return logic_state(site)
+
+
+@require_GET
+@api
+def run_logs(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    qs = site.run_logs.all()
+    if request.GET.get("kind"):
+        qs = qs.filter(kind=request.GET["kind"])
+    return {"logs": [{"id": x.id, "kind": x.kind, "ref": x.ref, "ok": x.ok, "status": x.status, "ms": x.ms,
+                      "message": x.message, "detail": x.detail[:6000], "at": x.at.isoformat()} for x in qs[:150]]}

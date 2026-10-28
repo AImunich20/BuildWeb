@@ -5,7 +5,7 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { data: renderData, api: renderApi, members: renderMembers, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
+  const tabs = { data: renderData, api: renderApi, members: renderMembers, logic: renderLogic, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
 
 
 
@@ -1377,6 +1377,250 @@
       try { await api(`/api/sites/${site.id}/members/create`, formData(m.el)); m.close(); toast('เพิ่มสมาชิกแล้ว', 'ok'); loadMembers(); }
       catch (e) { showFieldError(m.el, e); }
     };
+  }
+
+  // ---------------------------------------------------------------- logic: webhooks, functions, jobs, connectors, secrets
+  let LG = null, lgSub = 'functions';
+  const EVENT_LABELS = { 'record.created': 'เพิ่มแถว', 'record.updated': 'แก้ไขแถว', 'record.deleted': 'ลบแถว', 'form.submitted': 'ส่งฟอร์ม', 'member.registered': 'สมาชิกใหม่' };
+  const JOB_ACTIONS = { call_url: 'เรียก URL', sync_mysql: 'ซิงก์ชุดข้อมูลจาก MySQL', run_connector: 'ดึงข้อมูลจาก API ภายนอก', run_function: 'รันฟังก์ชัน', purge_rows: 'ลบแถวเก่า' };
+  const ACCESS = { public: 'ทุกคน', user: 'สมาชิก', key: 'ต้องมี API key', off: 'ปิด (ทดสอบในแอปเท่านั้น)' };
+  async function renderLogic() {
+    root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    try { LG = await api(`/api/sites/${site.id}/logic`); } catch (e) { root.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    const subs = [['functions', 'ฟังก์ชัน', LG.functions.length], ['webhooks', 'Webhooks', LG.webhooks.length], ['jobs', 'งานตั้งเวลา', LG.jobs.length],
+      ['connectors', 'ดึงข้อมูลจาก API', LG.connectors.length], ['secrets', 'ค่าลับ', LG.secrets.length], ['logs', 'บันทึกการทำงาน', '']];
+    root.innerHTML = `<div class="row between" style="margin-bottom:14px"><div class="muted">ตรรกะฝั่งเซิร์ฟเวอร์ของเว็บ — ทำงานบนเซิร์ฟเวอร์ BuildWeb (เครื่องนี้หรือที่ deploy)</div>
+      <div class="seg" id="lg-subs">${subs.map(([k, l, n]) => `<button data-v="${k}" class="${k === lgSub ? 'on' : ''}">${l}${n !== '' ? ` <span class="muted">${n}</span>` : ''}</button>`).join('')}</div></div><div id="lg-body"></div>`;
+    root.querySelectorAll('#lg-subs button').forEach(b => b.onclick = () => { lgSub = b.dataset.v; renderLogic(); });
+    ({ functions: lgFunctions, webhooks: lgWebhooks, jobs: lgJobs, connectors: lgConnectors, secrets: lgSecrets, logs: lgLogs })[lgSub]();
+  }
+  const lgBox = () => document.getElementById('lg-body');
+  const apiBase = () => ((site.base_url || (D.hosting.running ? siteUrls(D.hosting)[0] : '') || `${location.origin}/preview/${site.slug}/`).replace(/\/?$/, '/')) + 'api/v1/';
+  const listCard = (title, hint, btn, rows, empty) => `<div class="card"><div class="card-head"><div><h2>${title}</h2><div class="hint" style="margin:0">${hint}</div></div>${btn}</div>
+    ${rows.length ? rows.join('') : `<div class="empty-state">${empty}</div>`}</div>`;
+  const okBadge = v => v == null ? '<span class="badge">ยังไม่เคยรัน</span>' : v ? '<span class="badge ok">สำเร็จ</span>' : '<span class="badge err">ผิดพลาด</span>';
+
+  function lgFunctions() {
+    lgBox().innerHTML = listCard('ฟังก์ชันบนเซิร์ฟเวอร์ (Python)', 'เขียน endpoint ของคุณเอง เช่น คำนวณราคา, ส่ง LINE, ตรวจคูปอง — เรียกที่ <code>/api/v1/fn/ชื่อ</code>',
+      `<button class="btn sm primary" data-new>${BW_ICON('plus')} ฟังก์ชันใหม่</button>`,
+      LG.functions.map(f => `<div class="list-row" data-id="${f.id}"><span class="kind-icon">${BW_ICON('code')}</span><div style="flex:1"><b class="mono">${esc(f.slug)}</b> ${f.name ? `<span class="muted">${esc(f.name)}</span>` : ''}
+        <div class="small muted">${ACCESS[f.access]} · ${f.timeout}s · แก้ไข ${ago(f.updated_at)}${f.enabled ? '' : ' · <b>ปิดอยู่</b>'}</div></div><button class="btn sm" data-edit>แก้ไข / ทดสอบ</button></div>`),
+      'ยังไม่มีฟังก์ชัน');
+    lgBox().querySelector('[data-new]').onclick = () => fnModal(null);
+    lgBox().querySelectorAll('[data-id]').forEach(r => r.querySelector('[data-edit]').onclick = () => fnModal(LG.functions.find(f => f.id === +r.dataset.id)));
+  }
+
+  function fnModal(f) {
+    f = f || { slug: '', name: '', code: LG.template, access: 'key', timeout: 10, enabled: true };
+    const m = modal(`<header><h2>${f.id ? 'ฟังก์ชัน ' + esc(f.slug) : 'ฟังก์ชันใหม่'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
+      <div class="body"><div class="grid g4" style="gap:0 12px"><label class="field"><span>ชื่อ (ในลิงก์)</span><input class="input mono" name="slug" value="${esc(f.slug)}" placeholder="send-order"></label>
+        <label class="field"><span>คำอธิบาย</span><input class="input" name="name" value="${esc(f.name)}"></label>
+        <label class="field"><span>ใครเรียกได้</span><select class="input" name="access">${Object.entries(ACCESS).map(([k, l]) => `<option value="${k}" ${k === f.access ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>เวลาสูงสุด (วินาที)</span><input class="input mono" type="number" min="1" max="60" name="timeout" value="${f.timeout}"></label></div>
+        <div class="small muted" style="margin:-4px 0 6px">URL: <code>${esc(apiBase())}fn/${esc(f.slug || 'ชื่อ')}</code> · ในหน้าเว็บ: <code>fetch('api/v1/fn/${esc(f.slug || 'ชื่อ')}')</code></div>
+        <textarea class="input code fn-code" name="code" spellcheck="false">${esc(f.code)}</textarea>
+        <label class="check"><input type="checkbox" name="enabled" ${f.enabled ? 'checked' : ''}>เปิดใช้งาน</label>
+        <div class="sect-title">ทดสอบ</div>
+        <div class="grid g3" style="gap:0 12px"><label class="field"><span>Method</span><select class="input" id="fn-method"><option>GET</option><option>POST</option></select></label>
+          <label class="field"><span>Query (JSON)</span><input class="input mono" id="fn-query" value='{"name": "ทดสอบ"}'></label>
+          <label class="field"><span>Body (JSON)</span><input class="input mono" id="fn-body" value="{}"></label></div>
+        <div class="row between"><button class="btn" id="fn-run">${BW_ICON('play', 14)} บันทึกแล้วรันทดสอบ</button><span id="fn-meta" class="small muted"></span></div>
+        <div class="grid g2" style="gap:12px;margin-top:8px"><div><div class="small muted">ผลลัพธ์</div><div class="log" id="fn-out" style="min-height:120px;max-height:260px;overflow:auto"></div></div>
+          <div><div class="small muted">print / error</div><div class="log" id="fn-logs" style="min-height:120px;max-height:260px;overflow:auto"></div></div></div>
+        <details class="small" style="margin-top:10px"><summary style="cursor:pointer">ใช้อะไรได้บ้างใน <code>bw</code></summary><div class="log" style="margin-top:6px">bw.list("orders", sort="-_id", per_page=10)   # {"items": [...], "total": ...}
+bw.all("orders", filter="status=new")         # ทุกแถว
+bw.get("orders", 12) · bw.create("orders", {...}) · bw.update("orders", 12, {...}) · bw.delete("orders", 12)
+bw.http("POST", "https://api.line.me/...", json={...}, headers={"Authorization": "Bearer " + bw.secret("LINE_TOKEN")})
+bw.secret("NAME") · bw.log("ข้อความ") หรือ print(...)
+request = {"method", "query", "body", "headers", "user"}   # user = สมาชิกที่ล็อกอิน (หรือ None)
+return {...}  หรือ  return 201, {...}</div></details>
+      </div>
+      <footer>${f.id ? '<button class="btn danger" data-del style="margin-right:auto">ลบ</button>' : ''}<button class="btn" data-close>ปิด</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    const code = m.el.querySelector('[name=code]');
+    code.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); const s = code.selectionStart; code.setRangeText('    ', s, code.selectionEnd, 'end'); } });
+    const save = async () => {
+      const d = formData(m.el); if (f.id) d.id = f.id;
+      const r = await api(`/api/sites/${site.id}/logic/functions`, d); LG = r;
+      const saved = r.functions.find(x => x.slug === d.slug); if (saved) f = saved;
+      return saved;
+    };
+    m.el.querySelector('[data-save]').onclick = async () => { try { await save(); toast('บันทึกแล้ว', 'ok'); m.close(); renderLogic(); } catch (e) { showFieldError(m.el, e); } };
+    m.el.querySelector('#fn-run').onclick = async () => {
+      try {
+        const fn = await save();
+        let query, bodyJ;
+        try { query = JSON.parse(m.el.querySelector('#fn-query').value || '{}'); bodyJ = JSON.parse(m.el.querySelector('#fn-body').value || '{}'); }
+        catch (e) { return toast('Query/Body ต้องเป็น JSON', 'err'); }
+        m.el.querySelector('#fn-out').textContent = 'กำลังรัน…';
+        const t0 = performance.now();
+        const r = await api(`/api/logic/function/${fn.id}/test`, { method: m.el.querySelector('#fn-method').value, query, body: bodyJ });
+        m.el.querySelector('#fn-meta').innerHTML = `<span class="badge ${r.status < 300 ? 'ok' : 'err'}">${r.status}</span> ${Math.round(performance.now() - t0)} ms`;
+        m.el.querySelector('#fn-out').textContent = JSON.stringify(r.body, null, 2);
+        m.el.querySelector('#fn-logs').textContent = r.logs || '(ไม่มี)';
+      } catch (e) { showFieldError(m.el, e); }
+    };
+    const del = m.el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { if (!await confirmBox('ลบฟังก์ชัน', `ลบ ${esc(f.slug)}?`, { ok: 'ลบ', danger: true })) return; await api(`/api/logic/function/${f.id}/delete`, {}); m.close(); renderLogic(); };
+  }
+
+  function lgWebhooks() {
+    lgBox().innerHTML = listCard('Webhooks', 'ส่ง JSON ไปที่ URL ทันทีเมื่อข้อมูลเปลี่ยน — ใช้กับ n8n, Make, Zapier, LINE bot หรือเซิร์ฟเวอร์ของคุณ · ลงลายเซ็น HMAC-SHA256 · ลองซ้ำ 3 ครั้ง',
+      `<button class="btn sm primary" data-new>${BW_ICON('plus')} Webhook ใหม่</button>`,
+      LG.webhooks.map(h => `<div class="list-row" data-id="${h.id}" style="${h.active ? '' : 'opacity:.55'}"><span class="kind-icon">${BW_ICON('link')}</span><div style="flex:1;min-width:0"><b>${esc(h.name)}</b>
+        <div class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.url)}</div>
+        <div class="small muted">${h.events.length ? h.events.map(e => EVENT_LABELS[e]).join(', ') : 'ทุกเหตุการณ์'} · ${h.collections.length ? h.collections.join(', ') : 'ทุกชุดข้อมูล'}${h.signing ? ' · มีลายเซ็น' : ''}</div></div>
+        <button class="btn sm" data-test>ทดสอบ</button><button class="btn sm" data-edit>แก้ไข</button></div>`), 'ยังไม่มี webhook');
+    lgBox().querySelector('[data-new]').onclick = () => hookModal(null);
+    lgBox().querySelectorAll('[data-id]').forEach(r => {
+      const h = LG.webhooks.find(x => x.id === +r.dataset.id);
+      r.querySelector('[data-edit]').onclick = () => hookModal(h);
+      r.querySelector('[data-test]').onclick = async () => { const t = await api(`/api/logic/webhook/${h.id}/test`, {}); toast(t.message || (t.ok_delivery ? 'ส่งสำเร็จ' : 'ส่งไม่สำเร็จ'), t.ok_delivery ? 'ok' : 'err'); };
+    });
+  }
+
+  function hookModal(h) {
+    h = h || { name: '', url: '', events: [], collections: [], headers: {}, active: true };
+    const m = modal(`<header><h2>${h.id ? 'แก้ไข webhook' : 'Webhook ใหม่'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(h.name)}" placeholder="แจ้งคำสั่งซื้อเข้า n8n"></label>
+      <label class="field"><span>URL</span><input class="input mono" name="url" value="${esc(h.url)}" placeholder="https://…"></label></div>
+      <div class="sect-title">เหตุการณ์ <span class="small muted" style="text-transform:none;letter-spacing:0">— ไม่เลือก = ทุกอย่าง</span></div>
+      <div class="row" style="gap:16px">${LG.events.map(e => `<label class="check"><input type="checkbox" data-ev="${e}" ${h.events.includes(e) ? 'checked' : ''}>${EVENT_LABELS[e]} <code>${e}</code></label>`).join('')}</div>
+      <div class="sect-title">เฉพาะชุดข้อมูล</div>
+      <div class="row" style="gap:16px">${LG.collections.map(c => `<label class="check"><input type="checkbox" data-col="${esc(c.slug)}" ${h.collections.includes(c.slug) ? 'checked' : ''}>${esc(c.name)}</label>`).join('') || '<span class="muted small">ยังไม่มีชุดข้อมูล</span>'}</div>
+      <label class="field" style="margin-top:10px"><span>Headers <small>(บรรทัดละ 1 · ใช้ {{secret.NAME}} ได้)</small></span><textarea class="input code" name="headers" rows="3" placeholder="Authorization: Bearer {{secret.N8N_TOKEN}}">${esc(Object.entries(h.headers).map(([k, v]) => `${k}: ${v}`).join('\n'))}</textarea></label>
+      <label class="field"><span>Signing secret <small>(ไม่บังคับ · ใช้ตรวจ X-BuildWeb-Signature)</small></span><div class="row" style="flex-wrap:nowrap"><input class="input mono" name="signing_secret" placeholder="${h.signing ? 'ตั้งไว้แล้ว — เว้นว่าง = ใช้ค่าเดิม' : ''}"><button class="btn sm" type="button" data-gen>สุ่ม</button></div></label>
+      <label class="check"><input type="checkbox" name="active" ${h.active ? 'checked' : ''}>เปิดใช้งาน</label></div>
+      <footer>${h.id ? '<button class="btn danger" data-del style="margin-right:auto">ลบ</button>' : ''}<button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    m.el.querySelector('[data-gen]').onclick = () => { const a = new Uint8Array(24); crypto.getRandomValues(a); m.el.querySelector('[name=signing_secret]').value = [...a].map(x => x.toString(16).padStart(2, '0')).join(''); };
+    m.el.querySelector('[data-save]').onclick = async () => {
+      const d = formData(m.el); if (h.id) d.id = h.id;
+      if (!d.signing_secret && h.signing) d.signing_secret = null;
+      d.events = [...m.el.querySelectorAll('[data-ev]:checked')].map(x => x.dataset.ev);
+      d.collections = [...m.el.querySelectorAll('[data-col]:checked')].map(x => x.dataset.col);
+      try { LG = await api(`/api/sites/${site.id}/logic/webhooks`, d); m.close(); toast('บันทึกแล้ว', 'ok'); renderLogic(); } catch (e) { showFieldError(m.el, e); }
+    };
+    const del = m.el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { await api(`/api/logic/webhook/${h.id}/delete`, {}); m.close(); renderLogic(); };
+  }
+
+  function lgJobs() {
+    lgBox().innerHTML = listCard('งานตั้งเวลา', 'ทำงานอัตโนมัติตามเวลา เช่น ดึงราคาทุกชั่วโมง, ซิงก์ XAMPP ทุกคืน, ล้างข้อมูลเก่า (เวลาตามเครื่องนี้)',
+      `<button class="btn sm primary" data-new>${BW_ICON('plus')} งานใหม่</button>`,
+      LG.jobs.map(j => `<div class="list-row" data-id="${j.id}" style="${j.enabled ? '' : 'opacity:.55'}"><span class="kind-icon">${BW_ICON('history')}</span><div style="flex:1"><b>${esc(j.name)}</b> <code>${esc(j.schedule)}</code>
+        <div class="small muted">${JOB_ACTIONS[j.action]} · ${j.last_run ? 'รันล่าสุด ' + ago(j.last_run) : 'ยังไม่เคยรัน'}${j.enabled && j.next_run ? ' · ครั้งถัดไป ' + when(j.next_run) : ''}</div></div>
+        ${okBadge(j.last_ok)}<button class="btn sm" data-run>รันเลย</button><button class="btn sm" data-edit>แก้ไข</button></div>`), 'ยังไม่มีงานตั้งเวลา');
+    lgBox().querySelector('[data-new]').onclick = () => jobModal(null);
+    lgBox().querySelectorAll('[data-id]').forEach(r => {
+      const j = LG.jobs.find(x => x.id === +r.dataset.id);
+      r.querySelector('[data-edit]').onclick = () => jobModal(j);
+      r.querySelector('[data-run]').onclick = async e => { e.target.disabled = true; const x = await api(`/api/logic/job/${j.id}/run`, {}); toast(x.message, x.ok_run ? 'ok' : 'err'); renderLogic(); };
+    });
+  }
+
+  function jobModal(j) {
+    j = j || { name: '', schedule: 'daily 09:00', action: 'call_url', params: {}, enabled: true };
+    const presets = ['every 15m', 'every 1h', 'daily 09:00', 'daily 00:30', 'weekly mon 09:00'];
+    const sel = (name, opts, cur) => `<select class="input" data-p="${name}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    const params = a => {
+      const p = j.params || {};
+      if (a === 'call_url') return `<div class="grid g4" style="gap:0 12px"><label class="field"><span>Method</span>${sel('method', [['GET', 'GET'], ['POST', 'POST']], p.method)}</label>
+        <label class="field" style="grid-column:span 3"><span>URL <small>(ใช้ {{secret.NAME}} ได้)</small></span><input class="input mono" data-p="url" value="${esc(p.url || '')}"></label></div>`;
+      if (a === 'sync_mysql' || a === 'purge_rows') return `<div class="grid g2" style="gap:0 12px"><label class="field"><span>ชุดข้อมูล</span>${sel('collection', LG.collections.map(c => [c.slug, c.name]), p.collection)}</label>
+        ${a === 'purge_rows' ? `<label class="field"><span>ลบแถวที่เก่ากว่า (วัน)</span><input class="input mono" type="number" min="1" data-p="days" value="${esc(p.days || 30)}"></label>` : ''}</div>`;
+      if (a === 'run_connector') return `<label class="field"><span>ตัวดึงข้อมูล</span>${sel('connector', LG.connectors.map(c => [c.id, c.name]), p.connector)}</label>`;
+      return `<label class="field"><span>ฟังก์ชัน</span>${sel('function', LG.functions.map(f => [f.slug, f.slug]), p.function)}</label>`;
+    };
+    const m = modal(`<header><h2>${j.id ? 'แก้ไขงาน' : 'งานตั้งเวลาใหม่'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(j.name)}"></label>
+      <label class="field"><span>เมื่อไร</span><input class="input mono" name="schedule" value="${esc(j.schedule)}" list="sched-presets"><datalist id="sched-presets">${presets.map(x => `<option value="${x}">`).join('')}</datalist>
+        <small>every 15m · every 2h · hourly · daily 09:00 · weekly mon 09:00</small></label></div>
+      <label class="field"><span>ทำอะไร</span><select class="input" name="action">${Object.entries(JOB_ACTIONS).map(([k, l]) => `<option value="${k}" ${k === j.action ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <div id="job-params">${params(j.action)}</div>
+      <label class="check"><input type="checkbox" name="enabled" ${j.enabled ? 'checked' : ''}>เปิดใช้งาน</label></div>
+      <footer>${j.id ? '<button class="btn danger" data-del style="margin-right:auto">ลบ</button>' : ''}<button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    m.el.querySelector('[name=action]').onchange = e => m.el.querySelector('#job-params').innerHTML = params(e.target.value);
+    m.el.querySelector('[data-save]').onclick = async () => {
+      const d = formData(m.el); if (j.id) d.id = j.id;
+      d.params = {}; m.el.querySelectorAll('[data-p]').forEach(x => d.params[x.dataset.p] = x.value);
+      try { LG = await api(`/api/sites/${site.id}/logic/jobs`, d); m.close(); toast('บันทึกแล้ว', 'ok'); renderLogic(); } catch (e) { showFieldError(m.el, e); }
+    };
+    const del = m.el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { await api(`/api/logic/job/${j.id}/delete`, {}); m.close(); renderLogic(); };
+  }
+
+  function lgConnectors() {
+    lgBox().innerHTML = listCard('ดึงข้อมูลจาก API ภายนอก', 'นำ JSON จาก API ใดก็ได้ (POS, Google Sheets ผ่าน Apps Script, ระบบสต็อก) เข้าชุดข้อมูล แล้วใช้บนหน้าเว็บ/REST API ได้ทันที · ตั้งเวลาดึงซ้ำได้ที่ “งานตั้งเวลา”',
+      `<button class="btn sm primary" data-new>${BW_ICON('plus')} ตัวดึงข้อมูลใหม่</button>`,
+      LG.connectors.map(c => `<div class="list-row" data-id="${c.id}"><span class="kind-icon">${BW_ICON('cloud')}</span><div style="flex:1;min-width:0"><b>${esc(c.name)}</b>
+        <div class="small muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.method)} ${esc(c.url)}</div>
+        <div class="small muted">→ ${c.collection ? `<code>${esc(c.collection)}</code>` : 'สร้างชุดข้อมูลใหม่ตอนรันครั้งแรก'}${c.last_run ? ' · ' + ago(c.last_run) + ' · ' + esc(c.last_status) : ''}</div></div>
+        <button class="btn sm" data-run>ดึงเลย</button><button class="btn sm" data-edit>แก้ไข</button></div>`), 'ยังไม่มีตัวดึงข้อมูล');
+    lgBox().querySelector('[data-new]').onclick = () => connModal(null);
+    lgBox().querySelectorAll('[data-id]').forEach(r => {
+      const c = LG.connectors.find(x => x.id === +r.dataset.id);
+      r.querySelector('[data-edit]').onclick = () => connModal(c);
+      r.querySelector('[data-run]').onclick = async e => { e.target.disabled = true; try { const x = await api(`/api/logic/connector/${c.id}/run`, {}); toast(x.message, 'ok'); } catch (err) { toast(err.message, 'err'); } renderLogic(); };
+    });
+  }
+
+  function connModal(c) {
+    c = c || { name: '', url: '', method: 'GET', headers: {}, body: '', items_path: '', collection: '', key_field: '' };
+    const m = modal(`<header><h2>${c.id ? 'แก้ไขตัวดึงข้อมูล' : 'ตัวดึงข้อมูลใหม่'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g4" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(c.name)}"></label>
+        <label class="field"><span>Method</span><select class="input" name="method"><option ${c.method === 'GET' ? 'selected' : ''}>GET</option><option ${c.method === 'POST' ? 'selected' : ''}>POST</option></select></label>
+        <label class="field" style="grid-column:span 2"><span>URL <small>(ใช้ {{secret.NAME}} ได้)</small></span><input class="input mono" name="url" value="${esc(c.url)}" placeholder="https://api.example.com/products"></label></div>
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>Headers <small>(บรรทัดละ 1)</small></span><textarea class="input code" name="headers" rows="3" placeholder="Authorization: Bearer {{secret.POS_TOKEN}}">${esc(Object.entries(c.headers).map(([k, v]) => `${k}: ${v}`).join('\n'))}</textarea></label>
+        <label class="field"><span>Body <small>(สำหรับ POST)</small></span><textarea class="input code" name="body" rows="3">${esc(c.body)}</textarea></label></div>
+      <div class="grid g3" style="gap:0 12px"><label class="field"><span>ตำแหน่งรายการใน JSON</span><input class="input mono" name="items_path" value="${esc(c.items_path)}" placeholder="data.items (ว่าง = ทั้งหมด)"></label>
+        <label class="field"><span>บันทึกลงชุดข้อมูล</span><select class="input" name="collection"><option value="">— สร้างใหม่ตอนรัน —</option>${LG.collections.filter(x => x.mode === 'copy').map(x => `<option value="${esc(x.slug)}" ${x.slug === c.collection ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+        <label class="field"><span>คีย์สำหรับอัปเดต <small>(ว่าง = แทนที่ทั้งหมด)</small></span><input class="input mono" name="key_field" value="${esc(c.key_field)}" placeholder="id / sku"></label></div>
+      <div class="row"><button class="btn" id="cn-preview">${BW_ICON('eye')} บันทึกแล้วดูตัวอย่าง</button><span class="small muted" id="cn-meta"></span></div>
+      <div id="cn-out" class="data-table-wrap" style="margin-top:10px;max-height:300px"></div></div>
+      <footer>${c.id ? '<button class="btn danger" data-del style="margin-right:auto">ลบ</button>' : ''}<button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    const save = async () => { const d = formData(m.el); if (c.id) d.id = c.id; LG = await api(`/api/sites/${site.id}/logic/connectors`, d); c = LG.connectors.find(x => x.name === d.name) || c; };
+    m.el.querySelector('[data-save]').onclick = async () => { try { await save(); m.close(); toast('บันทึกแล้ว', 'ok'); renderLogic(); } catch (e) { showFieldError(m.el, e); } };
+    m.el.querySelector('#cn-preview').onclick = async () => {
+      try {
+        await save();
+        const r = await api(`/api/logic/connector/${c.id}/preview`, {});
+        m.el.querySelector('#cn-meta').textContent = `${r.total} แถว · ${r.columns.length} คอลัมน์`;
+        m.el.querySelector('#cn-out').innerHTML = `<table class="table small"><thead><tr>${r.columns.map(k => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${r.rows.map(row => `<tr>${r.columns.map(k => `<td>${esc(String(row[k] ?? '').slice(0, 80))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      } catch (e) { m.el.querySelector('#cn-out').innerHTML = `<div class="alert err">${esc(e.message)}</div>`; }
+    };
+    const del = m.el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { await api(`/api/logic/connector/${c.id}/delete`, {}); m.close(); renderLogic(); };
+  }
+
+  function lgSecrets() {
+    lgBox().innerHTML = `<div class="card"><div class="card-head"><div><h2>ค่าลับ (Secrets)</h2><div class="hint" style="margin:0">token / API key ของบริการภายนอก — ใช้ในเซิร์ฟเวอร์เท่านั้น ไม่ถูกส่งไปที่หน้าเว็บ · อ้างถึงด้วย <code>{{secret.ชื่อ}}</code> หรือ <code>bw.secret("ชื่อ")</code></div></div></div>
+      ${LG.secrets.map(x => `<div class="list-row"><span class="kind-icon">${BW_ICON('shield')}</span><div style="flex:1"><b class="mono">${esc(x.name)}</b> <span class="muted mono">${esc(x.preview)}</span></div>
+        <button class="btn sm ghost icon" data-del="${esc(x.name)}" title="ลบ">${BW_ICON('trash')}</button></div>`).join('')}
+      <div class="row" style="padding:14px 16px;border-top:1px solid var(--line);flex-wrap:nowrap"><input class="input mono" id="sc-name" placeholder="LINE_TOKEN" style="max-width:220px"><input class="input mono" id="sc-value" type="password" placeholder="ค่า" autocomplete="off"><button class="btn primary" id="sc-add">บันทึก</button></div></div>`;
+    document.getElementById('sc-add').onclick = async () => {
+      try { LG = await api(`/api/sites/${site.id}/logic/secrets`, { name: document.getElementById('sc-name').value, value: document.getElementById('sc-value').value }); toast('บันทึกแล้ว', 'ok'); renderLogic(); }
+      catch (e) { showFieldError(lgBox(), e); }
+    };
+    lgBox().querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!await confirmBox('ลบค่าลับ', `ลบ ${esc(b.dataset.del)}? webhook/ฟังก์ชันที่ใช้อยู่จะได้ค่าว่าง`, { ok: 'ลบ', danger: true })) return;
+      LG = await api(`/api/sites/${site.id}/logic/secrets`, { name: b.dataset.del, delete: true }); renderLogic();
+    });
+  }
+
+  async function lgLogs() {
+    lgBox().innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    const r = await api(`/api/sites/${site.id}/logic/logs`);
+    const kinds = { webhook: 'Webhook', job: 'งานตั้งเวลา', connector: 'ดึงข้อมูล', function: 'ฟังก์ชัน' };
+    lgBox().innerHTML = `<div class="card"><div class="card-head"><h2>บันทึกการทำงาน</h2><button class="btn sm" id="lg-refresh">${BW_ICON('refresh')} รีเฟรช</button></div>
+      ${r.logs.length ? `<div class="data-table-wrap"><table class="table"><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>ผล</th><th>รายละเอียด</th><th class="num">ms</th></tr></thead><tbody>
+      ${r.logs.map(x => `<tr data-id="${x.id}" style="cursor:pointer"><td class="small muted" style="white-space:nowrap">${when(x.at)}</td><td>${kinds[x.kind] || x.kind}</td><td><b>${esc(x.ref)}</b></td>
+        <td>${x.ok ? '<span class="badge ok">สำเร็จ</span>' : '<span class="badge err">ผิดพลาด</span>'}</td><td class="small">${esc(x.message)}</td><td class="num">${x.ms}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty-state">ยังไม่มีบันทึก</div>'}</div>`;
+    document.getElementById('lg-refresh').onclick = lgLogs;
+    lgBox().querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => {
+      const x = r.logs.find(l => l.id === +tr.dataset.id);
+      let detail = x.detail; try { detail = JSON.stringify(JSON.parse(x.detail), null, 2); } catch (e) { }
+      modal(`<header><h2>${esc(x.ref)} · ${esc(x.message)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body"><div class="log" style="max-height:60vh;overflow:auto">${esc(detail || '(ไม่มีรายละเอียด)')}</div></div>`, { wide: true });
+    });
   }
 
   // ---------------------------------------------------------------- statistics

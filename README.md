@@ -133,6 +133,30 @@ curl -X POST 'http://…/api/v1/orders' -H 'X-API-Key: bw_…' -H 'Content-Type:
 
 > ระบบสมาชิกต้องรันบนเซิร์ฟเวอร์ BuildWeb (โฮสต์จากเครื่องนี้ หรือ deploy ในเฟส 4) · ส่งอีเมลผ่าน SMTP ที่ตั้งในหน้า “การแจ้งเตือน”
 
+### 4.0.2 Logic: ฟังก์ชัน, Webhooks, งานตั้งเวลา — ใหม่ใน v0.4
+
+<img src="docs/images/logic.png" alt="ฟังก์ชันบนเซิร์ฟเวอร์" width="100%">
+
+```python
+# แท็บ Logic › ฟังก์ชัน › เรียกที่ /api/v1/fn/place-order
+def handler(request, bw):
+    item = bw.get("products", request["body"]["product"])
+    order = bw.create("orders", {"product": item["_id"], "qty": request["body"]["qty"],
+                                 "total": item["price"] * request["body"]["qty"]})
+    bw.http("POST", "https://api.line.me/v2/bot/message/push",
+            headers={"Authorization": "Bearer " + bw.secret("LINE_TOKEN")},
+            json={"to": bw.secret("LINE_ADMIN"), "messages": [{"type": "text", "text": f"ออเดอร์ใหม่ #{order['_id']}"}]})
+    return 201, order
+```
+
+| | |
+|---|---|
+| ฟังก์ชัน | Python ใน endpoint `/api/v1/fn/<ชื่อ>` · `bw.list/all/get/create/update/delete` · `bw.http()` · `bw.secret()` · `print` ไปที่บันทึก · โปรเซสแยก + จำกัดเวลา · สิทธิ์ ทุกคน/สมาชิก/key/ปิด |
+| Webhooks | `record.created/updated/deleted` · `form.submitted` · `member.registered` → POST JSON · ลายเซ็น `X-BuildWeb-Signature: sha256=…` · ลองซ้ำ 3 ครั้ง |
+| งานตั้งเวลา | `every 15m` · `hourly` · `daily 09:00` · `weekly mon 09:00` → เรียก URL, ซิงก์ MySQL, ดึง API, รันฟังก์ชัน, ลบแถวเก่า |
+| ดึงข้อมูลจาก API | JSON จาก URL ใดก็ได้ → ชุดข้อมูล · `data.items` · อัปเดตตามคีย์ · ตั้งเวลาดึงซ้ำ |
+| ค่าลับ | `{{secret.NAME}}` ในเซิร์ฟเวอร์เท่านั้น |
+
 ### 4.1 หน้ารายละเอียด, ค้นหา & บทความ — ใหม่ใน v0.1.4
 
 <img src="docs/images/data-pages.png" alt="หน้ารายการพร้อมค้นหาและหมวดหมู่" width="100%">
@@ -354,7 +378,7 @@ flowchart LR
 - [x] sitemap.xml, robots.txt, คะแนน SEO ต่อหน้า, สถิติผู้เข้าชม, ปุ่มติดต่อลอย (v0.1.4)
 - [x] **เฟส 1 · Backend core (v0.2):** REST API อัตโนมัติ, API key, สิทธิ์, CORS, rate limit, log, OpenAPI, ตัวทดลอง API, ฟิลด์พร้อมกฎและ relation, JS SDK
 - [x] **เฟส 2 · ผู้ใช้ของเว็บ (v0.3):** สมัคร/ล็อกอิน/ลืมรหัส, บทบาท, หน้าเฉพาะสมาชิก, ข้อมูลของใครของมัน, บล็อกสมาชิก
-- [ ] **เฟส 3 · Logic:** webhook, งานตั้งเวลา, endpoint เขียนเอง, เชื่อม API ภายนอก + เก็บ secret
+- [x] **เฟส 3 · Logic (v0.4):** webhook, งานตั้งเวลา, ฟังก์ชัน Python, ดึงข้อมูลจาก API ภายนอก, ค่าลับ, บันทึกการทำงาน
 - [ ] **เฟส 4 · Deploy full-stack:** backend ขึ้นเซิร์ฟเวอร์ (Docker/VPS + HTTPS + โดเมน), PostgreSQL, สำรอง/กู้คืน, เข้ารหัส secret
 - [ ] **เฟส 5 · งานทีม:** หลายผู้ใช้ + สิทธิ์, โหมด CMS ให้ลูกค้า, ตัวแก้โค้ด, คอมโพเนนต์เอง, Git
 - [ ] **เฟส 6 · E-commerce:** สินค้า/ตะกร้า/คำสั่งซื้อ, PromptPay/Omise/Stripe, LINE Messaging API
@@ -387,6 +411,7 @@ backend/
     seo.py publish.py    คะแนน SEO · เผยแพร่ GitHub Pages / Netlify / FTP
     schema.py restapi.py ฟิลด์ + การตรวจข้อมูล · REST API (keys, สิทธิ์, CORS, rate limit, OpenAPI)
     members.py           สมาชิกของเว็บ: รหัสผ่าน, session, ลิงก์อีเมล, สิทธิ์หน้า
+    logic.py fn_runner.py webhooks, งานตั้งเวลา, ดึง API, ค่าลับ · ตัวรันฟังก์ชัน Python (โปรเซสแยก)
     widgets.py           ค้นหา/หมวดหมู่/แบ่งหน้า (JS) · ปุ่มติดต่อลอย
     sections.py          บล็อกสำเร็จรูปและแม่แบบ
     importer.py          นำเข้าเว็บ (html/zip/โฟลเดอร์/GitHub)

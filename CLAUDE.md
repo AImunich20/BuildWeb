@@ -50,6 +50,10 @@ user in Thai. The UI copy is in Thai.
     `Page.access` ("", "members", "role:a,b") checked in `public.serve`; members-only pages are left out of
     static builds and the sitemap. Auth endpoints are `restapi.route_auth` (`<site>/api/v1/auth/…`); API rules
     "user"/"owner" use `Record.owner`. Member emails go through `notify.send_mail_to` (`notify.OUTBOX` in tests).
+  - `logic.py`: secrets (`Site.secrets`, `{{secret.X}}`, server-side only), `emit()` events → `Webhook`s (HMAC
+    signed, retried, synchronous in tests), `Connector` (external JSON → collection), schedules + `Job`s run by
+    `start_scheduler()` (started in run.py), `RunLog`. Functions (`Function`) run via `fn_runner.py` in a
+    `python -I` subprocess that calls the site's API on 127.0.0.1 as owner; tests mock `logic.http_request`.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

@@ -33,7 +33,7 @@ from django.db.models import Max
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 
-from . import data, members, schema
+from . import data, logic, members, schema
 from .models import ApiKey, ApiLog, Collection, Record
 
 ACTIONS = ("list", "view", "create", "update", "delete")
@@ -212,6 +212,8 @@ def route(request, site, path, key, owner, base_url):
                                    if owner or allowed(c, "list", key, owner, quiet=True, user=user)]})
     if parts == ["openapi.json"]:
         return JsonResponse(openapi(site, base_url, owner), json_dumps_params={"ensure_ascii": False, "indent": 2})
+    if parts[0] == "fn" and len(parts) == 2:
+        return call_fn(request, site, parts[1], key, owner, user)
     col = site.collections.select_related("connection").filter(slug=parts[0]).first()
     if not col:
         raise ApiError(404, "not_found", f"ไม่พบชุดข้อมูล “{parts[0]}”")
@@ -284,6 +286,32 @@ def public_field(f):
     return {k: v for k, v in f.items() if k != "source"}
 
 
+# --- server functions -----------------------------------------------------------------------------
+
+def call_fn(request, site, slug, key, owner, user):
+    fn = site.functions.filter(slug=slug).first()
+    if not fn or (not fn.enabled and not owner):
+        raise ApiError(404, "not_found", f"ไม่พบฟังก์ชัน “{slug}”")
+    if not owner:
+        rule = fn.access
+        if rule == "off":
+            raise ApiError(403, "forbidden", "ฟังก์ชันนี้ปิดการเรียกจากภายนอก")
+        if rule == "key" and not key:
+            raise ApiError(401, "key_required", "ต้องใช้ API key")
+        if rule == "user" and user is None and not key:
+            raise ApiError(401, "login_required", "ต้องเข้าสู่ระบบสมาชิกก่อน")
+    try:
+        payload_body = body(request) if request.method in ("POST", "PUT", "PATCH") else {}
+    except ApiError:
+        payload_body = request.body.decode("utf-8", "replace")[:100000]
+    payload = {"method": request.method, "query": {k: v for k, v in request.GET.items()}, "body": payload_body,
+               "headers": {k[5:].replace("_", "-").title(): v for k, v in request.META.items()
+                           if k.startswith("HTTP_") and k not in ("HTTP_COOKIE", "HTTP_AUTHORIZATION", "HTTP_X_API_KEY")},
+               "user": members.user_json(user) if user else None}
+    status, out, _ = logic.call_function(fn, payload)
+    return JsonResponse(out, status=int(status), safe=False, json_dumps_params={"ensure_ascii": False})
+
+
 # --- members (auth) -------------------------------------------------------------------------------
 
 def set_cookie(resp, site, request):
@@ -326,6 +354,7 @@ def route_auth(request, site, action):
     ua = request.META.get("HTTP_USER_AGENT", "")
     if action == "register":
         new = members.register(site, d, ip)
+        logic.emit(site, "member.registered", members.user_json(new))
         if s["verify_email"]:
             try:
                 members.send_verify(site, new, base)
@@ -528,6 +557,7 @@ def create_row(request, col, who, user=None):
         approved = who != "public" or col.opt("auto_approve") or not col.opt("forms")
         new_id = data.live_insert(col, clean, approved)
         data.invalidate(col)
+        logic.emit(col.site, "record.created", {"_id": new_id, **clean}, col.slug)
         return ok({"_id": new_id, **{k: v for k, v in clean.items()}}, 201)
     # Public posts to a moderated collection wait for approval, like the site's forms.
     approved = who not in ("public", "member", "self") or not col.opt("forms") or col.opt("auto_approve")
@@ -535,7 +565,9 @@ def create_row(request, col, who, user=None):
     rec = Record.objects.create(collection=col, data={f["name"]: clean.get(f["name"], "") for f in col.fields},
                                 position=pos, approved=approved, owner=user)
     col.save(update_fields=["updated_at"])
-    return ok(item(col, (rec.id, rec.data, rec), who == "app", user=user), 201)
+    out = item(col, (rec.id, rec.data, rec), who == "app", user=user)
+    logic.emit(col.site, "record.created", item(col, (rec.id, rec.data, rec), True), col.slug)
+    return ok(out, 201)
 
 
 def update_row(request, col, rid, owner, partial, mine=None):
@@ -547,12 +579,14 @@ def update_row(request, col, rid, owner, partial, mine=None):
         clean = schema.full_validate(col, d, partial=partial, current=row)
         data.live_update(col, rid, clean)
         data.invalidate(col)
+        logic.emit(col.site, "record.updated", {"_id": rid, **{**row, **clean}}, col.slug)
         return ok({"_id": rid, **{**row, **clean}})
     rid_, row, rec = get_row(col, rid, True, mine)
     clean = schema.full_validate(col, d, partial=partial, current=row, exclude_id=rec.id)
     rec.data = {**rec.data, **clean} if partial else {f["name"]: clean.get(f["name"], "") for f in col.fields}
     rec.save()
     col.save(update_fields=["updated_at"])
+    logic.emit(col.site, "record.updated", item(col, (rec.id, rec.data, rec), True), col.slug)
     return ok(item(col, (rec.id, rec.data, rec), owner, user=mine))
 
 
@@ -563,10 +597,13 @@ def delete_row(col, rid, owner, mine=None):
         get_row(col, rid, owner)
         data.live_delete(col, rid)
         data.invalidate(col)
+        logic.emit(col.site, "record.deleted", {"_id": rid}, col.slug)
         return
     _, _, rec = get_row(col, rid, True, mine)
+    gone = item(col, (rec.id, rec.data, rec), True)
     rec.delete()
     col.save(update_fields=["updated_at"])
+    logic.emit(col.site, "record.deleted", gone, col.slug)
 
 
 # --- OpenAPI --------------------------------------------------------------------------------------
