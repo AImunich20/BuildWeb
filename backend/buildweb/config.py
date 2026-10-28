@@ -75,14 +75,25 @@ def load():
             raw = json.loads(CONFIG_PATH.read_text("utf-8"))
         except (OSError, ValueError):
             raw = {}
-    cfg = _merge(DEFAULTS, raw)
-    if not cfg.get("secret_key"):
-        cfg["secret_key"] = secrets.token_urlsafe(48)
-        save(cfg)
-    return cfg
+    if not raw.get("secret_key"):
+        # Only what the user set is stored, so new defaults in later versions still apply.
+        raw["secret_key"] = secrets.token_urlsafe(48)
+        _write(raw)
+    return _merge(DEFAULTS, raw)
+
+
+def _raw():
+    try:
+        return json.loads(CONFIG_PATH.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def save(cfg):
+    _write(cfg)
+
+
+def _write(cfg):
     with _lock:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = CONFIG_PATH.with_suffix(".tmp")
@@ -91,10 +102,10 @@ def save(cfg):
 
 
 def update(section, values):
-    cfg = load()
-    cfg[section] = _merge(cfg.get(section, {}), values)
-    save(cfg)
-    return cfg
+    raw = _raw()
+    raw[section] = _merge(raw.get(section, {}), values)
+    _write(raw)
+    return load()
 
 
 def django_database(db):

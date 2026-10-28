@@ -27,6 +27,8 @@ DMG="BuildWeb_${VERSION}_$(uname -m).dmg"
 cp "$BUNDLE/macos/BuildWeb.app.tar.gz" "$OUT/$TAR"
 cp "$BUNDLE/macos/BuildWeb.app.tar.gz.sig" "$OUT/$TAR.sig"
 cp "$BUNDLE/dmg/$DMG" "$OUT/$DMG"
+# Same file under a fixed name, so .../releases/latest/download/BuildWeb.dmg always works.
+cp "$BUNDLE/dmg/$DMG" "$OUT/BuildWeb.dmg"
 
 VERSION="$VERSION" ARCH="$ARCH" TAR="$TAR" REPO="$REPO" SIG="$(cat "$OUT/$TAR.sig")" NOTES="${RELEASE_NOTES:-BuildWeb v$VERSION}" \
   node -e '
@@ -43,6 +45,6 @@ echo "Release files in $OUT:"
 ls -1 "$OUT"
 
 if [ "$1" = "--publish" ]; then
-  gh release create "v$VERSION" "$OUT/$DMG" "$OUT/$TAR" "$OUT/$TAR.sig" "$OUT/latest.json" \
+  gh release create "v$VERSION" "$OUT/$DMG" "$OUT/BuildWeb.dmg" "$OUT/$TAR" "$OUT/$TAR.sig" "$OUT/latest.json" \
     --repo "$REPO" --title "BuildWeb v$VERSION" --notes "${RELEASE_NOTES:-BuildWeb v$VERSION}"
 fi
