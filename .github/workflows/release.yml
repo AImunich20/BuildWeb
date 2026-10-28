@@ -1,8 +1,10 @@
-# Every push to main = a new patch release that installed apps pick up automatically.
+# Every push to main = a new patch release for macOS (Apple silicon + Intel), Windows and Linux, which
+# installed apps pick up automatically.
 #   test    → Django test suite
-#   release → next version (latest release + 1 patch, or package.json if bumped by hand),
-#             signed .app/.dmg built on Apple silicon, published to AImunich20/buildweb-releases,
-#             version bump committed back with [skip ci].
+#   version → next version (latest release + 1 patch, or package.json if bumped by hand)
+#   build   → signed app per platform (parallel)
+#   publish → one GitHub release in AImunich20/buildweb-releases with latest.json for every platform,
+#             then the version bump is committed back with [skip ci]
 # Put "[skip release]" in a commit message to push without releasing.
 # Secrets: TAURI_SIGNING_PRIVATE_KEY (~/.tauri/buildweb.key), RELEASES_TOKEN (can create releases in buildweb-releases).
 name: Release patch
@@ -19,6 +21,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  RELEASES_REPO: AImunich20/buildweb-releases
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -32,57 +37,131 @@ jobs:
           uv pip install --python .venv/bin/python -r requirements.txt
           BUILDWEB_DATA=$(mktemp -d) .venv/bin/python manage.py test builder
 
-  release:
+  version:
     needs: test
     if: ${{ !contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip ci]') }}
-    runs-on: macos-14
-    env:
-      RELEASES_REPO: AImunich20/buildweb-releases
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - uses: astral-sh/setup-uv@v6
-      - run: npm ci
-
-      - name: Next version
+      - id: v
+        name: Next version
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           latest=$(gh release view --repo "$RELEASES_REPO" --json tagName -q .tagName 2>/dev/null || echo v0.0.0)
           version=$(node scripts/set-version.js next "$latest")
           echo "Latest release $latest → building v$version"
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Release notes
         run: |
           before="${{ github.event.before }}"
-          if [ -n "$before" ] && git cat-file -e "$before" 2>/dev/null && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+          if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before" 2>/dev/null; then
             git log --no-merges --format='- %s' "$before..${{ github.sha }}" | grep -v '\[skip' > notes.txt || true
           fi
           [ -s notes.txt ] || git log -1 --format='- %s' > notes.txt
-          { echo "RELEASE_NOTES<<EOF_NOTES"; cat notes.txt; echo "EOF_NOTES"; } >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes.txt
 
-      - name: Build, sign and publish
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            bundles: app
+          - platform: darwin-x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
+            bundles: app
+            uv: https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz
+          - platform: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev build-essential file
+      - name: uv for the target architecture
+        if: matrix.uv
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/uv" && curl -sL "${{ matrix.uv }}" | tar xz -C "$RUNNER_TEMP/uv" --strip-components=1
+          echo "UV_BIN=$RUNNER_TEMP/uv/uv" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Set version
+        run: node scripts/set-version.js ${{ needs.version.outputs.version }}
+      - name: Build and sign
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          BUILDWEB_REPO: ${{ env.RELEASES_REPO }}
-        run: sh scripts/release.sh --publish
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Collect
+        run: node scripts/collect.js ${{ matrix.platform }} ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: out/*
+          if-no-files-found: error
 
+  publish:
+    needs: [version, build]
+    # Publish whatever platforms built (one failing platform must not block the others); the Mac
+    # (Apple silicon) build is required, see scripts/publish.js.
+    if: ${{ always() && needs.version.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: build-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: notes
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          export RELEASE_NOTES="$(cat notes.txt)"
+          node scripts/publish.js "$RELEASES_REPO" "${{ needs.version.outputs.version }}"
       - name: Commit version bump
         run: |
+          node scripts/set-version.js ${{ needs.version.outputs.version }}
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-          git diff --cached --quiet || git commit -m "release v$VERSION [skip ci]"
-          git push origin HEAD:main || echo "::warning::could not push the version bump (main moved on); next run continues from the latest release anyway"
+          git add package.json src-tauri/Cargo.toml
+          git diff --cached --quiet || git commit -m "release v${{ needs.version.outputs.version }} [skip ci]"
+          git push origin HEAD:main || echo "::warning::could not push the version bump; the next run continues from the latest release anyway"

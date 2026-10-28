@@ -4,8 +4,8 @@
   "version": "../package.json",
   "identifier": "com.buildweb.app",
   "build": {
-    "beforeBuildCommand": "sh scripts/stage-backend.sh",
-    "beforeDevCommand": "sh scripts/stage-backend.sh",
+    "beforeBuildCommand": "node scripts/stage-backend.js",
+    "beforeDevCommand": "node scripts/stage-backend.js",
     "frontendDist": "../desktop-ui"
   },
   "app": {
@@ -24,13 +24,15 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": "all",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": { "backend-stage/backend/": "backend/", "backend-stage/bin/": "bin/" },
     "category": "DeveloperTool",
     "shortDescription": "Drag-and-drop website builder",
     "createUpdaterArtifacts": true,
-    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "12.0" }
+    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "12.0" },
+    "windows": { "nsis": { "installMode": "currentUser", "languages": ["Thai", "English"] } },
+    "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] }, "appimage": { "bundleMediaFramework": false } }
   },
   "plugins": {
     "updater": {

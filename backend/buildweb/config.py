@@ -13,8 +13,18 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("BUILDWEB_DATA") or BACKEND_DIR / ".data")
 CONFIG_PATH = DATA_DIR / "config.json"
-XAMPP_DIR = Path("/Applications/XAMPP/xamppfiles")
-XAMPP_SOCKET = XAMPP_DIR / "var/mysql/mysql.sock"
+def _xampp():
+    import sys
+
+    if sys.platform == "darwin":
+        base = Path("/Applications/XAMPP/xamppfiles")
+        return base, base / "var/mysql/mysql.sock"
+    if os.name == "nt":
+        return Path(os.environ.get("XAMPP_HOME", r"C:\xampp")), Path("__no_socket__")
+    return Path("/opt/lampp"), Path("/opt/lampp/var/mysql/mysql.sock")
+
+
+XAMPP_DIR, XAMPP_SOCKET = _xampp()
 XAMPP_HTDOCS = XAMPP_DIR / "htdocs"
 
 DEFAULTS = {

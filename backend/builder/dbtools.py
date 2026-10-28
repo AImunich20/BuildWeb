@@ -13,6 +13,8 @@ import pymysql
 
 from buildweb import config
 
+from . import system
+
 BACKEND = config.BACKEND_DIR
 DUMP_EXCLUDE = ["contenttypes", "auth.permission", "sessions", "admin.logentry"]
 
@@ -162,6 +164,6 @@ def xampp_info():
         "installed": installed,
         "socket": str(config.XAMPP_SOCKET) if config.XAMPP_SOCKET.exists() else "",
         "htdocs": str(config.XAMPP_HTDOCS) if config.XAMPP_HTDOCS.exists() else "",
-        "manager": str(config.XAMPP_DIR / "manager-osx.app") if installed else "",
+        "manager": str(system.xampp_manager()) if installed else "",
         "phpmyadmin": "http://localhost/phpmyadmin/",
     }

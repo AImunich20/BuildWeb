@@ -28,9 +28,27 @@ user in Thai. The UI copy is in Thai.
     background thread and disabled in tests.
   - `tailscale.py`: wraps the `tailscale serve`/`funnel` CLI. `hosting.py` runs the main server, one server
     per `Site.host_port`, and the Tailscale publications (taken down on SIGTERM).
+  - `data.py` + `Collection`/`Record`/`DataConnection`: site data. Collections are imported from MySQL/XAMPP
+    (copy mode, or live mode read on every render with a 15 s cache), from `.sql` dumps or from CSV.
+    `Binder` renders `data-bw-repeat` blocks and `{{field}}` placeholders at render time. Unresolved
+    placeholders are left as-is, because imported Vue/Handlebars sites use `{{ }}` too. API rows use `_id`
+    for the record id (tables often have their own `id`).
+  - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
+    `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus
   a tray icon, hide-on-close, autostart (`--hidden`), auto-install when `app.auto_update` is set in the
-  backend config, and SIGTERM to the backend on quit.
+  backend config, and a graceful stop on quit (HTTP POST /api/system/shutdown with header `X-BuildWeb: 1`).
+  - **macOS:** the backend runs as the launchd job `com.buildweb.backend` (plist in the app data dir), not
+    as a child process. macOS 26+ RunningBoard freezes windowless apps together with their children, which
+    used to stop the backend and hosting. `NSAppSleepDisabled` and an NSProcessInfo activity are also set.
+  - Only a backend this instance started is stopped on quit (`STARTED_BACKEND`). `BUILDWEB_PORT` overrides
+    the port, which is useful for testing next to the installed app.
+  - Tailscale CLI calls need `TAILSCALE_BE_CLI=1`; without it, the macOS app binary tries to open its GUI
+    when launched from Finder.
+- CI (`.github/workflows/release.yml`) builds darwin-aarch64, darwin-x86_64 (cross-compiled, with an x64 uv),
+  windows-x86_64 (NSIS) and linux-x86_64 (AppImage + deb). Each platform runs `scripts/collect.js`, then
+  `scripts/publish.js` writes one latest.json plus fixed-name downloads (BuildWeb.dmg, BuildWeb-Intel.dmg,
+  BuildWeb-Setup.exe, BuildWeb.AppImage, BuildWeb.deb).
 - Theme: tokens in `app.css` (`:root` and `[data-theme=dark]`). `_head.html` applies the saved theme before
   first paint.
 

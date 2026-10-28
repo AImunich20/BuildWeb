@@ -41,7 +41,7 @@ def dashboard(request):
 
 def site_manage(request, site_id, tab="pages"):
     site = get_object_or_404(Site, pk=site_id)
-    if tab not in ("pages", "files", "forms", "settings", "export"):
+    if tab not in ("pages", "data", "files", "forms", "settings", "export"):
         tab = "pages"
     data = {
         "site": site_json(site),
@@ -84,6 +84,8 @@ def editor_page_data(site):
         "preview_base": f"/preview/{site.slug}/",
         "fonts_url": fonts_url(site),
         "layouts": sections.PAGE_LAYOUTS,
+        "collections": [{"id": c.id, "slug": c.slug, "name": c.name, "fields": c.fields, "mode": c.mode}
+                        for c in site.collections.all()],
         "sections": [{"id": s["id"], "label": s["label"], "category": s["category"], "icon": s["icon"],
                       "content": sections.block_content(s)} for s in sections.SECTIONS],
     }

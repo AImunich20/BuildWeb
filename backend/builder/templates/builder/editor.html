@@ -12,32 +12,32 @@
 <div class="ed">
   <header class="ed-top">
     <div class="ed-top-l">
-      <a class="btn ghost icon" href="/sites/{{ site.id }}/" title="กลับไปหน้าจัดการเว็บ">←</a>
-      <span class="logo-mark">◆</span>
+      <a class="btn ghost icon" href="/sites/{{ site.id }}/" title="กลับไปหน้าจัดการเว็บ"><i data-icon="undo"></i></a>
+      <span class="logo-mark"><i data-icon="cards" data-size="13"></i></span>
       <div class="ed-title">
         <div class="ed-site">{{ site.name }}</div>
         <button class="ed-page-btn" id="page-switch" title="เปลี่ยนหน้า">{{ page.title }} <span class="mono muted">{{ page.filename }}</span> ▾</button>
       </div>
     </div>
     <div class="ed-top-c" id="devices">
-      <button class="dev active" data-dev="desktop" title="คอมพิวเตอร์">Desktop</button>
-      <button class="dev" data-dev="tablet" title="แท็บเล็ต">Tablet</button>
-      <button class="dev" data-dev="mobile" title="มือถือ">Mobile</button>
+      <button class="dev active" data-dev="desktop" title="คอมพิวเตอร์"><i data-icon="monitor" data-size="15"></i></button>
+      <button class="dev" data-dev="tablet" title="แท็บเล็ต"><i data-icon="tablet" data-size="15"></i></button>
+      <button class="dev" data-dev="mobile" title="มือถือ"><i data-icon="phone" data-size="15"></i></button>
     </div>
     <div class="ed-top-r">
-      <button class="btn ghost icon" data-cmd="undo" title="เลิกทำ (⌘Z)">↶</button>
-      <button class="btn ghost icon" data-cmd="redo" title="ทำซ้ำ (⇧⌘Z)">↷</button>
+      <button class="btn ghost icon" data-cmd="undo" title="เลิกทำ (⌘Z)"><i data-icon="undo"></i></button>
+      <button class="btn ghost icon" data-cmd="redo" title="ทำซ้ำ (⇧⌘Z)"><i data-icon="redo"></i></button>
       <span class="sep"></span>
-      <button class="btn ghost icon" data-cmd="outline" title="แสดงเส้นขอบ">⬚</button>
-      <button class="btn ghost icon" data-cmd="code" title="ดูโค้ด HTML/CSS">&lt;/&gt;</button>
-      <button class="btn ghost icon" data-cmd="import" title="นำเข้า HTML">⇣</button>
-      <button class="btn ghost icon" data-cmd="history" title="เวอร์ชันย้อนหลัง">⟲</button>
-      <button class="btn ghost icon" data-cmd="clear" title="ล้างหน้า">⌫</button>
-      <button class="btn ghost icon" data-cmd="theme" title="สลับธีมสว่าง/มืด" id="theme-btn">◐</button>
+      <button class="btn ghost icon" data-cmd="outline" title="แสดงเส้นขอบ"><i data-icon="outline"></i></button>
+      <button class="btn ghost icon" data-cmd="code" title="ดูโค้ด HTML/CSS"><i data-icon="code"></i></button>
+      <button class="btn ghost icon" data-cmd="import" title="นำเข้า HTML"><i data-icon="import"></i></button>
+      <button class="btn ghost icon" data-cmd="history" title="เวอร์ชันย้อนหลัง"><i data-icon="history"></i></button>
+      <button class="btn ghost icon" data-cmd="clear" title="ล้างหน้า"><i data-icon="trash"></i></button>
+      <button class="btn ghost icon" data-cmd="theme" title="สลับธีมสว่าง/มืด" id="theme-btn"><i data-icon="moon"></i></button>
       <span class="sep"></span>
       <span class="save-state" id="save-state">พร้อม</span>
       <button class="btn sm" data-cmd="preview" title="ดูแบบเต็มจอ">ดูตัวอย่าง</button>
-      <button class="btn sm" data-cmd="open" title="เปิดในเบราว์เซอร์">↗</button>
+      <button class="btn sm" data-cmd="open" title="เปิดในเบราว์เซอร์"><i data-icon="external"></i></button>
       <select class="input status-sel" id="status" title="สถานะหน้า">
         <option value="published">● เผยแพร่</option><option value="draft">○ ฉบับร่าง</option>
       </select>
@@ -46,16 +46,18 @@
   </header>
   <div class="ed-main">
     <nav class="ed-rail" id="rail">
-      <button data-panel="blocks" class="active"><i>＋</i>เพิ่ม</button>
-      <button data-panel="pages"><i>▤</i>หน้า</button>
-      <button data-panel="layers"><i>☰</i>เลเยอร์</button>
-      <button data-panel="media"><i>▣</i>รูปภาพ</button>
-      <button data-panel="theme"><i>◑</i>ธีม</button>
+      <button data-panel="blocks" class="active"><i data-icon="plus" data-size="18"></i>เพิ่ม</button>
+      <button data-panel="pages"><i data-icon="pages" data-size="18"></i>หน้า</button>
+      <button data-panel="layers"><i data-icon="layers" data-size="18"></i>เลเยอร์</button>
+      <button data-panel="data"><i data-icon="table" data-size="18"></i>ข้อมูล</button>
+      <button data-panel="media"><i data-icon="image" data-size="18"></i>รูปภาพ</button>
+      <button data-panel="theme"><i data-icon="palette" data-size="18"></i>ธีม</button>
     </nav>
     <aside class="ed-left">
       <section data-pane="blocks"><div class="pane-head"><input class="input" id="block-search" placeholder="ค้นหาบล็อก..."></div><div id="blocks"></div></section>
       <section data-pane="pages" class="hidden"><div class="pane-head row between"><b>หน้าทั้งหมด</b><button class="btn sm primary" id="add-page">＋ เพิ่มหน้า</button></div><div id="page-list"></div></section>
       <section data-pane="layers" class="hidden"><div class="pane-head"><b>เลเยอร์</b><div class="muted small">ลากเพื่อจัดลำดับ คลิกเพื่อเลือก</div></div><div id="layers"></div></section>
+      <section data-pane="data" class="hidden"><div class="pane-head row between"><b>ข้อมูลของเว็บ</b><a class="btn sm" href="/sites/{{ site.id }}/data/">จัดการ</a></div><div id="data-panel"></div></section>
       <section data-pane="media" class="hidden"><div class="pane-head row between"><b>รูปภาพของเว็บ</b><button class="btn sm" id="upload-btn">อัปโหลด</button><input type="file" id="upload-input" multiple accept="image/*,video/*" hidden></div>
         <div class="muted small" style="padding:0 14px 10px">ลากรูปไปวางในหน้า หรือเลือกรูปแล้วกดรูปนี้เพื่อเปลี่ยน</div><div id="media-list" class="media-grid"></div></section>
       <section data-pane="theme" class="hidden"><div class="pane-head"><b>ธีมของเว็บ</b><div class="muted small">มีผลกับทุกหน้า</div></div><div id="theme-panel"></div></section>
@@ -78,6 +80,7 @@
 <script src="{% static 'vendor/grapesjs/countdown.js' %}"></script>
 <script src="{% static 'vendor/grapesjs/tooltip.js' %}"></script>
 <script src="{% static 'vendor/grapesjs/parser-postcss.js' %}"></script>
+<script src="{% static 'builder/icons.js' %}?v={{ app_version }}"></script>
 <script src="{% static 'builder/app.js' %}?v={{ app_version }}"></script>
 <script src="{% static 'builder/editor.js' %}?v={{ app_version }}"></script>
 </body>

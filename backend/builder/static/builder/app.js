@@ -6,7 +6,7 @@
   }
 
   async function api(url, data, opts = {}) {
-    const init = { method: data === undefined && !opts.method ? 'GET' : (opts.method || 'POST'), headers: { 'X-CSRFToken': cookie('buildweb_csrf') } };
+    const init = { method: data === undefined && !opts.method ? 'GET' : (opts.method || 'POST'), headers: { 'X-CSRFToken': cookie('buildweb_csrf'), 'X-BuildWeb': '1' } };
     if (data instanceof FormData) init.body = data;
     else if (data !== undefined) { init.body = JSON.stringify(data); init.headers['Content-Type'] = 'application/json'; }
     let res, json;

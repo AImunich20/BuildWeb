@@ -128,23 +128,24 @@
 
   // ------------------------------------------------------------------ blocks
   const bm = editor.BlockManager;
-  const CAT_ORDER = ['ส่วนหัว/ท้าย', 'เนื้อหา', 'ขาย', 'สื่อ', 'ฟอร์ม', 'พื้นฐาน', 'ส่วนประกอบ', 'ขั้นสูง'];
+  const CAT_ORDER = ['ส่วนหัว/ท้าย', 'เนื้อหา', 'ขาย', 'ข้อมูล', 'สื่อ', 'ฟอร์ม', 'พื้นฐาน', 'ส่วนประกอบ', 'ขั้นสูง'];
   D.sections.forEach(s => bm.add('bw-' + s.id, {
-    label: s.label, category: s.category, content: s.content, media: `<div class="bw-bicon">${s.icon}</div>`,
+    label: s.label, category: s.category, content: s.content, media: `<div class="bw-bicon">${BW_ICON(s.icon, 20)}</div>`,
     attributes: { title: 'ลากไปวางในหน้า' },
   }));
   // A few small Canva-style elements
-  const el = (id, label, icon, content) => bm.add('bw-el-' + id, { label, category: 'พื้นฐาน', content, media: `<div class="bw-bicon">${icon}</div>` });
-  el('heading', 'หัวข้อ', 'H1', '<h2 style="padding:10px 0">หัวข้อใหม่</h2>');
-  el('para', 'ย่อหน้า', '¶', '<p style="padding:6px 0">ดับเบิลคลิกเพื่อพิมพ์ข้อความของคุณ</p>');
-  el('button', 'ปุ่ม', '⬭', '<a href="#" class="bw-btn">ปุ่มของคุณ</a>');
-  el('button2', 'ปุ่มขอบ', '◯', '<a href="#" class="bw-btn bw-btn-outline">ปุ่มของคุณ</a>');
-  el('divider', 'เส้นคั่น', '—', '<hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">');
-  el('spacer', 'ช่องว่าง', '↕', '<div style="height:60px"></div>');
-  el('container', 'กล่องกึ่งกลาง', '▢', '<div class="bw-container" style="padding:40px 20px;min-height:80px"></div>');
-  el('section', 'ส่วนว่าง', '▭', '<section style="padding:70px 0;min-height:120px"><div class="bw-container" style="min-height:60px"></div></section>');
-  el('list', 'รายการ', '•', '<ul style="padding-left:22px;line-height:1.9"><li>รายการที่หนึ่ง</li><li>รายการที่สอง</li><li>รายการที่สาม</li></ul>');
-  el('icon', 'อิโมจิ/ไอคอน', '☺', '<span style="font-size:48px;display:inline-block">🚀</span>');
+  const el = (id, label, icon, content, category = 'พื้นฐาน') => bm.add('bw-el-' + id, { label, category, content, media: `<div class="bw-bicon">${BW_ICON(icon, 20)}</div>` });
+  el('heading', 'หัวข้อ', 'heading', '<h2 style="padding:10px 0">หัวข้อใหม่</h2>');
+  el('para', 'ย่อหน้า', 'text', '<p style="padding:6px 0">ดับเบิลคลิกเพื่อพิมพ์ข้อความของคุณ</p>');
+  el('button', 'ปุ่ม', 'button', '<a href="#" class="bw-btn">ปุ่มของคุณ</a>');
+  el('button2', 'ปุ่มขอบ', 'button-outline', '<a href="#" class="bw-btn bw-btn-outline">ปุ่มของคุณ</a>');
+  el('divider', 'เส้นคั่น', 'divider', '<hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">');
+  el('spacer', 'ช่องว่าง', 'spacer', '<div style="height:60px"></div>');
+  el('container', 'กล่องกึ่งกลาง', 'box', '<div class="bw-container" style="padding:40px 20px;min-height:80px"></div>');
+  el('section', 'ส่วนว่าง', 'section', '<section style="padding:70px 0;min-height:120px"><div class="bw-container" style="min-height:60px"></div></section>');
+  el('list', 'รายการ', 'list', '<ul style="padding-left:22px;line-height:1.9"><li>รายการที่หนึ่ง</li><li>รายการที่สอง</li><li>รายการที่สาม</li></ul>');
+  el('icon', 'สัญลักษณ์', 'smile', '<span style="font-size:48px;display:inline-block">★</span>');
+  el('repeat', 'กล่องวนซ้ำข้อมูล', 'repeat', '<div class="bw-container" data-bw-repeat="" style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding:30px 20px"><div style="padding:20px;border:1px solid #eee;border-radius:12px"><h3>{{ชื่อฟิลด์}}</h3><p>เลือกชุดข้อมูลที่แท็บ “ตั้งค่า”</p></div></div>', 'ข้อมูล');
 
   function renderBlocks(filter = '') {
     const q = filter.trim().toLowerCase();
@@ -273,6 +274,7 @@
     theme: () => {
       const dark = document.documentElement.getAttribute('data-theme') === 'dark';
       BW.setTheme(dark ? 'light' : 'dark');
+      $('#theme-btn').innerHTML = BW_ICON(dark ? 'moon' : 'sun');
     },
     import: openImport,
     history: openHistory,
@@ -307,6 +309,7 @@
     document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.panel));
     if (b.dataset.panel === 'theme') drawTheme();
     if (b.dataset.panel === 'pages') drawPages();
+    if (b.dataset.panel === 'data') drawData();
   }));
 
   // right tabs
@@ -325,12 +328,12 @@
   // ------------------------------------------------------------------ pages panel
   function drawPages() {
     const sharedRows = (site.shared || []).map(x => `<div class="pg ${isShared && target.id === x.id ? 'cur' : ''}" data-url="${x.edit_url}">
-      <span>${x.kind === 'header' ? '⬒' : '⬓'}</span><div class="t"><b>${esc(x.label)}</b><span>ใช้ทุกหน้า</span></div>
+      <span class="muted">${BW_ICON(x.kind === 'header' ? 'panel-top' : 'panel-bottom')}</span><div class="t"><b>${esc(x.label)}</b><span>ใช้ทุกหน้า</span></div>
       ${x.enabled ? '<span class="badge ok">เปิด</span>' : '<span class="badge">ปิด</span>'}</div>`).join('');
     $('#page-list').innerHTML = sharedRows + '<div class="pg-sep">หน้า</div>' + D.pages.map(p => `<div class="pg ${!isShared && p.id === page.id ? 'cur' : ''}" data-url="${p.edit_url}">
-      <span>${p.is_home ? '🏠' : '📄'}</span><div class="t"><b>${esc(p.title)}</b><span class="mono">${esc(p.filename)}</span></div>
+      <span class="muted">${BW_ICON(p.is_home ? 'home' : 'file')}</span><div class="t"><b>${esc(p.title)}</b><span class="mono">${esc(p.filename)}</span></div>
       ${p.status === 'draft' ? '<span class="badge warn">ร่าง</span>' : ''}</div>`).join('') +
-      `<div style="padding:14px"><a class="btn sm" href="/sites/${site.id}/pages/" style="width:100%">⚙ จัดการหน้า & SEO</a></div>`;
+      `<div style="padding:14px"><a class="btn sm" href="/sites/${site.id}/pages/" style="width:100%">จัดการหน้า & SEO</a></div>`;
     document.querySelectorAll('#page-list .pg').forEach(el => el.addEventListener('click', () => leaveTo(el.dataset.url)));
     document.querySelectorAll('#page-list a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); leaveTo(a.href); }));
   }
@@ -353,6 +356,86 @@
     };
   });
 
+  // ------------------------------------------------------------------ data (collections)
+  const COLS = D.collections || [];
+  const colBySlug = Object.fromEntries(COLS.map(c => [c.slug, c]));
+  const fieldPh = f => `{{${f.name}}}`;
+
+  function cardTemplate(c) {
+    // A ready-made card using the collection's fields: image, first text as title, the rest as lines.
+    const img = c.fields.find(f => f.type === 'image');
+    const texts = c.fields.filter(f => f !== img && !['bool', 'html'].includes(f.type) && !/^id$/i.test(f.name));
+    const [title, ...rest] = texts;
+    const link = c.fields.find(f => f.type === 'link');
+    return `<section class="bw-data-sec"><div class="bw-container">
+      <div class="bw-data-grid" data-bw-repeat="${c.slug}" data-bw-limit="12" data-bw-empty="ยังไม่มีข้อมูล">
+        <article class="bw-data-card">${img ? `<img src="${fieldPh(img)}" alt="${title ? fieldPh(title) : ''}">` : ''}
+          <div class="bw-data-body">${title ? `<h3>${fieldPh(title)}</h3>` : ''}
+          ${rest.filter(f => f !== link).slice(0, 3).map(f => `<p>${fieldPh(f)}</p>`).join('')}
+          ${link ? `<a class="bw-btn" href="${fieldPh(link)}">ดูเพิ่มเติม</a>` : ''}</div></article></div></div></section>
+      <style>.bw-data-sec{padding:60px 0}.bw-data-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+      .bw-data-card{background:#fff;border:1px solid #eee;border-radius:var(--bw-radius);overflow:hidden}
+      .bw-data-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block}
+      .bw-data-body{padding:16px 18px}.bw-data-body h3{margin:0 0 6px}.bw-data-body p{margin:0 0 6px;color:var(--bw-muted)}</style>`;
+  }
+  function tableTemplate(c) {
+    const fs = c.fields.slice(0, 6);
+    return `<section class="bw-data-sec"><div class="bw-container"><table class="bw-data-table"><thead><tr>${fs.map(f => `<th>${BW.esc(f.label)}</th>`).join('')}</tr></thead>
+      <tbody data-bw-repeat="${c.slug}" data-bw-limit="50"><tr>${fs.map(f => `<td>${fieldPh(f)}</td>`).join('')}</tr></tbody></table></div></section>
+      <style>.bw-data-table{width:100%;border-collapse:collapse}.bw-data-table th,.bw-data-table td{padding:10px 12px;border-bottom:1px solid #eee;text-align:left}
+      .bw-data-table th{color:var(--bw-muted);font-weight:600}</style>`;
+  }
+  COLS.forEach(c => {
+    bm.add('bw-data-cards-' + c.slug, { label: `${c.name} (การ์ด)`, category: 'ข้อมูล', content: cardTemplate(c), media: `<div class="bw-bicon">${BW_ICON('cards', 20)}</div>` });
+    bm.add('bw-data-table-' + c.slug, { label: `${c.name} (ตาราง)`, category: 'ข้อมูล', content: tableTemplate(c), media: `<div class="bw-bicon">${BW_ICON('table', 20)}</div>` });
+  });
+
+  function drawData() {
+    const box = $('#data-panel');
+    if (!COLS.length) {
+      box.innerHTML = `<div class="r-empty">ยังไม่มีชุดข้อมูล<br><a class="btn sm" style="margin-top:10px" href="/sites/${site.id}/data/">นำเข้าจาก XAMPP / .sql / CSV</a></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="small muted" style="padding:10px 12px">คลิกฟิลด์เพื่อแทรก <code>{{ฟิลด์}}</code> ในข้อความที่เลือก · ลากบล็อกจากหมวด “ข้อมูล” เพื่อแสดงทั้งชุด</div>` +
+      COLS.map(c => `<div class="data-col"><div class="row between"><b>${BW.esc(c.name)}</b><code>${BW.esc(c.slug)}</code></div>
+        <div class="chips">${c.fields.map(f => `<button class="chip" data-col="${c.slug}" data-f="${BW.esc(f.name)}" title="${BW.esc(f.label)} · ${f.type}">${BW.esc(f.name)}</button>`).join('')}
+        <button class="chip ghost" data-col="${c.slug}" data-f="count" title="จำนวนแถว">count</button></div></div>`).join('');
+    box.querySelectorAll('.chip').forEach(b => b.onclick = () => insertField(b.dataset.col, b.dataset.f));
+  }
+  function insertField(slug, field) {
+    const sel = editor.getSelected();
+    // Inside a repeat block use {{field}}; elsewhere {{collection.field}} (first row / count).
+    let inRepeat = false;
+    for (let c = sel; c; c = c.parent()) { if ((c.getAttributes()['data-bw-repeat'] || '') === slug) { inRepeat = true; break; } }
+    const ph = inRepeat && field !== 'count' ? `{{${field}}}` : `{{${slug}.${field}}}`;
+    const rte = editor.RichTextEditor;
+    if (sel && sel.is('text') && rte && sel.getView() && sel.getView().rte && sel.getView().rte.actionbar) {
+      try { rte.insertHTML(ph); return; } catch (e) { /* fall back */ }
+    }
+    if (sel && sel.is('image')) { sel.set('src', ph); toast(`ตั้งรูปเป็น ${ph}`, 'ok'); return; }
+    if (sel && sel.is('text')) { sel.components(sel.getInnerHTML() + ' ' + ph); toast(`แทรก ${ph}`, 'ok'); return; }
+    navigator.clipboard.writeText(ph).then(() => toast(`คัดลอก ${ph} แล้ว — วางในข้อความได้เลย`, 'ok'));
+  }
+
+  // "Repeat from data" settings on every element (stored as data-bw-* attributes).
+  const repeatTraits = () => {
+    const opts = [{ id: '', name: '— ไม่วนซ้ำ —' }, ...COLS.map(c => ({ id: c.slug, name: c.name }))];
+    return [
+      { type: 'select', name: 'data-bw-repeat', label: 'วนซ้ำจากข้อมูล', options: opts },
+      { type: 'number', name: 'data-bw-limit', label: 'แสดงสูงสุด (แถว)', min: 0 },
+      { name: 'data-bw-sort', label: 'เรียงตามฟิลด์' },
+      { type: 'select', name: 'data-bw-order', label: 'ลำดับ', options: [{ id: '', name: 'น้อย → มาก' }, { id: 'desc', name: 'มาก → น้อย' }] },
+      { name: 'data-bw-filter', label: 'กรอง (เช่น category=coffee;price>50)' },
+      { name: 'data-bw-empty', label: 'ข้อความเมื่อไม่มีข้อมูล' },
+    ];
+  };
+  editor.on('component:selected', comp => {
+    if (!comp || comp.get('type') === 'bw-shared' || comp.is('textnode') || comp.get('tagName') === 'body') return;
+    if (!['div', 'section', 'ul', 'ol', 'tbody', 'article', 'nav', 'main', 'aside', 'span'].includes(comp.get('tagName'))) return;
+    if (comp.getTrait('data-bw-repeat')) return;
+    comp.addTrait(repeatTraits(), { at: comp.getTraits().length });
+  });
+
   // ------------------------------------------------------------------ media panel
   const am = editor.AssetManager;
   let mediaList = [];
@@ -365,7 +448,7 @@
   function drawMedia() {
     const box = $('#media-list');
     if (!mediaList.length) { box.innerHTML = '<div class="muted small" style="grid-column:1/-1;text-align:center;padding:30px 0">ยังไม่มีรูป กด “อัปโหลด”</div>'; return; }
-    box.innerHTML = mediaList.map(a => `<div class="mi" data-url="${esc(a.url)}" data-kind="${a.kind}" title="${esc(a.name)}" style="${a.kind === 'image' ? `background-image:url('${encodeURI(a.url)}')` : ''}">${a.kind === 'video' ? '🎬' : ''}<span>${esc(a.name)}</span></div>`).join('');
+    box.innerHTML = mediaList.map(a => `<div class="mi" data-url="${esc(a.url)}" data-kind="${a.kind}" title="${esc(a.name)}" style="${a.kind === 'image' ? `background-image:url('${encodeURI(a.url)}')` : ''}">${a.kind === 'video' ? BW_ICON('video', 22) : ''}<span>${esc(a.name)}</span></div>`).join('');
     box.querySelectorAll('.mi').forEach(it => it.addEventListener('click', () => useMedia(it.dataset.url, it.dataset.kind)));
   }
   function useMedia(url, kind) {

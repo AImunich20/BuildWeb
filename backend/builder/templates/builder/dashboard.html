@@ -4,8 +4,8 @@
 <div class="topline">
   <div><div class="crumbs">~/sites</div><h1>เว็บไซต์ของฉัน</h1><div class="sub">สร้าง แก้ไข และเผยแพร่เว็บไซต์ด้วยการลากวาง</div></div>
   <div class="row">
-    <button class="btn" id="import-btn">⇣ นำเข้าเว็บ</button>
-    <button class="btn primary" id="new-site">＋ สร้างเว็บใหม่</button>
+    <button class="btn" id="import-btn"><i data-icon="import"></i> นำเข้าเว็บ</button>
+    <button class="btn primary" id="new-site"><i data-icon="plus"></i> สร้างเว็บใหม่</button>
   </div>
 </div>
 
@@ -20,7 +20,7 @@
 </div>
 
 <div class="sites">
-  <div class="new-card" id="new-site-card"><div><div class="plus">＋</div>สร้างเว็บใหม่<div class="small muted" style="margin-top:4px">หรือ <a href="#import" id="import-link">นำเข้าจาก HTML / GitHub</a></div></div></div>
+  <div class="new-card" id="new-site-card"><div><div class="plus"><i data-icon="plus" data-size="18"></i></div>สร้างเว็บใหม่<div class="small muted" style="margin-top:4px">หรือ <a href="#import" id="import-link">นำเข้าจาก HTML / GitHub</a></div></div></div>
   {% for c in cards %}
   <div class="card site-card">
     <div class="thumb" data-href="/sites/{{ c.site.id }}/edit/">
@@ -33,7 +33,7 @@
       <div class="acts">
         <a class="btn primary sm" href="/sites/{{ c.site.id }}/edit/">ออกแบบ</a>
         <a class="btn sm" href="/sites/{{ c.site.id }}/">จัดการ</a>
-        <a class="btn sm ghost icon" href="/preview/{{ c.site.slug }}/" target="_blank" title="ดูตัวอย่าง">↗</a>
+        <a class="btn sm ghost icon" href="/preview/{{ c.site.slug }}/" target="_blank" title="ดูตัวอย่าง"><i data-icon="external"></i></a>
       </div>
     </div>
   </div>
@@ -56,7 +56,7 @@ fitThumbs(); window.addEventListener('resize', fitThumbs);
 function newSite() {
   const tpls = TEMPLATES.map((t, i) => `<div class="tpl ${i === 1 ? 'sel' : ''}" data-id="${t.id}">
       <div class="sw" style="background:${t.preview}"></div><div class="t"><b>${esc(t.name)}</b><span>${esc(t.description)}</span></div></div>`).join('');
-  const m = modal(`<header><h2>สร้างเว็บใหม่</h2><button class="btn ghost icon sm" data-close>✕</button></header>
+  const m = modal(`<header><h2>สร้างเว็บใหม่</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
     <div class="body">
       <label class="field"><span>ชื่อเว็บไซต์</span><input class="input" name="name" placeholder="เช่น ร้านกาแฟของฉัน" maxlength="200"></label>
       <label class="field"><span>คำอธิบายสั้นๆ <small>— ใช้เป็นคำอธิบายบน Google</small></span><input class="input" name="description" maxlength="300"></label>
@@ -79,7 +79,7 @@ function newSite() {
 
 function importSite() {
   const siteOpts = SITES.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  const m = modal(`<header><h2>นำเข้าเว็บไซต์</h2><button class="btn ghost icon sm" data-close>✕</button></header>
+  const m = modal(`<header><h2>นำเข้าเว็บไซต์</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
     <div class="body">
       <div class="seg" id="imp-tabs" style="margin-bottom:16px"><button class="on" data-src="files">ไฟล์ / โฟลเดอร์ / .zip</button><button data-src="github">GitHub</button></div>
       <div data-pane="files">

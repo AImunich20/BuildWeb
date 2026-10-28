@@ -2,15 +2,14 @@
 `tailscale serve` (HTTPS for devices in your tailnet) or `tailscale funnel` (HTTPS on the public internet).
 """
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
-CANDIDATES = [
-    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-    "/opt/homebrew/bin/tailscale",
-    "/usr/local/bin/tailscale",
-]
+from .system import NO_WINDOW, WINDOWS, tailscale_candidates
+
+CANDIDATES = tailscale_candidates()
 FUNNEL_PORTS = (443, 8443, 10000)  # the only HTTPS ports Funnel allows
 
 
@@ -25,10 +24,15 @@ def run(args, timeout=20):
     b = binary()
     if not b:
         raise RuntimeError("ไม่พบ Tailscale ในเครื่อง — ติดตั้งจาก tailscale.com/download")
-    r = subprocess.run([b, *args], capture_output=True, text=True, timeout=timeout)
+    # Launched from Finder (no terminal), the macOS app binary would try to open its GUI instead of acting
+    # as the CLI; TAILSCALE_BE_CLI forces CLI mode.
+    env = {**os.environ, "TAILSCALE_BE_CLI": "1"}
+    r = subprocess.run([b, *args], capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL,
+                       start_new_session=not WINDOWS, creationflags=NO_WINDOW)
     if r.returncode != 0:
         msg = (r.stderr or r.stdout).strip()
-        if "Funnel not available" in msg or "funnel" in msg.lower() and "not" in msg.lower() and "enabled" in msg.lower():
+        low = msg.lower()
+        if "funnel not available" in low or ("funnel" in low and "not" in low and "enabled" in low):
             msg = "บัญชี Tailscale นี้ยังไม่เปิด Funnel — เปิดได้ที่หน้า Access controls ของ Tailscale admin (nodeAttrs: funnel) " + msg
         elif "HTTPS" in msg and "not enabled" in msg:
             msg = "tailnet นี้ยังไม่เปิด HTTPS certificates — เปิดที่ Tailscale admin › DNS › Enable HTTPS " + msg
@@ -96,3 +100,29 @@ def url(https_port=443):
     if not host:
         return ""
     return f"https://{host}/" if int(https_port) == 443 else f"https://{host}:{int(https_port)}/"
+
+
+def connect():
+    """`tailscale up` (uses the existing login). Raises with a hint when a login in the app is needed."""
+    try:
+        run(["up", "--timeout=20s"], timeout=30)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Tailscale ใช้เวลานานเกินไป — เปิดแอป Tailscale แล้วกด Connect") from e
+    except RuntimeError as e:
+        if "login" in str(e).lower() or "auth" in str(e).lower():
+            raise RuntimeError("ต้องล็อกอิน Tailscale ก่อน — เปิดแอป Tailscale แล้วล็อกอิน") from e
+        raise
+    return status()
+
+
+def open_app():
+    import sys
+
+    from .system import popen
+
+    if sys.platform == "darwin":
+        popen(["open", "-a", "Tailscale"])
+    elif WINDOWS:
+        popen([binary().replace("tailscale.exe", "tailscale-ipn.exe")])
+    else:
+        raise RuntimeError("บน Linux ให้รัน `sudo tailscale up` ในเทอร์มินัล")

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Asset, AssetFolder, FormSubmission, Page, PageRevision, Site
+from .models import Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record, SharedSection, Site
 
 
 class PageInline(admin.TabularInline):
@@ -55,3 +55,25 @@ class FormSubmissionAdmin(admin.ModelAdmin):
     list_display = ("site", "form_name", "page", "is_read", "created_at")
     list_filter = ("site", "is_read", "form_name")
     readonly_fields = ("site", "page", "form_name", "data", "ip", "user_agent", "created_at")
+
+
+admin.site.register(SharedSection)
+
+
+class RecordInline(admin.TabularInline):
+    model = Record
+    extra = 0
+    fields = ("position", "data")
+
+
+@admin.register(Collection)
+class CollectionAdmin(admin.ModelAdmin):
+    list_display = ("name", "site", "slug", "mode", "source_table", "updated_at")
+    list_filter = ("site", "mode")
+    inlines = [RecordInline]
+
+
+@admin.register(DataConnection)
+class DataConnectionAdmin(admin.ModelAdmin):
+    list_display = ("name", "host", "port", "user", "database")
+    exclude = ("password",)

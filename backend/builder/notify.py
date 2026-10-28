@@ -5,8 +5,6 @@ Sent from a background thread so a slow channel never delays the visitor's form 
 import json
 import logging
 import smtplib
-import subprocess
-import sys
 import threading
 import urllib.request
 from email.message import EmailMessage
@@ -42,10 +40,10 @@ def _post_json(url, payload, timeout=8):
 
 
 def send_mac(title, text):
-    if sys.platform != "darwin":
-        return
-    script = f"display notification {json.dumps(text[:240])} with title {json.dumps(title)} sound name \"Glass\""
-    subprocess.run(["osascript", "-e", script], timeout=5, capture_output=True)
+    """Desktop notification (macOS / Windows toast / Linux notify-send); the setting is still called "mac"."""
+    from .system import desktop_notify
+
+    desktop_notify(title, text)
 
 
 def send_telegram(cfg, text):

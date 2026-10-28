@@ -252,3 +252,77 @@ class FormSubmission(models.Model):
         ordering = ["-created_at"]
         verbose_name = "ข้อมูลจากฟอร์ม"
         verbose_name_plural = "ข้อมูลจากฟอร์ม"
+
+
+class DataConnection(models.Model):
+    """A MySQL/MariaDB server (usually XAMPP) that collections can import from or read live."""
+
+    name = models.CharField("ชื่อการเชื่อมต่อ", max_length=100)
+    host = models.CharField(max_length=200, default="127.0.0.1")
+    port = models.PositiveIntegerField(default=3306)
+    user = models.CharField(max_length=100, default="root")
+    password = models.CharField(max_length=200, blank=True)
+    database = models.CharField(max_length=100, blank=True)
+    socket = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "การเชื่อมต่อฐานข้อมูล"
+        verbose_name_plural = "การเชื่อมต่อฐานข้อมูล"
+
+    def __str__(self):
+        return f"{self.name} ({self.user}@{self.host}:{self.port}/{self.database})"
+
+    def as_config(self, database=None):
+        return {"host": self.host, "port": self.port, "user": self.user, "password": self.password,
+                "name": database if database is not None else self.database, "socket": self.socket}
+
+
+class Collection(models.Model):
+    """A table of data a site's pages can show (repeat blocks, {{placeholders}})."""
+
+    COPY, LIVE = "copy", "live"
+    MODES = [(COPY, "เก็บไว้ใน BuildWeb"), (LIVE, "เชื่อมสดกับ MySQL")]
+    FIELD_TYPES = ["text", "longtext", "number", "image", "link", "date", "bool", "html"]
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="collections")
+    name = models.CharField("ชื่อ", max_length=120)
+    slug = models.SlugField("ชื่อที่ใช้อ้างอิง", max_length=60)
+    fields = models.JSONField(default=list, blank=True)  # [{"name", "label", "type"}]
+    mode = models.CharField(max_length=8, choices=MODES, default=COPY)
+    connection = models.ForeignKey(DataConnection, null=True, blank=True, on_delete=models.SET_NULL, related_name="collections")
+    source_database = models.CharField(max_length=100, blank=True)
+    source_table = models.CharField(max_length=100, blank=True)
+    live_order = models.CharField(max_length=100, blank=True)
+    live_desc = models.BooleanField(default=False)
+    live_limit = models.PositiveIntegerField(default=500)
+    last_synced = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [models.UniqueConstraint(fields=["site", "slug"], name="unique_collection_slug")]
+        verbose_name = "ชุดข้อมูล"
+        verbose_name_plural = "ชุดข้อมูล"
+
+    def __str__(self):
+        return f"{self.site.name} / {self.name}"
+
+    @property
+    def field_names(self):
+        return [f["name"] for f in self.fields]
+
+
+class Record(models.Model):
+    collection = models.ForeignKey(Collection, on_delete=models.CASCADE, related_name="records")
+    data = models.JSONField(default=dict)
+    position = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        verbose_name = "แถวข้อมูล"
+        verbose_name_plural = "แถวข้อมูล"

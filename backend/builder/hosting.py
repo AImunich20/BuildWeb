@@ -47,6 +47,7 @@ class HostingServer:
         self.lan = False
         self.ts_error = ""
         self._ts_published = set()  # https ports we published through tailscale
+        self._watcher = None
 
     # -- servers ---------------------------------------------------------------------------------
     @property
@@ -157,6 +158,32 @@ class HostingServer:
         except (RuntimeError, OSError) as e:
             self.ts_error = str(e)
             log.warning("tailscale: %s", e)
+
+    def watch_tailscale(self, interval=30):
+        """Publish (again) when Tailscale comes up after the app started, or after it reconnects."""
+        if self._watcher:
+            return
+
+        def loop():
+            import time
+
+            from . import tailscale
+
+            while True:
+                time.sleep(interval)
+                try:
+                    h = config.load()["hosting"]
+                    if not (h["enabled"] and h.get("tailscale") and self.running):
+                        continue
+                    port = int(h.get("tailscale_port") or 443)
+                    s = tailscale.status()
+                    if s.get("running") and (port not in self._ts_published or self.ts_error or str(port) not in s.get("serve", {})):
+                        self.apply_tailscale(h)
+                except Exception as e:  # never let the watcher die
+                    log.warning("tailscale watcher: %s", e)
+
+        self._watcher = threading.Thread(target=loop, daemon=True, name="tailscale-watch")
+        self._watcher.start()
 
     def shutdown(self):
         """App is quitting: stop servers and take our tailscale publications down."""

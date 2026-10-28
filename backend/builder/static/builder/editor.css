@@ -132,3 +132,16 @@ select.input.status-sel{width:auto;height:28px;padding:0 8px;font-size:12.5px}
 .rev{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .rev .t{flex:1}
 @media (max-width:1200px){.ed-main{grid-template-columns:52px 236px 1fr 256px}.ed-top-r .btn.sm[data-cmd=open]{display:none}}
+
+/* icons + data panel */
+i[data-icon]{display:inline-flex;align-items:center;justify-content:center;font-style:normal}
+.ic{display:block;flex:none}
+.ed-rail button .ic{width:18px;height:18px}
+.data-col{padding:10px 12px;border-bottom:1px solid var(--line)}
+.data-col code{font-size:11px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{border:1px solid var(--line-2);background:var(--bg);color:var(--ink-2);border-radius:999px;padding:3px 10px;font:12px var(--mono);cursor:pointer}
+.chip:hover{border-color:var(--brand);color:var(--ink)}
+.chip.ghost{border-style:dashed}
+
+.gjs-block .bw-bicon svg,.bw-bicon .ic{fill:none!important;width:20px;height:20px}

@@ -27,7 +27,7 @@ SECTIONS = [
         "id": "navbar",
         "label": "แถบเมนู",
         "category": "ส่วนหัว/ท้าย",
-        "icon": "☰",
+        "icon": "menu",
         "html": """<header class="bw-nav"><div class="bw-container bw-nav-in">
 <a href="index.html" class="bw-logo">แบรนด์ของคุณ</a>
 <button class="bw-nav-toggle" data-bw-menu-toggle=".bw-nav-links" aria-label="เมนู">☰</button>
@@ -50,7 +50,7 @@ flex-direction:column;background:#fff;padding:16px 20px;border-bottom:1px solid 
         "id": "hero",
         "label": "ฮีโร่ (หัวเว็บ)",
         "category": "เนื้อหา",
-        "icon": "★",
+        "icon": "star",
         "html": f"""<section class="bw-hero"><div class="bw-container bw-hero-in">
 <div class="bw-hero-text"><span class="bw-badge">✨ ใหม่ล่าสุด</span>
 <h1>สร้างสิ่งที่ยอดเยี่ยม<br>ให้ลูกค้าของคุณ</h1>
@@ -71,7 +71,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "hero-center",
         "label": "ฮีโร่ตรงกลาง",
         "category": "เนื้อหา",
-        "icon": "◎",
+        "icon": "target",
         "html": """<section class="bw-hero2"><div class="bw-container">
 <h1>ทุกอย่างที่คุณต้องการ<br>อยู่ในที่เดียว</h1>
 <p>คำอธิบายสั้นๆ ที่ดึงดูดให้ผู้คนอยากอ่านต่อ</p>
@@ -85,7 +85,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "features",
         "label": "จุดเด่น 3 ช่อง",
         "category": "เนื้อหา",
-        "icon": "▦",
+        "icon": "grid",
         "html": """<section class="bw-features" id="features"><div class="bw-container">
 <div class="bw-sec-head"><h2>ทำไมต้องเลือกเรา</h2><p>สามเหตุผลที่ลูกค้าไว้วางใจ</p></div>
 <div class="bw-grid3">
@@ -108,7 +108,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "about",
         "label": "เกี่ยวกับ + รูป",
         "category": "เนื้อหา",
-        "icon": "◧",
+        "icon": "columns",
         "html": f"""<section class="bw-about"><div class="bw-container bw-about-in">
 <img src="{IMG_SQ}" alt="เกี่ยวกับเรา">
 <div><h2>เรื่องราวของเรา</h2>
@@ -129,7 +129,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "stats",
         "label": "ตัวเลขสถิติ",
         "category": "เนื้อหา",
-        "icon": "#",
+        "icon": "hash",
         "html": """<section class="bw-stats"><div class="bw-container bw-stats-in">
 <div><strong>1,200+</strong><span>ลูกค้า</span></div><div><strong>98%</strong><span>ความพึงพอใจ</span></div>
 <div><strong>24/7</strong><span>ดูแลตลอด</span></div><div><strong>15</strong><span>รางวัล</span></div></div></section>""",
@@ -143,7 +143,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "gallery",
         "label": "แกลเลอรี",
         "category": "สื่อ",
-        "icon": "▣",
+        "icon": "images",
         "html": "<section class=\"bw-gallery\"><div class=\"bw-container\"><div class=\"bw-sec-head\"><h2>ผลงานของเรา</h2></div>"
         "<div class=\"bw-gal-grid\">"
         + "".join(
@@ -163,7 +163,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "pricing",
         "label": "ตารางราคา",
         "category": "ขาย",
-        "icon": "฿",
+        "icon": "tag",
         "html": """<section class="bw-pricing"><div class="bw-container">
 <div class="bw-sec-head"><h2>แพ็กเกจราคา</h2><p>เลือกแพ็กเกจที่เหมาะกับคุณ</p></div>
 <div class="bw-grid3">
@@ -184,7 +184,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "testimonials",
         "label": "รีวิวลูกค้า",
         "category": "ขาย",
-        "icon": "❝",
+        "icon": "quote",
         "html": f"""<section class="bw-testi"><div class="bw-container">
 <div class="bw-sec-head"><h2>เสียงจากลูกค้า</h2></div><div class="bw-grid3">
 <figure class="bw-quote"><blockquote>“บริการดีมาก ประทับใจตั้งแต่ครั้งแรก แนะนำเลยค่ะ”</blockquote><figcaption><img src="{AVATAR}" alt="">คุณสมหญิง<br><small>เจ้าของร้าน</small></figcaption></figure>
@@ -202,7 +202,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "team",
         "label": "ทีมงาน",
         "category": "เนื้อหา",
-        "icon": "☺",
+        "icon": "users",
         "html": "<section class=\"bw-team\"><div class=\"bw-container\"><div class=\"bw-sec-head\"><h2>ทีมของเรา</h2></div><div class=\"bw-team-grid\">"
         + "".join(
             f'<div class="bw-member"><img src="{AVATAR}" alt="{n}"><h3>{n}</h3><p>{r}</p></div>'
@@ -219,7 +219,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "faq",
         "label": "คำถามที่พบบ่อย",
         "category": "เนื้อหา",
-        "icon": "?",
+        "icon": "help",
         "html": """<section class="bw-faq"><div class="bw-container bw-faq-in"><div class="bw-sec-head"><h2>คำถามที่พบบ่อย</h2></div>
 <details open><summary>ใช้เวลานานแค่ไหน?</summary><p>โดยทั่วไปใช้เวลา 3-5 วันทำการ ขึ้นอยู่กับรายละเอียดงาน</p></details>
 <details><summary>ชำระเงินได้ทางไหนบ้าง?</summary><p>รองรับโอนเงิน พร้อมเพย์ และบัตรเครดิต</p></details>
@@ -235,7 +235,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "id": "cta",
         "label": "ชวนให้ติดต่อ (CTA)",
         "category": "ขาย",
-        "icon": "➜",
+        "icon": "arrow",
         "html": """<section class="bw-cta"><div class="bw-container bw-cta-in">
 <div><h2>พร้อมเริ่มต้นแล้วหรือยัง?</h2><p>ปรึกษาฟรี ไม่มีค่าใช้จ่าย</p></div>
 <a href="contact.html" class="bw-btn">คุยกับเราเลย</a></div></section>""",
@@ -249,7 +249,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "contact",
         "label": "ฟอร์มติดต่อ",
         "category": "ฟอร์ม",
-        "icon": "✉",
+        "icon": "mail",
         "html": """<section class="bw-contact"><div class="bw-container bw-contact-in">
 <div><h2>ติดต่อเรา</h2><p>ฝากข้อความไว้ แล้วเราจะติดต่อกลับโดยเร็วที่สุด</p>
 <p>📍 กรุงเทพมหานคร<br>📞 02-123-4567<br>✉️ hello@example.com</p></div>
@@ -273,7 +273,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "map",
         "label": "แผนที่",
         "category": "สื่อ",
-        "icon": "⌖",
+        "icon": "pin",
         "html": """<section class="bw-map"><iframe title="แผนที่" src="https://maps.google.com/maps?q=Bangkok&z=13&output=embed" loading="lazy"></iframe></section>""",
         "css": """.bw-map iframe{display:block;width:100%;height:380px;border:0}""",
     },
@@ -281,7 +281,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "video",
         "label": "วิดีโอ YouTube",
         "category": "สื่อ",
-        "icon": "▶",
+        "icon": "play",
         "html": """<section class="bw-video"><div class="bw-container"><div class="bw-video-box">
 <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ" title="วิดีโอ" allowfullscreen></iframe></div></div></section>""",
         "css": """.bw-video{padding:70px 0}
@@ -292,7 +292,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "menu-list",
         "label": "เมนู/สินค้า",
         "category": "ขาย",
-        "icon": "☕",
+        "icon": "coffee",
         "html": "<section class=\"bw-menu\"><div class=\"bw-container\"><div class=\"bw-sec-head\"><h2>เมนูแนะนำ</h2></div><div class=\"bw-menu-grid\">"
         + "".join(
             f'<div class="bw-menu-item"><img src="{placeholder(n, 400, 300, "#fde68a", "#fca5a5")}" alt="{n}"><div><h3>{n}</h3><p>{d}</p><strong>฿{p}</strong></div></div>'
@@ -312,7 +312,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "page-header",
         "label": "หัวข้อหน้า",
         "category": "เนื้อหา",
-        "icon": "H",
+        "icon": "heading",
         "html": """<section class="bw-phead"><div class="bw-container"><h1>ชื่อหน้า</h1><p>คำอธิบายสั้นๆ ของหน้านี้</p></div></section>""",
         "css": """.bw-phead{padding:80px 0 60px;text-align:center;background:var(--bw-surface)}
 .bw-phead h1{font-size:clamp(32px,4.5vw,50px)}.bw-phead p{color:var(--bw-muted);font-size:18px;margin:0}""",
@@ -321,7 +321,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "text-block",
         "label": "บทความ",
         "category": "เนื้อหา",
-        "icon": "¶",
+        "icon": "text",
         "html": """<section class="bw-article"><div class="bw-container bw-article-in"><h2>หัวข้อบทความ</h2>
 <p>เริ่มเขียนเนื้อหาที่นี่ ดับเบิลคลิกเพื่อแก้ไขข้อความ คุณสามารถเพิ่มย่อหน้า ลิงก์ ตัวหนา หรือตัวเอียงได้</p>
 <p>ย่อหน้าที่สองสำหรับรายละเอียดเพิ่มเติม เขียนให้อ่านง่าย แบ่งเป็นช่วงสั้นๆ</p></div></section>""",
@@ -331,7 +331,7 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
         "id": "footer",
         "label": "ส่วนท้าย",
         "category": "ส่วนหัว/ท้าย",
-        "icon": "▁",
+        "icon": "panel-bottom",
         "html": """<footer class="bw-footer"><div class="bw-container bw-footer-in">
 <div><a href="index.html" class="bw-logo">แบรนด์ของคุณ</a><p>สร้างประสบการณ์ที่ดีที่สุดให้ลูกค้า</p></div>
 <div><h4>เมนู</h4><nav class="bw-footer-links" data-bw-auto-nav><a href="index.html">หน้าแรก</a><a href="about.html">เกี่ยวกับเรา</a><a href="contact.html">ติดต่อ</a></nav></div>

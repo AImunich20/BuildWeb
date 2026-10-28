@@ -30,7 +30,7 @@ class LocalAdminMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.path.startswith("/api/system/restart"):
+        if request.path.startswith(("/api/system/restart", "/api/system/shutdown")):
             return self.get_response(request)
         try:
             if not request.is_public and not request.user.is_authenticated and not settings.DB_FAILED:
@@ -63,7 +63,7 @@ def database_down(request, error):
 <div style="background:#fff;padding:36px 40px;border-radius:18px;box-shadow:0 20px 50px -25px rgba(0,0,0,.3);max-width:520px;text-align:center">
 <div style="font-size:46px">⛁</div><h2>{msg}</h2><p style="color:#6b7280">{escape(str(error)[:200])}</p>
 <p style="color:#6b7280">เปิด MySQL แล้วกด “ลองใหม่” — ถ้ายังเชื่อมต่อไม่ได้ โปรแกรมจะเข้าโหมดปลอดภัยให้แก้การตั้งค่า</p>
-<button onclick="this.disabled=true;this.textContent='กำลังรีสตาร์ท...';fetch('/api/system/restart',{{method:'POST'}}).finally(()=>setTimeout(()=>location.href='/',6000))"
+<button onclick="this.disabled=true;this.textContent='กำลังรีสตาร์ท...';fetch('/api/system/restart',{{method:'POST',headers:{{'X-BuildWeb':'1'}}}}).finally(()=>setTimeout(()=>location.href='/',6000))"
 style="font:inherit;padding:11px 22px;border:0;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#06b6d4);color:#fff;cursor:pointer">↻ ลองใหม่</button></div>"""
     return HttpResponse(html, status=503)
 

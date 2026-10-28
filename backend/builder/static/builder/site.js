@@ -5,19 +5,268 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { pages: renderPages, files: renderFiles, forms: renderForms, settings: renderSettings, export: renderExport };
+  const tabs = { data: renderData, pages: renderPages, files: renderFiles, forms: renderForms, settings: renderSettings, export: renderExport };
+
+
+  // ---------------------------------------------------------------- data (collections)
+  const TYPES = { text: 'ข้อความ', longtext: 'ข้อความยาว', number: 'ตัวเลข', image: 'รูป', link: 'ลิงก์', date: 'วันที่', bool: 'ใช่/ไม่', html: 'HTML' };
+  let DATA = { collections: [], connections: [] };
+
+  async function renderData(selectId) {
+    DATA = await api(`/api/sites/${site.id}/collections`);
+    const sel = selectId || +(new URLSearchParams(location.search).get('c')) || (DATA.collections[0] || {}).id;
+    root.innerHTML = `<div class="row between" style="margin-bottom:14px">
+        <div class="muted">ชุดข้อมูลที่หน้าเว็บนำไปแสดงได้ — ใช้บล็อก “ข้อมูล” ในตัวออกแบบ หรือพิมพ์ <code>{{ฟิลด์}}</code></div>
+        <div class="row"><button class="btn" id="d-mysql">${BW_ICON('database')} นำเข้าจาก MySQL / XAMPP</button>
+        <button class="btn" id="d-file">${BW_ICON('upload')} นำเข้า .sql / CSV</button><button class="btn primary" id="d-new">${BW_ICON('plus')} สร้างเอง</button></div></div>
+      <div class="data-layout"><div class="card data-list" id="d-list"></div><div id="d-main"></div></div>`;
+    const list = document.getElementById('d-list');
+    list.innerHTML = DATA.collections.length ? DATA.collections.map(c => `<a class="data-item ${c.id === sel ? 'active' : ''}" data-id="${c.id}">
+        <div class="row between"><b>${esc(c.name)}</b>${c.mode === 'live' ? '<span class="badge brand">สด</span>' : ''}</div>
+        <div class="small muted mono">${esc(c.slug)} · ${c.fields.length} ฟิลด์${c.count != null ? ' · ' + c.count + ' แถว' : ''}</div></a>`).join('')
+      : `<div class="empty-state">${BW_ICON('table', 28)}<div style="margin-top:8px">ยังไม่มีชุดข้อมูล</div></div>`;
+    list.querySelectorAll('[data-id]').forEach(a => a.onclick = () => openCollection(+a.dataset.id));
+    document.getElementById('d-mysql').onclick = mysqlWizard;
+    document.getElementById('d-file').onclick = fileImport;
+    document.getElementById('d-new').onclick = newCollection;
+    if (sel) openCollection(sel); else document.getElementById('d-main').innerHTML = `<div class="card pad"><h2>เริ่มใช้ข้อมูลในเว็บ</h2>
+      <div class="hint">ตัวอย่าง: นำตาราง <code>products</code> จาก XAMPP มาแสดงเป็นการ์ดสินค้าในหน้าเว็บ — แก้ใน phpMyAdmin แล้วหน้าเว็บเปลี่ยนตาม (โหมดเชื่อมสด)</div>
+      <ol class="small" style="line-height:2;margin:0;padding-left:18px"><li>กด “นำเข้าจาก MySQL / XAMPP” หรือ “นำเข้า .sql / CSV”</li>
+      <li>เปิดตัวออกแบบ › แท็บ “ข้อมูล” หรือหมวดบล็อก “ข้อมูล” แล้วลากการ์ด/ตารางลงหน้า</li>
+      <li>หรือเลือกกล่องใดก็ได้ › “ตั้งค่า” › “วนซ้ำจากข้อมูล” แล้วใส่ <code>{{ฟิลด์}}</code> ในข้อความ</li></ol></div>`;
+  }
+
+  async function openCollection(id) {
+    document.querySelectorAll('.data-item').forEach(a => a.classList.toggle('active', +a.dataset.id === id));
+    history.replaceState(null, '', `?c=${id}`);
+    const main = document.getElementById('d-main');
+    main.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    const r = await api(`/api/collections/${id}`);
+    const c = r.collection, rows = r.rows;
+    const src = c.connection ? `${esc(c.connection_name)} › ${esc(c.source_database)}.${esc(c.source_table)}` : '';
+    main.innerHTML = `<div class="card">
+      <div class="card-head"><div><h2>${esc(c.name)}</h2><div class="small muted">ใช้อ้างอิง <code>${esc(c.slug)}</code>${src ? ' · จาก ' + src : ''}${c.last_synced ? ' · ซิงก์ ' + ago(c.last_synced) : ''}</div></div>
+        <div class="row">${c.connection ? `<button class="btn sm" id="c-sync">${BW_ICON('refresh')} ${c.mode === 'live' ? 'โหลดใหม่' : 'ซิงก์จาก MySQL'}</button>` : ''}
+          <a class="btn sm" href="/api/collections/${c.id}/export.csv">CSV</a><button class="btn sm" id="c-settings">${BW_ICON('settings')} ฟิลด์ & ตั้งค่า</button>
+          <button class="btn sm danger icon" id="c-del" title="ลบชุดข้อมูล">${BW_ICON('trash')}</button></div></div>
+      ${r.error ? `<div class="alert err" style="margin:14px 16px 0">${esc(r.error)}</div>` : ''}
+      ${c.mode === 'live' ? `<div class="alert info" style="margin:14px 16px 0">โหมดเชื่อมสด: อ่านจาก MySQL ทุกครั้งที่มีคนเปิดเว็บ (แคช 15 วินาที) · แก้ข้อมูลที่ phpMyAdmin</div>` : ''}
+      <div class="data-table-wrap"><table class="table data-table"><thead><tr>${r.editable ? '<th style="width:32px"><input type="checkbox" id="c-all"></th>' : ''}
+        ${c.fields.map(f => `<th title="${esc(f.label)}">${esc(f.name)} <span class="muted small">${TYPES[f.type] || f.type}</span></th>`).join('')}</tr></thead>
+        <tbody>${rows.map(row => `<tr data-id="${row._id || ''}">${r.editable ? '<td><input type="checkbox" class="c-row"></td>' : ''}
+          ${c.fields.map(f => cell(f, row[f.name], r.editable)).join('')}</tr>`).join('')}</tbody></table>
+        ${rows.length ? '' : '<div class="empty-state">ยังไม่มีแถวข้อมูล</div>'}</div>
+      ${r.editable ? `<div class="row" style="padding:12px 16px;border-top:1px solid var(--line)"><button class="btn sm" id="c-add">${BW_ICON('plus')} เพิ่มแถว</button>
+        <button class="btn sm danger" id="c-remove" disabled>ลบแถวที่เลือก</button><span class="small muted" style="margin-left:auto">คลิกช่องเพื่อแก้ไข · บันทึกเมื่อออกจากช่อง</span></div>` : ''}
+    </div>
+    <div class="card pad" style="margin-top:16px"><h2>วิธีใช้ในหน้าเว็บ</h2><div class="hint">วางในโค้ด HTML หรือใช้บล็อก/การตั้งค่า “วนซ้ำจากข้อมูล” ในตัวออกแบบ</div>
+      <div class="log">&lt;div data-bw-repeat="${esc(c.slug)}" data-bw-limit="6"&gt;
+  &lt;h3&gt;{{${esc((c.fields[0] || { name: 'field' }).name)}}}&lt;/h3&gt;
+&lt;/div&gt;
+จำนวนแถว: {{${esc(c.slug)}.count}}</div></div>`;
+    const tbody = main.querySelector('tbody');
+    if (r.editable) {
+      tbody.querySelectorAll('[contenteditable]').forEach(td => {
+        td.addEventListener('focus', () => td.dataset.before = td.innerText);
+        td.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); td.blur(); } });
+        td.addEventListener('blur', async () => {
+          if (td.innerText === td.dataset.before) return;
+          const tr = td.closest('tr'), payload = {};
+          tr.querySelectorAll('[data-f]').forEach(x => payload[x.dataset.f] = x.innerText);
+          try { const res = await api(`/api/collections/${c.id}/rows/save`, { _id: +tr.dataset.id || null, data: payload }); tr.dataset.id = res.row._id; td.classList.add('saved'); setTimeout(() => td.classList.remove('saved'), 800); }
+          catch (e) { toast(e.message, 'err'); }
+        });
+      });
+      const sync = () => document.getElementById('c-remove').disabled = !tbody.querySelector('.c-row:checked');
+      tbody.querySelectorAll('.c-row').forEach(x => x.onchange = sync);
+      document.getElementById('c-all').onchange = e => { tbody.querySelectorAll('.c-row').forEach(x => x.checked = e.target.checked); sync(); };
+      document.getElementById('c-add').onclick = async () => {
+        try { await api(`/api/collections/${c.id}/rows/save`, { data: {} }); openCollection(c.id); } catch (e) { toast(e.message, 'err'); }
+      };
+      document.getElementById('c-remove').onclick = async () => {
+        const ids = [...tbody.querySelectorAll('.c-row:checked')].map(x => +x.closest('tr').dataset.id);
+        if (!await confirmBox('ลบแถว', `ลบ ${ids.length} แถวที่เลือก?`, { ok: 'ลบ', danger: true })) return;
+        await api(`/api/collections/${c.id}/rows/delete`, { ids }); openCollection(c.id);
+      };
+    }
+    const syncBtn = document.getElementById('c-sync');
+    if (syncBtn) syncBtn.onclick = async () => {
+      syncBtn.disabled = true;
+      try { const s = await api(`/api/collections/${c.id}/resync`, {}); toast(`ได้ ${s.rows} แถว`, 'ok'); renderData(c.id); } catch (e) { toast(e.message, 'err'); syncBtn.disabled = false; }
+    };
+    document.getElementById('c-settings').onclick = () => collectionSettings(c);
+    document.getElementById('c-del').onclick = async () => {
+      if (!await confirmBox('ลบชุดข้อมูล', `ลบ “${esc(c.name)}” และข้อมูลทั้งหมดในชุดนี้? (ตารางใน MySQL ไม่ถูกแตะ)`, { ok: 'ลบ', danger: true })) return;
+      await api(`/api/collections/${c.id}/delete`, {}); history.replaceState(null, '', location.pathname); renderData();
+    };
+  }
+
+  function cell(f, v, editable) {
+    const val = v == null ? '' : String(v);
+    if (!editable) return `<td>${f.type === 'image' && val ? `<span class="thumb-sm" style="background-image:url('${encodeURI(val)}')"></span>` : ''}${esc(val.slice(0, 200))}</td>`;
+    return `<td contenteditable="plaintext-only" data-f="${esc(f.name)}" class="${f.type === 'number' ? 'num' : ''}">${esc(val)}</td>`;
+  }
+
+  function collectionSettings(c) {
+    const row = f => `<div class="field-row"><input class="input mono" data-k="name" value="${esc(f.name)}" data-orig="${esc(f.name)}"><input class="input" data-k="label" value="${esc(f.label)}">
+      <select class="input" data-k="type">${Object.entries(TYPES).map(([k, l]) => `<option value="${k}" ${k === f.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button class="btn sm ghost icon" data-rm title="ลบฟิลด์">${BW_ICON('x')}</button></div>`;
+    const m = modal(`<header><h2>ตั้งค่าชุดข้อมูล</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(c.name)}"></label>
+      <label class="field"><span>ชื่อที่ใช้อ้างอิง <small>(ใน data-bw-repeat)</small></span><input class="input mono" name="slug" value="${esc(c.slug)}"></label></div>
+      ${c.mode === 'live' ? `<div class="grid g3" style="gap:0 12px"><label class="field"><span>เรียงตามคอลัมน์</span><input class="input mono" name="live_order" value="${esc(c.live_order)}"></label>
+        <label class="field"><span>ลำดับ</span><select class="input" name="live_desc"><option value="">น้อย → มาก</option><option value="1" ${c.live_desc ? 'selected' : ''}>มาก → น้อย</option></select></label>
+        <label class="field"><span>ดึงสูงสุด (แถว)</span><input class="input mono" name="live_limit" type="number" value="${c.live_limit}"></label></div>` : ''}
+      <div class="sect-title">ฟิลด์ <span class="small muted" style="text-transform:none;letter-spacing:0">— ชื่อ (ใช้ใน {{ }}) · ชื่อที่แสดง · ชนิด</span></div>
+      <div id="f-rows">${c.fields.map(row).join('')}</div>
+      ${c.mode === 'live' ? '' : `<button class="btn sm" id="f-add">${BW_ICON('plus')} เพิ่มฟิลด์</button>`}</div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    const bindRm = () => m.el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => b.closest('.field-row').remove());
+    bindRm();
+    const add = m.el.querySelector('#f-add');
+    if (add) add.onclick = () => { m.el.querySelector('#f-rows').insertAdjacentHTML('beforeend', row({ name: 'field', label: 'ฟิลด์ใหม่', type: 'text' })); bindRm(); };
+    m.el.querySelector('[data-save]').onclick = async () => {
+      const d = formData(m.el);
+      const rows = [...m.el.querySelectorAll('.field-row')];
+      d.fields = rows.map(r => ({ name: r.querySelector('[data-k=name]').value, label: r.querySelector('[data-k=label]').value, type: r.querySelector('[data-k=type]').value }));
+      d.renames = rows.map(r => ({ from: r.querySelector('[data-k=name]').dataset.orig, to: r.querySelector('[data-k=name]').value })).filter(x => x.from && x.from !== x.to);
+      if ('live_desc' in d) d.live_desc = d.live_desc === '1';
+      try { await api(`/api/collections/${c.id}/update`, d); m.close(); toast('บันทึกแล้ว', 'ok'); renderData(c.id); }
+      catch (e) { showFieldError(m.el, e); }
+    };
+  }
+
+  function newCollection() {
+    const m = modal(`<header><h2>สร้างชุดข้อมูล</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <label class="field"><span>ชื่อ</span><input class="input" name="name" placeholder="เช่น สินค้า, ผลงาน, ข่าว"></label>
+      <label class="field"><span>ชื่อที่ใช้อ้างอิง <small>(a-z 0-9 -)</small></span><input class="input mono" name="slug" placeholder="products"></label>
+      <div class="small muted">เริ่มด้วยฟิลด์ ชื่อ · รายละเอียด · รูป แล้วปรับได้ภายหลัง</div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>สร้าง</button></footer>`);
+    m.el.querySelector('[data-ok]').onclick = async () => {
+      try { const r = await api(`/api/sites/${site.id}/collections/create`, formData(m.el)); m.close(); renderData(r.collection.id); }
+      catch (e) { showFieldError(m.el, e); }
+    };
+  }
+
+  function fileImport() {
+    const m = modal(`<header><h2>นำเข้า .sql / CSV</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="drop" id="fi-drop">${BW_ICON('upload', 20)}<div style="margin-top:6px">ลากไฟล์ <b>.sql</b> (export จาก phpMyAdmin) หรือ <b>.csv</b> มาวาง หรือ <a href="#" id="fi-pick">เลือกไฟล์</a></div>
+        <input type="file" id="fi-input" accept=".sql,.csv,.txt" hidden></div>
+      <div id="fi-preview"></div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok disabled>นำเข้า</button></footer>`, { wide: true });
+    let file = null;
+    const ok = m.el.querySelector('[data-ok]'), prev = m.el.querySelector('#fi-preview');
+    const pick = async f => {
+      file = f; ok.disabled = false;
+      if (/\.sql$/i.test(f.name)) {
+        const fd = new FormData(); fd.append('file', f); fd.append('preview', '1');
+        prev.innerHTML = '<div class="muted small">กำลังอ่านไฟล์…</div>';
+        try {
+          const r = await api(`/api/sites/${site.id}/collections/import-file`, fd);
+          prev.innerHTML = `<div class="sect-title">เลือกตาราง</div>` + r.tables.map(t => `<label class="opt sel"><input type="checkbox" name="tables" value="${esc(t.name)}" checked>
+            <div><b class="mono">${esc(t.name)}</b><span>${t.rows} แถว · ${t.columns.map(esc).join(', ')}</span></div></label>`).join('');
+        } catch (e) { prev.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; ok.disabled = true; }
+      } else prev.innerHTML = `<label class="field" style="margin-top:12px"><span>ชื่อชุดข้อมูล</span><input class="input" name="name" value="${esc(f.name.replace(/\.[^.]+$/, ''))}"></label>`;
+    };
+    m.el.querySelector('#fi-pick').onclick = e => { e.preventDefault(); m.el.querySelector('#fi-input').click(); };
+    m.el.querySelector('#fi-input').onchange = e => e.target.files[0] && pick(e.target.files[0]);
+    const drop = m.el.querySelector('#fi-drop');
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => e.dataTransfer.files[0] && pick(e.dataTransfer.files[0]));
+    ok.onclick = async () => {
+      const fd = new FormData(); fd.append('file', file);
+      m.el.querySelectorAll('[name=tables]:checked').forEach(x => fd.append('tables', x.value));
+      const nm = m.el.querySelector('[name=name]'); if (nm) fd.append('name', nm.value);
+      ok.disabled = true;
+      try { const r = await api(`/api/sites/${site.id}/collections/import-file`, fd); m.close(); toast(`นำเข้าแล้ว ${r.collections.length} ชุด`, 'ok'); renderData(r.collections[0] && r.collections[0].id); }
+      catch (e) { toast(e.message, 'err'); ok.disabled = false; }
+    };
+  }
+
+  function mysqlWizard() {
+    const conns = DATA.connections;
+    const m = modal(`<header><h2>นำเข้าจาก MySQL / XAMPP</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="sect-title" style="margin-top:0">1 · การเชื่อมต่อ</div>
+      <div class="row" style="margin-bottom:10px"><select class="input" id="w-conn" style="flex:1">${conns.map(c => `<option value="${c.id}">${esc(c.name)} — ${esc(c.user)}@${esc(c.host)}:${c.port}</option>`).join('')}
+        <option value="new">＋ การเชื่อมต่อใหม่…</option></select></div>
+      <div id="w-new" class="${conns.length ? 'hidden' : ''}"><div class="grid g3" style="gap:0 12px">
+        <label class="field"><span>ชื่อ</span><input class="input" name="name" value="XAMPP"></label>
+        <label class="field"><span>โฮสต์</span><input class="input mono" name="host" value="127.0.0.1"></label>
+        <label class="field"><span>พอร์ต</span><input class="input mono" name="port" value="3306"></label>
+        <label class="field"><span>ผู้ใช้</span><input class="input mono" name="user" value="root"></label>
+        <label class="field"><span>รหัสผ่าน</span><input class="input mono" name="password" type="password" placeholder="XAMPP: ไม่มีรหัส"></label>
+        <label class="field"><span>Socket <small>(ไม่บังคับ)</small></span><input class="input mono" name="socket"></label></div>
+        <button class="btn sm" id="w-save">${BW_ICON('check')} ทดสอบและบันทึก</button></div>
+      <div id="w-db" class="hidden"><div class="sect-title">2 · ฐานข้อมูล</div><select class="input" id="w-dbsel"></select></div>
+      <div id="w-tables" class="hidden"><div class="sect-title">3 · ตาราง</div><div id="w-tlist"></div>
+        <div class="sect-title">วิธีใช้ข้อมูล</div>
+        <label class="opt sel"><input type="radio" name="mode" value="copy" checked><div><b>คัดลอกมาเก็บใน BuildWeb</b><span>แก้ในแอปได้ ไม่ต้องเปิด XAMPP ตลอด · กด “ซิงก์” เพื่อดึงใหม่</span></div></label>
+        <label class="opt"><input type="radio" name="mode" value="live"><div><b>เชื่อมสด</b><span>อ่านจาก MySQL ทุกครั้งที่เปิดเว็บ · แก้ใน phpMyAdmin แล้วเว็บเปลี่ยนตาม (ต้องเปิด XAMPP ไว้)</span></div></label></div>
+      <div id="w-msg"></div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok disabled>นำเข้า</button></footer>`, { wide: true });
+    const $m = q => m.el.querySelector(q);
+    const msg = (t, k = 'err') => $m('#w-msg').innerHTML = t ? `<div class="alert ${k}" style="margin-top:12px">${esc(t)}</div>` : '';
+    let connId = conns.length ? conns[0].id : null;
+    m.el.querySelectorAll('[name=mode]').forEach(r => r.onchange = () => m.el.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o.querySelector('input') && o.querySelector('input').checked && o.querySelector('[name=mode]'))));
+    const loadDbs = async () => {
+      msg('');
+      $m('#w-db').classList.add('hidden'); $m('#w-tables').classList.add('hidden'); $m('[data-ok]').disabled = true;
+      try {
+        const r = await api('/api/data/mysql/browse', { connection_id: connId });
+        $m('#w-dbsel').innerHTML = '<option value="">— เลือกฐานข้อมูล —</option>' + r.databases.map(d => `<option>${esc(d)}</option>`).join('');
+        $m('#w-db').classList.remove('hidden');
+      } catch (e) { msg(e.message); }
+    };
+    $m('#w-conn').onchange = e => {
+      if (e.target.value === 'new') { $m('#w-new').classList.remove('hidden'); connId = null; }
+      else { $m('#w-new').classList.add('hidden'); connId = +e.target.value; loadDbs(); }
+    };
+    if (!conns.length) $m('#w-conn').value = 'new';
+    $m('#w-save').onclick = async () => {
+      const d = formData($m('#w-new'));
+      $m('#w-save').disabled = true;
+      try {
+        const r = await api('/api/data/connections', d);
+        connId = r.connection.id;
+        DATA.connections.push(r.connection);
+        $m('#w-conn').insertAdjacentHTML('afterbegin', `<option value="${connId}">${esc(r.connection.name)} — ${esc(r.connection.user)}@${esc(r.connection.host)}:${r.connection.port}</option>`);
+        $m('#w-conn').value = connId; $m('#w-new').classList.add('hidden'); loadDbs();
+      } catch (e) { msg(e.message); }
+      $m('#w-save').disabled = false;
+    };
+    $m('#w-dbsel').onchange = async e => {
+      const db = e.target.value; if (!db) return;
+      try {
+        const r = await api('/api/data/mysql/browse', { connection_id: connId, database: db });
+        $m('#w-tlist').innerHTML = r.tables.length ? r.tables.map(t => `<label class="opt"><input type="checkbox" name="t" value="${esc(t.name)}">
+          <div><b class="mono">${esc(t.name)}</b><span>~${t.rows} แถว · ${t.columns.map(c => esc(c.name)).join(', ')}</span></div></label>`).join('') : '<div class="muted">ไม่มีตาราง</div>';
+        m.el.querySelectorAll('[name=t]').forEach(x => x.onchange = () => { x.closest('.opt').classList.toggle('sel', x.checked); $m('[data-ok]').disabled = !m.el.querySelector('[name=t]:checked'); });
+        $m('#w-tables').classList.remove('hidden');
+      } catch (er) { msg(er.message); }
+    };
+    $m('[data-ok]').onclick = async () => {
+      const tables = [...m.el.querySelectorAll('[name=t]:checked')].map(x => x.value);
+      $m('[data-ok]').disabled = true;
+      try {
+        const r = await api(`/api/sites/${site.id}/collections/import-mysql`, { connection_id: connId, database: $m('#w-dbsel').value, tables, mode: m.el.querySelector('[name=mode]:checked').value });
+        m.close(); toast(`นำเข้าแล้ว ${r.collections.length} ตาราง`, 'ok'); renderData(r.collections[0].id);
+      } catch (e) { msg(e.message); $m('[data-ok]').disabled = false; }
+    };
+    if (connId) loadDbs();
+  }
 
   // ---------------------------------------------------------------- pages
   function renderPages() {
     root.innerHTML = `
       <div class="row between" style="margin-bottom:14px">
-        <div class="muted">ลากที่ <span class="handle">⋮⋮</span> เพื่อจัดลำดับเมนู · หน้าแรกจะถูกส่งออกเป็น <code>index.html</code></div>
-        <div class="row"><button class="btn" id="sync-nav" title="อัปเดตลิงก์ในแถบเมนูและส่วนท้ายของทุกหน้าให้ตรงกับรายการหน้า">↻ อัปเดตเมนูทุกหน้า</button>
+        <div class="muted">ลากที่ <span class="handle" style="display:inline-flex;vertical-align:middle">${BW_ICON('drag', 14)}</span> เพื่อจัดลำดับเมนู · หน้าแรกจะถูกส่งออกเป็น <code>index.html</code></div>
+        <div class="row"><button class="btn" id="sync-nav" title="อัปเดตลิงก์ในแถบเมนูและส่วนท้ายของทุกหน้าให้ตรงกับรายการหน้า">อัปเดตเมนูทุกหน้า</button>
         <button class="btn primary" id="add-page">＋ เพิ่มหน้า</button></div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-head"><div><h2>ส่วนหัว & ส่วนท้ายร่วม</h2>
         <div class="hint" style="margin:0">แก้ครั้งเดียว เปลี่ยนทุกหน้า · เมนูอัปเดตตามรายการหน้าอัตโนมัติ</div></div>
-        <button class="btn sm" id="extract" title="ย้าย <header>/<footer> ของหน้าแรกมาเป็นส่วนร่วม และลบซ้ำออกจากทุกหน้า">⇪ แยกจากหน้าแรก</button></div>
+        <button class="btn sm" id="extract" title="ย้าย <header>/<footer> ของหน้าแรกมาเป็นส่วนร่วม และลบซ้ำออกจากทุกหน้า">แยกจากหน้าแรก</button></div>
         <div id="shared-rows"></div></div>
       <div class="card"><table class="table"><thead><tr><th></th><th>หน้า</th><th>ไฟล์</th><th>สถานะ</th><th>เมนู</th><th>แก้ไขล่าสุด</th><th></th></tr></thead>
       <tbody id="page-rows"></tbody></table></div>`;
@@ -40,7 +289,7 @@
     const box = document.getElementById('shared-rows');
     const rows = site.shared || [];
     box.innerHTML = rows.map(x => `<div class="list-row" data-id="${x.id}">
-        <span class="kind-icon">${x.kind === 'header' ? '⬒' : '⬓'}</span>
+        <span class="kind-icon">${BW_ICON(x.kind === 'header' ? 'panel-top' : 'panel-bottom')}</span>
         <div style="flex:1"><b>${esc(x.label)}</b><div class="muted small">แก้ไข ${ago(x.updated_at)}</div></div>
         <label class="switch" title="เปิด/ปิดทุกหน้า"><input type="checkbox" ${x.enabled ? 'checked' : ''}><span></span></label>
         <a class="btn sm" href="${x.edit_url}">ออกแบบ</a></div>`).join('') ||
@@ -60,8 +309,8 @@
     const byId = Object.fromEntries(D.pages.map(p => [p.id, p]));
     tb.innerHTML = D.pages.map(p => `
       <tr draggable="true" data-id="${p.id}">
-        <td class="handle" title="ลากเพื่อเรียงลำดับ">⋮⋮</td>
-        <td><div class="page-title">${p.is_home ? '🏠 ' : ''}${p.parent ? '<span class="muted">↳ </span>' : ''}${esc(p.title)}
+        <td class="handle" title="ลากเพื่อเรียงลำดับ">${BW_ICON('drag', 15)}</td>
+        <td><div class="page-title">${p.is_home ? '<span class="badge" style="height:18px;margin-right:6px">หน้าแรก</span>' : ''}${p.parent ? '<span class="muted">↳ </span>' : ''}${esc(p.title)}
           <small>${p.parent && byId[p.parent] ? 'อยู่ใต้ ' + esc(byId[p.parent].title) + ' · ' : ''}${p.seo_description ? esc(p.seo_description.slice(0, 70)) : 'ยังไม่มีคำอธิบาย SEO'}</small></div></td>
         <td class="mono small">${esc(p.filename)}</td>
         <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}</td>
@@ -70,7 +319,7 @@
         <td><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
           <a class="btn sm primary" href="${p.edit_url}">ออกแบบ</a>
           <button class="btn sm" data-act="settings">ตั้งค่า</button>
-          <button class="btn sm ghost icon" data-act="more">⋯</button></div></td>
+          <button class="btn sm ghost icon" data-act="more">${BW_ICON('more')}</button></div></td>
       </tr>`).join('');
     tb.querySelectorAll('tr').forEach(tr => {
       const p = byId[tr.dataset.id];
@@ -101,7 +350,7 @@
   }
 
   function pageMenu(p, anchor) {
-    const m = modal(`<header><h2>${esc(p.title)}</h2><button class="btn ghost icon" data-close>✕</button></header>
+    const m = modal(`<header><h2>${esc(p.title)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
       <div class="body" style="display:grid;gap:8px">
         <a class="btn" href="/preview/${site.slug}/${p.is_home ? '' : p.slug + '.html'}" target="_blank">ดูตัวอย่างหน้านี้</a>
         ${p.is_home ? '' : '<button class="btn" data-a="home">ตั้งเป็นหน้าแรก</button>'}
@@ -134,7 +383,7 @@
     const parents = D.pages.filter(x => x.id !== p.id).map(x => `<option value="${x.id}" ${x.id === p.parent ? 'selected' : ''}>${esc(x.title)}</option>`).join('');
     const layouts = D.layouts.map((l, i) => `<label class="opt ${i === 1 ? 'sel' : ''}" style="margin:0"><input type="radio" name="layout" value="${l.id}" ${i === 1 ? 'checked' : ''}>
       <div><b>${esc(l.name)}</b><span>${l.sections.length ? l.sections.length + ' ส่วน' : 'เริ่มจากว่าง'}</span></div></label>`).join('');
-    const m = modal(`<header><h2>${isNew ? 'เพิ่มหน้าใหม่' : 'ตั้งค่าหน้า'}</h2><button class="btn ghost icon" data-close>✕</button></header>
+    const m = modal(`<header><h2>${isNew ? 'เพิ่มหน้าใหม่' : 'ตั้งค่าหน้า'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
       <div class="body">
         <div class="grid g2" style="gap:0 16px">
           <label class="field"><span>ชื่อหน้า *</span><input class="input" name="title" value="${esc(p.title)}" maxlength="200" placeholder="เช่น เกี่ยวกับเรา"></label>
@@ -203,9 +452,9 @@
 
   async function renderFiles() {
     root.innerHTML = `<div class="fm">
-      <div class="card fm-folders"><div class="row between" style="padding:2px 6px 8px"><b>โฟลเดอร์</b><button class="btn sm ghost" id="new-folder" title="สร้างโฟลเดอร์">＋</button></div><div id="folders"></div></div>
-      <div><div class="drop" id="drop">ลากไฟล์มาวางที่นี่ หรือ <a href="#" id="pick">เลือกไฟล์</a> — รูป วิดีโอ PDF ฯลฯ (สูงสุด 200 MB ต่อไฟล์)
-        <input type="file" id="file-input" multiple hidden><div class="progress hidden" id="prog"><i></i></div></div>
+      <div class="card fm-folders"><div class="row between" style="padding:2px 6px 8px"><b>โฟลเดอร์</b><button class="btn sm ghost icon" id="new-folder" title="สร้างโฟลเดอร์">${BW_ICON('plus')}</button></div><div id="folders"></div></div>
+      <div><div class="drop" id="drop">${BW_ICON('upload', 20)}<div style="margin-top:6px">ลากไฟล์มาวางที่นี่ หรือ <a href="#" id="pick">เลือกไฟล์</a> — รูป วิดีโอ PDF ฯลฯ (สูงสุด 200 MB ต่อไฟล์)
+        </div><input type="file" id="file-input" multiple hidden><div class="progress hidden" id="prog"><i></i></div></div>
         <div class="row between" style="margin-bottom:12px"><div class="row"><input class="input" id="q" placeholder="ค้นหาไฟล์..." style="width:220px">
           <select class="input" id="kind" style="width:150px"><option value="">ทุกประเภท</option><option value="image">รูปภาพ</option><option value="video">วิดีโอ</option><option value="audio">เสียง</option><option value="document">เอกสาร</option><option value="other">อื่นๆ</option></select></div>
           <span class="muted small" id="fm-sum"></span></div>
@@ -227,7 +476,7 @@
   function drawFolders() {
     const el = document.getElementById('folders');
     const count = f => fmState.assets.filter(a => a.folder === f).length;
-    const item = (f, label, depth = 0) => `<a data-f="${esc(f)}" class="${f === fmFolder ? 'active' : ''}" style="padding-left:${10 + depth * 14}px">${f ? '📁' : '🗂'} ${esc(label)} <span class="muted small" style="margin-left:auto">${count(f)}</span></a>`;
+    const item = (f, label, depth = 0) => `<a data-f="${esc(f)}" class="${f === fmFolder ? 'active' : ''}" style="padding-left:${10 + depth * 14}px">${BW_ICON(f ? 'folder' : 'images', 15)} ${esc(label)} <span class="muted small" style="margin-left:auto">${count(f)}</span></a>`;
     el.innerHTML = item('', 'ไฟล์ทั้งหมด (ราก)') + fmState.folders.map(f => item(f, f.split('/').pop(), f.split('/').length)).join('');
     el.querySelectorAll('a').forEach(a => a.onclick = () => { fmFolder = a.dataset.f; drawFolders(); drawAssets(); });
   }
@@ -236,13 +485,13 @@
     const q = (document.getElementById('q').value || '').toLowerCase();
     const kind = document.getElementById('kind').value;
     const list = fmState.assets.filter(a => a.folder === fmFolder && (!q || a.name.toLowerCase().includes(q)) && (!kind || a.kind === kind));
-    const icons = { video: '🎬', audio: '🎵', document: '📄', other: '📦' };
+    const icons = { video: BW_ICON('video', 30), audio: BW_ICON('music', 30), document: BW_ICON('file', 30), other: BW_ICON('box', 30) };
     const grid = document.getElementById('fm-grid');
     const sub = fmState.folders.filter(f => f.startsWith(fmFolder ? fmFolder + '/' : '') && f.split('/').length === (fmFolder ? fmFolder.split('/').length + 1 : 1));
-    grid.innerHTML = sub.map(f => `<div class="fm-item" data-folder="${esc(f)}"><div class="pv">📁</div><div class="nm">${esc(f.split('/').pop())}<small>โฟลเดอร์</small></div></div>`).join('') +
-      list.map(a => `<div class="fm-item" data-id="${a.id}"><div class="pv" ${a.kind === 'image' ? `style="background-image:url('${encodeURI(a.url)}')"` : ''}>${a.kind === 'image' ? '' : icons[a.kind] || '📦'}</div>
+    grid.innerHTML = sub.map(f => `<div class="fm-item" data-folder="${esc(f)}"><div class="pv">${BW_ICON('folder', 30)}</div><div class="nm">${esc(f.split('/').pop())}<small>โฟลเดอร์</small></div></div>`).join('') +
+      list.map(a => `<div class="fm-item" data-id="${a.id}"><div class="pv" ${a.kind === 'image' ? `style="background-image:url('${encodeURI(a.url)}')"` : ''}>${a.kind === 'image' ? '' : icons[a.kind] || icons.other}</div>
         <div class="nm" title="${esc(a.name)}">${esc(a.name)}<small>${bytes(a.size)}</small></div></div>`).join('');
-    if (!sub.length && !list.length) grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="big">🖼</div>โฟลเดอร์นี้ยังไม่มีไฟล์</div>`;
+    if (!sub.length && !list.length) grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="big">${BW_ICON('image', 30)}</div>โฟลเดอร์นี้ยังไม่มีไฟล์</div>`;
     const total = fmState.assets.reduce((s, a) => s + a.size, 0);
     document.getElementById('fm-sum').textContent = `${fmState.assets.length} ไฟล์ · ${bytes(total)}`;
     grid.querySelectorAll('[data-folder]').forEach(el => {
@@ -295,7 +544,7 @@
     const folders = ['', ...fmState.folders].map(f => `<option value="${esc(f)}" ${f === a.folder ? 'selected' : ''}>${f ? esc(f) : '— ราก —'}</option>`).join('');
     const pv = a.kind === 'image' ? `<img src="${encodeURI(a.url)}" style="max-width:100%;max-height:300px;border-radius:12px;display:block;margin:0 auto 16px;background:#f6f6fa">`
       : a.kind === 'video' ? `<video src="${encodeURI(a.url)}" controls style="width:100%;border-radius:12px;margin-bottom:16px"></video>` : '';
-    const m = modal(`<header><h2>รายละเอียดไฟล์</h2><button class="btn ghost icon" data-close>✕</button></header><div class="body">${pv}
+    const m = modal(`<header><h2>รายละเอียดไฟล์</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">${pv}
       <div class="grid g2" style="gap:0 16px"><label class="field"><span>ชื่อไฟล์</span><input class="input" name="name" value="${esc(a.name)}"></label>
       <label class="field"><span>โฟลเดอร์</span><select class="input" name="folder">${folders}</select></label></div>
       ${a.kind === 'image' ? `<label class="field"><span>คำอธิบายรูป (alt) <small>ช่วย SEO และผู้พิการทางสายตา</small></span><input class="input" name="alt" value="${esc(a.alt)}"></label>` : ''}
@@ -320,7 +569,7 @@
 
   async function pickAsset(cb) {
     const r = await api(`/api/sites/${site.id}/assets?kind=image`);
-    const m = modal(`<header><h2>เลือกรูปภาพ</h2><button class="btn ghost icon" data-close>✕</button></header><div class="body">
+    const m = modal(`<header><h2>เลือกรูปภาพ</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
       ${r.assets.length ? `<div class="fm-grid">${r.assets.map(a => `<div class="fm-item" data-url="${esc(a.url)}"><div class="pv" style="background-image:url('${encodeURI(a.url)}')"></div><div class="nm">${esc(a.name)}</div></div>`).join('')}</div>`
         : '<div class="empty-state">ยังไม่มีรูป — อัปโหลดได้ที่แท็บ “ไฟล์ & รูปภาพ”</div>'}</div>`, { wide: true });
     m.el.querySelectorAll('[data-url]').forEach(el => el.onclick = () => { cb(el.dataset.url); m.close(); });
@@ -334,7 +583,7 @@
     const r = await api(`/api/sites/${site.id}/submissions`);
     const box = document.getElementById('subs');
     if (!r.submissions.length) {
-      box.innerHTML = `<div class="empty-state"><div class="big">📭</div>ยังไม่มีข้อมูลจากฟอร์ม<br><small>เพิ่มบล็อก “ฟอร์มติดต่อ” ในตัวออกแบบ แล้วเปิดโฮสติ้งเพื่อให้ผู้คนส่งข้อความได้</small></div>`;
+      box.innerHTML = `<div class="empty-state"><div class="big">${BW_ICON('form', 30)}</div>ยังไม่มีข้อมูลจากฟอร์ม<br><small>เพิ่มบล็อก “ฟอร์มติดต่อ” ในตัวออกแบบ แล้วเปิดโฮสติ้งเพื่อให้ผู้คนส่งข้อความได้</small></div>`;
     } else {
       box.innerHTML = r.submissions.map(s => `<div class="sub-item ${s.is_read ? '' : 'unread'}" data-id="${s.id}">
         <div><div class="row"><b>${esc(s.form || 'ฟอร์ม')}</b>${s.page ? `<span class="badge">${esc(s.page)}</span>` : ''}${s.is_read ? '' : '<span class="badge brand">ใหม่</span>'}<span class="muted small">${when(s.created_at)}</span></div>

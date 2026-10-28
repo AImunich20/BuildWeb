@@ -22,9 +22,9 @@
       <h2>ระบบ</h2>
       <div class="hint">เครื่องมือสำหรับผู้ดูแล</div>
       <div class="row">
-        <a class="btn" href="/django-admin/">⚑ Django Admin</a>
-        <a class="btn" href="/settings/database/">⛁ ฐานข้อมูล</a>
-        <button class="btn" id="restart">↻ รีสตาร์ทระบบ</button>
+        <a class="btn" href="/django-admin/"><i data-icon="shield"></i> Django Admin</a>
+        <a class="btn" href="/settings/database/"><i data-icon="database"></i> ฐานข้อมูล</a>
+        <button class="btn" id="restart"><i data-icon="refresh"></i> รีสตาร์ทระบบ</button>
       </div>
     </div>
   </div>
@@ -78,7 +78,8 @@ function drawHosting(h) {
       </div>
       ${ts.error ? `<div class="alert err">${esc(ts.error)}</div>` : ''}
       <div class="small muted" style="margin-bottom:12px">Funnel ใช้ได้กับพอร์ต 443, 8443, 10000 และต้องเปิดสิทธิ์ใน Tailscale admin ก่อน · เว็บที่มีพอร์ตเฉพาะจะได้ https://…:พอร์ตนั้น/ ด้วย (ใน tailnet)</div>`
-    : ts.installed ? '<div class="small muted" style="margin-bottom:12px">เปิดแอป Tailscale และล็อกอินก่อน แล้วกลับมาที่หน้านี้</div>'
+    : ts.installed ? `<div class="row" style="margin-bottom:12px"><button class="btn sm primary" id="ts-connect">เชื่อมต่อ Tailscale</button><button class="btn sm" id="ts-open">เปิดแอป Tailscale</button>
+        <span class="small muted">${ts.enabled ? 'เปิดเผยแพร่ไว้แล้ว — จะเชื่อมลิงก์ให้เองเมื่อ Tailscale ออนไลน์' : 'ต้องออนไลน์ก่อนจึงเผยแพร่ได้'}</span></div>`
     : '<div class="small muted" style="margin-bottom:12px">ติดตั้ง Tailscale จาก tailscale.com/download เพื่อเปิดเว็บจากที่ไหนก็ได้ผ่านโดเมน *.ts.net</div>'}
     <button class="btn primary" id="h-save">บันทึกการตั้งค่าโฮสติ้ง</button>`;
   el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); toast('คัดลอกแล้ว', 'ok'); });
@@ -94,6 +95,14 @@ function drawHosting(h) {
       toast(r.hosting.tailscale.error ? 'บันทึกแล้ว แต่ Tailscale มีปัญหา' : r.hosting.running ? 'โฮสติ้งเปิดแล้ว' : 'บันทึกแล้ว', r.hosting.tailscale.error ? 'err' : 'ok');
     } catch (e) { toast(e.message, 'err'); const r = await api('/api/settings/hosting'); drawHosting(r.hosting); }
   };
+  const tsAct = async (action, btn) => {
+    btn.disabled = true;
+    try { const r = await api('/api/settings/tailscale/' + action, {}); if (action === 'connect') { drawHosting(r.hosting); toast(r.hosting.tailscale.running ? 'เชื่อมต่อ Tailscale แล้ว' : 'ยังไม่ออนไลน์ — ลองเปิดแอป Tailscale', r.hosting.tailscale.running ? 'ok' : 'err'); } }
+    catch (e) { toast(e.message, 'err'); }
+    btn.disabled = false;
+  };
+  if (val('ts-connect')) val('ts-connect').onclick = e => tsAct('connect', e.currentTarget);
+  if (val('ts-open')) val('ts-open').onclick = e => tsAct('open', e.currentTarget);
   val('h-save').onclick = save;
   val('h-enabled').onchange = save;
 }

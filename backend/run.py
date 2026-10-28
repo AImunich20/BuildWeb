@@ -56,13 +56,12 @@ def watch_parent():
     ppid = os.environ.get("BUILDWEB_PARENT_PID")
     if not ppid:
         return
+    from builder.system import process_alive
 
     def loop():
         while True:
             time.sleep(2)
-            try:
-                os.kill(int(ppid), 0)
-            except OSError:
+            if not process_alive(ppid):
                 shutdown()
 
     threading.Thread(target=loop, daemon=True).start()
@@ -87,6 +86,7 @@ def main():
         from builder.hosting import server as hosting
 
         hosting.apply_config()
+        hosting.watch_tailscale()
 
     from django.core.wsgi import get_wsgi_application
     from waitress import serve

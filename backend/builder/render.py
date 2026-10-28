@@ -181,7 +181,9 @@ def full_body(page, pages, shared=None):
     parts.append(body_html(page))
     if foot and page.use_footer:
         parts.append(strip_body(foot.html))
-    return fill_nav("\n".join(parts), pages, page)
+    from .data import render_html
+
+    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page)
 
 
 def visible_pages(site, include_drafts):

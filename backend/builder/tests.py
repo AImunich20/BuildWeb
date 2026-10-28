@@ -9,7 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 
 from . import exporter, render, sections, services
-from .models import Asset, FormSubmission, Page, PageRevision, Site
+from .models import Asset, Collection, FormSubmission, Page, PageRevision, Site
 
 TMP_MEDIA = Path(tempfile.mkdtemp(prefix="bw-media-"))
 
@@ -423,3 +423,115 @@ class HostingNotifyTests(TestCase):
         self.assertTrue(r["notify"]["email"]["password_set"])
         bad = c.post("/api/settings/notify", json.dumps({"webhook_url": "ftp://x"}), content_type="application/json")
         self.assertEqual(bad.status_code, 400)
+
+
+SQL_DUMP = """-- phpMyAdmin SQL Dump
+CREATE TABLE `products` (
+  `id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `price` decimal(10,2) DEFAULT NULL,
+  `image` varchar(255) DEFAULT NULL,
+  `note` text,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `products` (`id`, `name`, `price`, `image`, `note`) VALUES
+(1, 'ลาเต้', 65.00, 'latte.jpg', 'it\\'s \\"hot\\"'),
+(2, 'ชาไทย', 55.50, 'tea.jpg', NULL),
+(3, 'Cake, cheese', 95.00, 'cake.jpg', 'line1\\nline2');
+INSERT INTO `staff` VALUES (1,'Ann'),(2,'Bo');
+"""
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class DataTests(TestCase):
+    def setUp(self):
+        from . import data
+
+        self.data = data
+        self.site = services.create_site("Data", "blank")
+
+    def test_parse_sql_dump(self):
+        t = self.data.parse_sql_dump(SQL_DUMP)
+        self.assertEqual(t["products"]["columns"], ["id", "name", "price", "image", "note"])
+        rows = t["products"]["rows"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["name"], "ลาเต้")
+        self.assertEqual(rows[0]["note"], 'it\'s "hot"')
+        self.assertEqual(rows[1]["note"], "")
+        self.assertEqual(rows[1]["price"], 55.5)
+        self.assertEqual(rows[2]["name"], "Cake, cheese")
+        self.assertEqual(rows[2]["note"], "line1\nline2")
+        self.assertEqual(len(t["staff"]["rows"]), 2)
+
+    def test_collection_types_and_render(self):
+        t = self.data.parse_sql_dump(SQL_DUMP)["products"]
+        col = self.data.create_collection(self.site, "products", t["columns"], t["rows"], sql_types=t["types"])
+        types = {f["name"]: f["type"] for f in col.fields}
+        self.assertEqual(types["price"], "number")
+        self.assertEqual(types["image"], "image")
+        self.assertEqual(types["note"], "longtext")
+        html = ('<p>{{products.count}} รายการ · {{site.name}} · {{unknown}} · {{ vue.thing }}</p>'
+                '<div class="grid" data-bw-repeat="products" data-bw-sort="price" data-bw-order="desc" data-bw-limit="2">'
+                '<div class="card"><h3>{{#}}. {{name}}</h3><img src="{{image}}"><span>{{price}}</span><div><b>x</b></div></div></div>')
+        out = self.data.render_html(html, self.site)
+        self.assertIn("<p>3 รายการ · Data · {{unknown}} · {{ vue.thing }}</p>", out)
+        self.assertEqual(out.count('class="card"'), 2)
+        self.assertLess(out.index("Cake, cheese"), out.index("ลาเต้"))  # sorted by price desc
+        self.assertNotIn("ชาไทย", out)  # limit 2
+        self.assertIn("<h3>1. Cake, cheese</h3>", out)
+        self.assertIn('src="cake.jpg"', out)
+
+    def test_filters_escape_and_empty(self):
+        self.data.create_collection(self.site, "items", ["name", "cat", "n"], [
+            {"name": "<b>A</b>", "cat": "x", "n": 5}, {"name": "B", "cat": "y", "n": 10}, {"name": "C", "cat": "x", "n": 20}])
+        out = self.data.render_html('<ul data-bw-repeat="items" data-bw-filter="cat=x;n>=10"><li>{{name}}</li></ul>', self.site)
+        self.assertEqual(out.count("<li>"), 1)
+        self.assertIn("<li>C</li>", out)
+        out = self.data.render_html('<ul data-bw-repeat="items" data-bw-filter="name~a"><li>{{name}}|{{{name}}}</li></ul>', self.site)
+        self.assertIn("&lt;b&gt;A&lt;/b&gt;|<b>A</b>", out)
+        out = self.data.render_html('<ul data-bw-repeat="items" data-bw-filter="cat=z" data-bw-empty="ไม่มีข้อมูล"><li>{{name}}</li></ul>', self.site)
+        self.assertIn("ไม่มีข้อมูล", out)
+        self.assertNotIn("<li>", out)
+        # unknown collection: template stays visible
+        out = self.data.render_html('<div data-bw-repeat="nope"><i>{{x}}</i></div>', self.site)
+        self.assertIn("<i>{{x}}</i>", out)
+
+    def test_bound_page_renders_through_site(self):
+        self.data.create_collection(self.site, "Menu", ["title"], [{"title": "กาแฟ"}, {"title": "ชา"}])
+        page = self.site.home_page()
+        page.html = '<section data-bw-repeat="menu"><h2>{{title}}</h2></section>'
+        page.save()
+        files, _ = render.build_files(self.site)
+        self.assertIn("<h2>กาแฟ</h2>", files["index.html"])
+        self.assertIn("<h2>ชา</h2>", files["index.html"])
+
+    def test_csv_and_api(self):
+        c = Client()
+        c.get("/")
+        csv_file = SimpleUploadedFile("สินค้า.csv", "ชื่อ,ราคา\nกาแฟ,50\nชา,40\n".encode("utf-8-sig"))
+        r = c.post(f"/api/sites/{self.site.id}/collections/import-file", {"file": csv_file}).json()
+        self.assertTrue(r["ok"], r)
+        col = r["collections"][0]
+        self.assertEqual([f["name"] for f in col["fields"]], ["ชื่อ", "ราคา"])
+        self.assertEqual(col["count"], 2)
+        sql = SimpleUploadedFile("dump.sql", SQL_DUMP.encode())
+        prev = c.post(f"/api/sites/{self.site.id}/collections/import-file", {"file": sql, "preview": "1"}).json()
+        self.assertEqual({t["name"] for t in prev["tables"]}, {"products", "staff"})
+        sql = SimpleUploadedFile("dump.sql", SQL_DUMP.encode())
+        r = c.post(f"/api/sites/{self.site.id}/collections/import-file", {"file": sql, "tables": ["products"]}).json()
+        self.assertEqual(len(r["collections"]), 1)
+        cid = r["collections"][0]["id"]
+        post = lambda u, d: c.post(u, json.dumps(d), content_type="application/json").json()  # noqa: E731
+        row = post(f"/api/collections/{cid}/rows/save", {"data": {"name": "ใหม่", "price": 10}})["row"]
+        self.assertEqual(row["name"], "ใหม่")
+        self.assertEqual(c.get(f"/api/collections/{cid}").json()["collection"]["count"], 4)
+        res = post(f"/api/collections/{cid}/rows/delete", {"ids": [row["_id"]]})
+        self.assertEqual(res.get("deleted"), 1, res)
+        r = post(f"/api/collections/{cid}/update", {"slug": "menu", "fields": [{"name": "title", "label": "ชื่อ"}],
+                                                   "renames": [{"from": "name", "to": "title"}]})
+        self.assertEqual(r["collection"]["slug"], "menu")
+        self.assertEqual(Collection.objects.get(pk=cid).records.first().data["title"], "ลาเต้")
+        self.assertIn("ลาเต้", c.get(f"/api/collections/{cid}/export.csv").content.decode("utf-8-sig"))
+        self.assertEqual(c.get(f"/sites/{self.site.id}/data/").status_code, 200)
+        self.assertTrue(post(f"/api/collections/{cid}/delete", {})["ok"])

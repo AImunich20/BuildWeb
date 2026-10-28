@@ -15,9 +15,10 @@ from django.views.decorators.http import require_GET, require_POST
 
 from buildweb import config
 
-from . import dbtools, exporter, importer, notify, sections, services
+from . import data, dbtools, exporter, importer, notify, sections, services, system
 from .hosting import server as hosting
-from .models import DEFAULT_THEME, Asset, AssetFolder, FormSubmission, Page, PageRevision, SharedSection, Site
+from .models import (DEFAULT_THEME, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
+                     SharedSection, Site)
 
 MAX_UPLOAD = 200 * 1024 * 1024
 SAFE_NAME_RE = re.compile(r"[^\w.\-ก-๙ ]+")
@@ -548,7 +549,7 @@ def reveal(request):
     path = Path(body(request).get("path", "")).expanduser()
     if not path.exists():
         raise ApiError("ไม่พบไฟล์/โฟลเดอร์")
-    subprocess.Popen(["open", "-R", str(path)])
+    system.reveal(path)
     return {}
 
 
@@ -556,9 +557,9 @@ def reveal(request):
 @api
 def open_url(request):
     url = body(request).get("url", "")
-    if not re.match(r"^https?://", url) and not url.endswith(".app"):
+    if not re.match(r"^https?://", url) and not url.endswith((".app", ".exe", ".run")):
         raise ApiError("ลิงก์ไม่ถูกต้อง")
-    subprocess.Popen(["open", url])
+    system.open_target(url)
     return {}
 
 
@@ -658,11 +659,36 @@ def db_switch(request):
     return {"steps": steps}
 
 
+def shell_request(request):
+    """Requests from the desktop shell / our own pages carry this header; a plain cross-site form can't."""
+    return request.headers.get("X-BuildWeb") == "1"
+
+
 @csrf_exempt  # must work when the database (and so the session) is down; it only restarts the local server
 @require_POST
 @api
 def system_restart(request):
+    if not shell_request(request):
+        raise ApiError("forbidden", status=403)
     dbtools.restart_soon()
+    return {}
+
+
+@csrf_exempt
+@require_POST
+@api
+def system_shutdown(request):
+    """Called by the desktop shell when quitting (all platforms): take Tailscale links down, then exit."""
+    if not shell_request(request):
+        raise ApiError("forbidden", status=403)
+    import os
+    import threading
+
+    def go():
+        hosting.shutdown()
+        os._exit(0)
+
+    threading.Timer(0.2, go).start()
     return {}
 
 
@@ -769,3 +795,276 @@ def import_github(request):
     except importer.ImportErrorTH as e:
         raise ApiError(str(e), field="url")
     return run_import(bundle, d, repo.split("/")[-1])
+
+
+@require_POST
+@api
+def tailscale_action(request, action):
+    from . import tailscale
+
+    if action == "connect":
+        tailscale.connect()
+        hosting.apply_tailscale()
+    elif action == "open":
+        tailscale.open_app()
+    else:
+        raise ApiError("unknown action", status=404)
+    return {"hosting": hosting.status()}
+
+
+# --- data: collections, connections, imports ------------------------------------------------------
+
+def collection_json(c, with_count=True):
+    count = None
+    if with_count:
+        count = c.records.count() if c.mode == Collection.COPY else None
+    return {
+        "id": c.id, "name": c.name, "slug": c.slug, "fields": c.fields, "mode": c.mode, "count": count,
+        "connection": c.connection_id, "connection_name": c.connection.name if c.connection else "",
+        "source_database": c.source_database, "source_table": c.source_table, "live_order": c.live_order,
+        "live_desc": c.live_desc, "live_limit": c.live_limit,
+        "last_synced": c.last_synced.isoformat() if c.last_synced else None, "updated_at": c.updated_at.isoformat(),
+    }
+
+
+def connection_json(c):
+    return {"id": c.id, "name": c.name, "host": c.host, "port": c.port, "user": c.user, "database": c.database,
+            "socket": c.socket, "password_set": bool(c.password)}
+
+
+def clean_fields(raw):
+    used, out = set(), []
+    for f in raw or []:
+        name = data.field_key(f.get("name") or f.get("label"), used)
+        typ = f.get("type") if f.get("type") in Collection.FIELD_TYPES else "text"
+        out.append({"name": name, "label": (f.get("label") or name)[:100], "type": typ, "source": f.get("source", name)})
+    return out
+
+
+@require_GET
+@api
+def collection_list(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    return {"collections": [collection_json(c) for c in site.collections.select_related("connection")],
+            "connections": [connection_json(c) for c in DataConnection.objects.all()]}
+
+
+@require_POST
+@api
+def collection_create(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    name = (d.get("name") or "").strip()
+    if not name:
+        raise ApiError("กรุณาตั้งชื่อชุดข้อมูล", field="name")
+    fields = clean_fields(d.get("fields") or [{"name": "title", "label": "ชื่อ"}, {"name": "detail", "label": "รายละเอียด", "type": "longtext"},
+                                              {"name": "image", "label": "รูป", "type": "image"}])
+    c = Collection.objects.create(site=site, name=name, slug=data.unique_slug(site, d.get("slug") or name), fields=fields)
+    return {"collection": collection_json(c)}
+
+
+@require_POST
+@api
+def collection_import_file(request, site_id):
+    """CSV → one collection; .sql dump → one collection per table (optionally only ``tables``)."""
+    site = get_object_or_404(Site, pk=site_id)
+    f = request.FILES.get("file")
+    if not f:
+        raise ApiError("กรุณาเลือกไฟล์ .csv หรือ .sql")
+    raw = f.read()
+    created = []
+    if f.name.lower().endswith(".sql"):
+        text = raw.decode("utf-8", "replace")
+        tables = data.parse_sql_dump(text)
+        wanted = set(request.POST.getlist("tables"))
+        if not tables:
+            raise ApiError("ไม่พบตาราง (CREATE TABLE / INSERT) ในไฟล์ .sql")
+        if request.POST.get("preview"):
+            return {"tables": [{"name": n, "columns": t["columns"], "rows": len(t["rows"])} for n, t in tables.items()]}
+        for name, t in tables.items():
+            if wanted and name not in wanted:
+                continue
+            created.append(data.create_collection(site, name, t["columns"], t["rows"], sql_types=t["types"]))
+    else:
+        try:
+            cols, rows = data.parse_csv(raw)
+        except (UnicodeDecodeError, RuntimeError) as e:
+            raise ApiError(f"อ่านไฟล์ CSV ไม่ได้: {e}")
+        name = (request.POST.get("name") or f.name.rsplit(".", 1)[0]).strip()
+        created.append(data.create_collection(site, name, cols, rows))
+    return {"collections": [collection_json(c) for c in created]}
+
+
+def connection_cfg(d):
+    if d.get("connection_id"):
+        c = get_object_or_404(DataConnection, pk=int(d["connection_id"]))
+        cfg = c.as_config(d.get("database") if "database" in d else None)
+        return c, cfg
+    db = config.load()["db"]  # default: the app's own MySQL settings / XAMPP defaults
+    return None, {"host": d.get("host") or db["host"], "port": d.get("port") or db["port"], "user": d.get("user") or db["user"],
+                  "password": d.get("password", db["password"]), "name": d.get("database", ""), "socket": d.get("socket", "")}
+
+
+@api
+def connection_save(request):
+    if request.method != "POST":
+        return {"connections": [connection_json(c) for c in DataConnection.objects.all()]}
+    d = body(request)
+    c = DataConnection.objects.filter(pk=d.get("id")).first() if d.get("id") else DataConnection()
+    c.name = (d.get("name") or "XAMPP").strip()[:100]
+    c.host = (d.get("host") or "127.0.0.1").strip()
+    c.port = int(d.get("port") or 3306)
+    c.user = (d.get("user") or "root").strip()
+    if d.get("password") or not c.pk:
+        c.password = d.get("password") or ""
+    c.database = (d.get("database") or "").strip()
+    c.socket = (d.get("socket") or "").strip()
+    data.list_databases(c.as_config(""))  # fails with a clear message when unreachable
+    c.save()
+    return {"connection": connection_json(c)}
+
+
+@require_POST
+@api
+def connection_delete(request, conn_id):
+    get_object_or_404(DataConnection, pk=conn_id).delete()
+    return {}
+
+
+@require_POST
+@api
+def mysql_browse(request):
+    """{connection_id} → databases; with {database} → tables (+columns, row counts)."""
+    d = body(request)
+    _, cfg = connection_cfg({**d, "database": ""})
+    if d.get("database"):
+        return {"tables": data.list_tables(cfg, d["database"])}
+    return {"databases": data.list_databases(cfg)}
+
+
+@require_POST
+@api
+def collection_import_mysql(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    conn = get_object_or_404(DataConnection, pk=int(d.get("connection_id") or 0))
+    database, tables = d.get("database") or conn.database, d.get("tables") or []
+    if not database or not tables:
+        raise ApiError("เลือกฐานข้อมูลและตารางก่อน")
+    mode = Collection.LIVE if d.get("mode") == "live" else Collection.COPY
+    created = [data.import_mysql(site, conn, database, t, mode=mode) for t in tables]
+    return {"collections": [collection_json(c) for c in created]}
+
+
+@api
+def collection_detail(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    if c.mode == Collection.COPY:
+        rows = [{**r.data, "_id": r.id} for r in c.records.all()[:5000]]  # "_id": tables often have their own "id"
+        return {"collection": collection_json(c), "rows": rows, "editable": True}
+    try:
+        rows = data.rows_for(c)
+        err = ""
+    except RuntimeError as e:
+        rows, err = [], str(e)
+    return {"collection": collection_json(c, with_count=False), "rows": rows[:5000], "editable": False, "error": err}
+
+
+@require_POST
+@api
+def collection_update(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    d = body(request)
+    if "name" in d:
+        c.name = (d["name"] or c.name).strip()[:120]
+    if "slug" in d and d["slug"] != c.slug:
+        slug = (d["slug"] or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
+            raise ApiError("ชื่ออ้างอิงใช้ได้เฉพาะ a-z, 0-9 และ -", field="slug")
+        if c.site.collections.filter(slug=slug).exclude(pk=c.pk).exists():
+            raise ApiError("มีชุดข้อมูลที่ใช้ชื่อนี้แล้ว", field="slug")
+        c.slug = slug
+    if "fields" in d:
+        old = {f["name"]: f for f in c.fields}
+        fields = clean_fields(d["fields"])
+        for f in fields:  # keep where live columns come from
+            if f["name"] in old:
+                f["source"] = old[f["name"]].get("source", f["name"])
+        renames = {r["from"]: r["to"] for r in d.get("renames", []) if r.get("from") and r.get("to")}
+        if renames and c.mode == Collection.COPY:
+            for rec in c.records.all():
+                rec.data = {renames.get(k, k): v for k, v in rec.data.items()}
+                rec.save(update_fields=["data"])
+        c.fields = fields
+    for k in ("live_order",):
+        if k in d:
+            setattr(c, k, (d[k] or "")[:100])
+    if "live_desc" in d:
+        c.live_desc = as_bool(d["live_desc"])
+    if "live_limit" in d:
+        c.live_limit = max(1, min(5000, int(d["live_limit"] or 500)))
+    c.save()
+    data.invalidate(c)
+    return {"collection": collection_json(c)}
+
+
+@require_POST
+@api
+def collection_delete(request, col_id):
+    get_object_or_404(Collection, pk=col_id).delete()
+    return {}
+
+
+@require_POST
+@api
+def collection_resync(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    if c.mode == Collection.LIVE:
+        data.invalidate(c)
+        return {"rows": len(data.rows_for(c))}
+    return {"rows": data.resync(c)}
+
+
+@require_POST
+@api
+def record_save(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    if c.mode != Collection.COPY:
+        raise ApiError("ชุดข้อมูลแบบเชื่อมสดแก้ไขได้ที่ MySQL (phpMyAdmin)")
+    d = body(request)
+    values = {f["name"]: d.get("data", {}).get(f["name"], "") for f in c.fields}
+    if d.get("_id"):
+        r = get_object_or_404(Record, pk=d["_id"], collection=c)
+        r.data = {**r.data, **values}
+        r.save()
+    else:
+        pos = (c.records.order_by("-position").values_list("position", flat=True).first() or 0) + 1
+        r = Record.objects.create(collection=c, data=values, position=pos)
+    c.save(update_fields=["updated_at"])
+    return {"row": {**r.data, "_id": r.id}}
+
+
+@require_POST
+@api
+def record_delete(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    ids = [int(i) for i in body(request).get("ids", [])]
+    n, _ = c.records.filter(id__in=ids).delete()
+    return {"deleted": n}
+
+
+def collection_csv(request, col_id):
+    from django.http import HttpResponse
+
+    c = get_object_or_404(Collection, pk=col_id)
+    rows = data.rows_for(c)
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="{c.slug}.csv"'
+    resp.write("﻿")
+    import csv as _csv
+
+    w = _csv.writer(resp)
+    w.writerow([f["label"] for f in c.fields])
+    for r in rows:
+        w.writerow([r.get(f["name"], "") for f in c.fields])
+    return resp
