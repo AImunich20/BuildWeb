@@ -1,6 +1,6 @@
 [package]
 name = "buildweb"
-version = "0.7.0"
+version = "0.7.1"
 description = "BuildWeb – drag-and-drop website builder"
 edition = "2021"
 
