@@ -133,11 +133,12 @@ def site_css(site):
     from .anim import ANIM_CSS
     from .navbar import NAV_CSS
 
-    from .widgets import CONTACT_CSS, DATA_CSS
+    from .widgets import CONTACT_CSS, DATA_CSS, SHOP_CSS
 
     shared = "\n".join(sec.css for sec in site.shared_sections.filter(enabled=True) if sec.css and not sec.managed)
     base = BASE_CSS if site.use_base_styles else ""
-    return (theme_css(site) + base + NAV_CSS + ANIM_CSS + DATA_CSS + CONTACT_CSS + "\n" + shared + "\n"
+    return (theme_css(site) + base + NAV_CSS + ANIM_CSS + DATA_CSS + CONTACT_CSS + (SHOP_CSS if (site.shop or {}).get("enabled") else "")
+            + "\n" + shared + "\n"
             + (site.custom_css or ""))
 
 
@@ -145,9 +146,10 @@ def site_js(site):
     from .anim import ANIM_JS
     from .navbar import NAV_JS
 
-    from .widgets import AUTH_JS, DATA_JS, SDK_JS
+    from .widgets import AUTH_JS, DATA_JS, SDK_JS, SHOP_JS
 
-    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS + AUTH_JS
+    core = (SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS + AUTH_JS
+            + (SHOP_JS if (site.shop or {}).get("enabled") else ""))
     shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
     return core + "\n" + shared + "\n" + (site.custom_js or "")
 
@@ -329,6 +331,13 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
     from .widgets import contact_html
 
     body = rel_media(full_body(page, pages, shared, row, include_drafts, user)) + "\n" + rel_media(contact_html(site))
+    if (site.shop or {}).get("enabled"):
+        from .shop import settings as shop_settings
+
+        body += (f'\n<a class="bw-cartfab" href="{e(shop_settings(site)["pages"]["cart"])}" hidden aria-label="ตะกร้าสินค้า">'
+                 '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/>'
+                 '<circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>'
+                 'ตะกร้า <b data-bw-cart-count>0</b></a>')
     scripts = [f'<script src="{depth_prefix}js/site.js"></script>']
     if page.js:
         scripts.append(f"<script>\n{page.js}\n</script>")
@@ -340,6 +349,12 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
 
         ms = member_settings(site)
         attrs += f' data-bw-after-login="{e(ms["after_login"] or ms["pages"]["account"])}"'
+    if (site.shop or {}).get("enabled"):
+        import json as _json
+
+        from .shop import settings as shop_settings
+
+        attrs += f' data-bw-shop="{e(site.slug)}" data-bw-shop-pages="{e(_json.dumps(shop_settings(site)["pages"]))}"'
     if page.body_class:
         attrs = f' class="{e(page.body_class)}"' + attrs
     if form_endpoint:

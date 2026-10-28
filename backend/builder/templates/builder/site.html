@@ -13,6 +13,7 @@
 <nav class="tabs">
   <a href="/sites/{{ site.id }}/pages/" class="{% if tab == 'pages' %}active{% endif %}">หน้าเว็บ</a>
   <a href="/sites/{{ site.id }}/data/" class="{% if tab == 'data' %}active{% endif %}">ข้อมูล</a>
+  <a href="/sites/{{ site.id }}/shop/" class="{% if tab == 'shop' %}active{% endif %}">ร้านค้า</a>
   {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/api/" class="{% if tab == 'api' %}active{% endif %}">API</a>{% endif %}
   {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/members/" class="{% if tab == 'members' %}active{% endif %}">สมาชิก</a>{% endif %}
   {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/logic/" class="{% if tab == 'logic' %}active{% endif %}">Logic</a>{% endif %}

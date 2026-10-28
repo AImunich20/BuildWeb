@@ -1425,3 +1425,127 @@ class TeamTests(TestCase):
         self.assertEqual(r["blocks"][0]["name"], "การ์ดราคา")
         r = c.post(f"/api/blocks/{r['blocks'][0]['id']}/delete", "{}", content_type="application/json").json()
         self.assertEqual(r["blocks"], [])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class ShopTests(TestCase):
+    """v0.7 phase 6: shop pages, checkout with server-side prices, stock, PromptPay, slips, Stripe, orders admin."""
+
+    def setUp(self):
+        from . import generate, notify
+
+        notify.SENT.clear()
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Shop", "blank")
+        generate.create_shop(self.site)
+        self.site.refresh_from_db()
+        from . import shop
+
+        shop.save_settings(self.site, {"promptpay": "081-234-5678", "bank": "กสิกร 123", "cod": True, "shipping": 50, "free_over": 1000})
+        self.prod = shop.products_col(self.site)
+        self.tee = self.prod.records.get(data__slug="t-shirt")
+        self.pub = {"buildweb.public": True}
+
+    def checkout(self, items, payment="promptpay", **extra):
+        d = {"items": items, "payment": payment, "customer": "สมชาย", "phone": "0812345678", "address": "กรุงเทพ", **extra}
+        return self.c.post(f"/{self.site.slug}/api/v1/shop/checkout", json.dumps(d), content_type="application/json", **self.pub)
+
+    def test_promptpay_payload(self):
+        from . import shop
+
+        self.assertEqual(shop.crc16("123456789"), "29B1")  # CRC-16/CCITT-FALSE check value
+        p = shop.promptpay_payload("0812345678", 440)
+        self.assertTrue(p.startswith("000201010212"))
+        self.assertIn("0016A000000677010111" + "01130066812345678", p)
+        self.assertIn("5406440.00", p)
+        self.assertEqual(p[-4:], shop.crc16(p[:-4]))
+        self.assertIn("0213" + "1234567890123", shop.promptpay_payload("1-2345-67890-12-3"))
+        with self.assertRaises(ValueError):
+            shop.promptpay_payload("123")
+
+    def test_checkout_uses_server_prices_and_stock(self):
+        r = self.checkout([{"id": self.tee.id, "qty": 2, "price": 1}])  # a tampered price is ignored
+        self.assertEqual(r.status_code, 201, r.content)
+        o = r.json()
+        self.assertEqual(o["total"], 830.0)  # 2 × 390 + 50 shipping
+        self.assertIn("5406830.00", o["promptpay"])
+        self.tee.refresh_from_db()
+        self.assertEqual(self.tee.data["stock"], 23)
+        view = self.c.get(f"/{self.site.slug}/api/v1/shop/orders/{o['number']}?t={o['token']}", **self.pub).json()
+        self.assertEqual((view["status"], view["items"][0]["qty"]), ("pending", 2))
+        self.assertEqual(self.c.get(f"/{self.site.slug}/api/v1/shop/orders/{o['number']}?t=wrong", **self.pub).status_code, 404)
+        free = self.checkout([{"id": self.tee.id, "qty": 3}]).json()
+        self.assertEqual(free["total"], 1170.0)  # free shipping over 1000
+        bag = self.prod.records.get(data__slug="tote-bag")
+        self.assertEqual(self.checkout([{"id": bag.id, "qty": 1}]).status_code, 409)  # stock 0
+        self.assertEqual(self.checkout([{"id": self.tee.id, "qty": 1}], payment="stripe").status_code, 400)  # not enabled
+        bad = self.checkout([{"id": self.tee.id, "qty": 1}], customer="")
+        self.assertEqual(bad.json()["error"]["fields"], {"customer": "จำเป็นต้องกรอก"})
+        from . import notify
+
+        self.assertTrue(any(o["number"] in t for t in notify.SENT))
+
+    def test_slip_status_cancel_restores_stock(self):
+        o = self.checkout([{"id": self.tee.id, "qty": 5}], payment="transfer").json()
+        slip = SimpleUploadedFile("slip.jpg", b"\xff\xd8\xff fake jpeg", "image/jpeg")
+        r = self.c.post(f"/{self.site.slug}/api/v1/shop/orders/{o['number']}/slip?t={o['token']}", {"slip": slip}, **self.pub)
+        self.assertTrue(r.json()["has_slip"])
+        orders = self.c.get(f"/api/sites/{self.site.id}/shop/orders").json()["orders"]
+        self.assertTrue(orders[0]["slip"])
+        self.assertNotIn("token", orders[0])
+        self.c.post(f"/api/sites/{self.site.id}/shop/orders/{orders[0]['_id']}", json.dumps({"status": "cancelled"}), content_type="application/json")
+        self.tee.refresh_from_db()
+        self.assertEqual(self.tee.data["stock"], 25)
+        summary = self.c.get(f"/api/sites/{self.site.id}/shop").json()["summary"]
+        self.assertEqual(summary["pending"], 0)
+
+    def test_stripe_session_and_webhook(self):
+        import hashlib
+        import hmac
+        import time
+        from unittest import mock
+
+        from . import logic, shop
+
+        shop.save_settings(self.site, {"stripe": True})
+        self.c.post(f"/api/sites/{self.site.id}/logic/secrets", json.dumps({"name": "STRIPE_SECRET_KEY", "value": "sk_test_x"}), content_type="application/json")
+        self.c.post(f"/api/sites/{self.site.id}/logic/secrets", json.dumps({"name": "STRIPE_WEBHOOK_SECRET", "value": "whsec_y"}), content_type="application/json")
+        sent = {}
+
+        def fake(method, url, headers=None, body=None, timeout=20):
+            sent.update(url=url, auth=headers["Authorization"], body=body)
+            return 200, json.dumps({"id": "cs_1", "url": "https://checkout.stripe.com/c/cs_1"})
+
+        with mock.patch.object(logic, "http_request", side_effect=fake):
+            o = self.checkout([{"id": self.tee.id, "qty": 1}], payment="stripe").json()
+        self.assertEqual(o["redirect"], "https://checkout.stripe.com/c/cs_1")
+        self.assertEqual(sent["auth"], "Bearer sk_test_x")
+        self.assertIn("unit_amount%5D=39000", sent["body"])
+        event = json.dumps({"type": "checkout.session.completed", "data": {"object": {"metadata": {"order": o["number"]},
+                                                                                       "payment_status": "paid"}}}).encode()
+        ts = str(int(time.time()))
+        sig = hmac.new(b"whsec_y", ts.encode() + b"." + event, hashlib.sha256).hexdigest()
+        url = f"/{self.site.slug}/api/v1/shop/stripe-webhook"
+        self.assertEqual(self.c.post(url, event, content_type="application/json", HTTP_STRIPE_SIGNATURE=f"t={ts},v1=bad", **self.pub).status_code, 400)
+        self.assertEqual(self.c.post(url, event, content_type="application/json", HTTP_STRIPE_SIGNATURE=f"t={ts},v1={sig}", **self.pub).status_code, 200)
+        rec = shop.orders_col(self.site).records.get(data__number=o["number"])
+        self.assertEqual(rec.data["status"], "paid")
+
+    def test_shop_pages_and_member_orders(self):
+        files, _ = render.build_files(self.site)
+        for f in ("shop.html", "cart.html", "checkout.html", "order.html", "product/t-shirt.html"):
+            self.assertIn(f, files)
+        self.assertIn('data-bw-add-to-cart="', files["shop.html"])
+        self.assertIn("bw-cartfab", files["shop.html"])
+        self.assertIn("bwCart", files["js/site.js"])
+        from . import members
+
+        self.site.auth = {"enabled": True}
+        self.site.save()
+        members.create_user(self.site, "buyer@x.io", "secret123", "B", verified=True)
+        self.c.post(f"/{self.site.slug}/api/v1/auth/login", json.dumps({"email": "buyer@x.io", "password": "secret123"}),
+                    content_type="application/json", **self.pub)
+        self.checkout([{"id": self.tee.id, "qty": 1}])
+        mine = self.c.get(f"/{self.site.slug}/api/v1/shop/my-orders", **self.pub).json()["items"]
+        self.assertEqual(len(mine), 1)

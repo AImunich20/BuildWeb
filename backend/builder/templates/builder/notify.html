@@ -20,6 +20,14 @@
     </div>
   </div>
   <div class="card">
+    <div class="card-head"><div><h2>LINE</h2><div class="hint" style="margin:0">LINE Messaging API (LINE Official Account) — แจ้งออเดอร์/ฟอร์มเข้า LINE ของคุณหรือกลุ่ม</div></div><span data-status="line"></span></div>
+    <div class="card pad" style="border:0">
+      <label class="field"><span>Channel access token <small>— LINE Developers › Messaging API</small></span><input class="input mono" id="line_token" type="password" autocomplete="off"></label>
+      <label class="field"><span>ส่งถึง (User ID หรือ Group ID) <small>— ขึ้นต้นด้วย U… หรือ C…</small></span><input class="input mono" id="line_to" placeholder="U1234…"></label>
+      <button class="btn sm" data-test="line">ทดสอบ</button>
+    </div>
+  </div>
+  <div class="card">
     <div class="card-head"><div><h2>Discord</h2><div class="hint" style="margin:0">Webhook ของช่อง</div></div><span data-status="discord"></span></div>
     <div class="card pad" style="border:0">
       <label class="field"><span>Webhook URL <small>— Channel › Edit › Integrations › Webhooks</small></span><input class="input mono" id="discord_webhook" placeholder="https://discord.com/api/webhooks/…"></label>
@@ -58,7 +66,7 @@ let N = null;
 function fill(n) {
   N = n;
   $('n-enabled').checked = n.enabled; $('n-mac').checked = n.mac;
-  ['telegram_token', 'telegram_chat', 'discord_webhook', 'webhook_url'].forEach(k => $(k).value = n[k] || '');
+  ['telegram_token', 'telegram_chat', 'discord_webhook', 'webhook_url', 'line_token', 'line_to'].forEach(k => $(k).value = n[k] || '');
   $('e-enabled').checked = n.email.enabled; $('e-tls').checked = n.email.tls !== false;
   ['host', 'port', 'user', 'from', 'to'].forEach(k => $('e-' + k).value = n.email[k] || '');
   $('e-pw-hint').textContent = n.email.password_set ? 'ตั้งไว้แล้ว — เว้นว่างเพื่อใช้รหัสเดิม' : '';
@@ -71,6 +79,7 @@ function payload() {
     enabled: $('n-enabled').checked, mac: $('n-mac').checked,
     telegram_token: $('telegram_token').value, telegram_chat: $('telegram_chat').value,
     discord_webhook: $('discord_webhook').value, webhook_url: $('webhook_url').value,
+    line_token: $('line_token').value, line_to: $('line_to').value,
     email: { enabled: $('e-enabled').checked, tls: $('e-tls').checked, host: $('e-host').value, port: $('e-port').value,
       user: $('e-user').value, from: $('e-from').value, to: $('e-to').value, password: $('e-password').value },
   };

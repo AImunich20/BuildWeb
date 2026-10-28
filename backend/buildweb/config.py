@@ -52,6 +52,8 @@ DEFAULTS = {
         "telegram_token": "",
         "telegram_chat": "",
         "discord_webhook": "",
+        "line_token": "",   # LINE Messaging API channel access token
+        "line_to": "",      # LINE user / group id that receives the messages
         "webhook_url": "",
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "", "from": "", "to": "", "tls": True},
     },

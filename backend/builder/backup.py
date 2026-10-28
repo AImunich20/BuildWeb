@@ -28,7 +28,7 @@ from .models import (ApiKey, Asset, AssetFolder, Collection, Connector, FormSubm
 
 FORMAT = "buildweb-site"
 SITE_FIELDS = ("name", "slug", "description", "language", "theme", "nav", "favicon", "head_code", "custom_css", "custom_js",
-               "form_endpoint", "published", "use_base_styles", "base_url", "contact", "api", "auth")
+               "form_endpoint", "published", "use_base_styles", "base_url", "contact", "api", "auth", "shop")
 PAGE_FIELDS = ("title", "slug", "is_home", "status", "show_in_nav", "use_header", "use_footer", "nav_label", "nav_order",
                "seo_title", "seo_description", "seo_keywords", "og_image", "noindex", "head_code", "body_class",
                "custom_css", "custom_js", "project_data", "html", "css", "js", "detail_field", "access")

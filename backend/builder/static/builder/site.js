@@ -5,7 +5,7 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { data: renderData, api: renderApi, members: renderMembers, logic: renderLogic, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
+  const tabs = { shop: renderShop, data: renderData, api: renderApi, members: renderMembers, logic: renderLogic, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
 
 
 
@@ -1621,6 +1621,81 @@ return {...}  หรือ  return 201, {...}</div></details>
       let detail = x.detail; try { detail = JSON.stringify(JSON.parse(x.detail), null, 2); } catch (e) { }
       modal(`<header><h2>${esc(x.ref)} · ${esc(x.message)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body"><div class="log" style="max-height:60vh;overflow:auto">${esc(detail || '(ไม่มีรายละเอียด)')}</div></div>`, { wide: true });
     });
+  }
+
+  // ---------------------------------------------------------------- shop
+  let SH = null, shFilter = '';
+  async function renderShop() {
+    root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    SH = await api(`/api/sites/${site.id}/shop`);
+    const st = SH.settings, sm = SH.summary, baht = n => '฿' + Number(n || 0).toLocaleString('th-TH');
+    if (!SH.products) {
+      root.innerHTML = `<div class="card pad" style="max-width:720px"><h2>เปิดร้านค้าออนไลน์</h2><div class="hint">กดปุ่มเดียวได้ครบ: ชุดข้อมูลสินค้า (พร้อมตัวอย่าง 4 ชิ้น), คำสั่งซื้อ, หน้าร้าน, หน้าสินค้า, ตะกร้า, ชำระเงิน และหน้าติดตามคำสั่งซื้อ</div>
+        <ul class="small" style="line-height:1.9;margin:0 0 14px;padding-left:18px"><li>พร้อมเพย์ QR (ยอดเงินในคิวอาร์), โอนเงิน + แนบสลิป, เก็บเงินปลายทาง, บัตรผ่าน Stripe</li>
+        <li>ตัดสต็อกอัตโนมัติ คืนสต็อกเมื่อยกเลิก · แจ้งเตือนคำสั่งซื้อใหม่ทาง LINE / Telegram / อีเมล</li><li>ราคาคำนวณใหม่ที่เซิร์ฟเวอร์ทุกครั้ง แก้ราคาในตะกร้าไม่ได้</li></ul>
+        <button class="btn primary" id="sh-setup">${BW_ICON('plus')} สร้างร้านค้า</button></div>`;
+      document.getElementById('sh-setup').onclick = async () => { try { await api(`/api/sites/${site.id}/shop/setup`, {}); toast('สร้างร้านค้าแล้ว', 'ok'); renderShop(); } catch (e) { toast(e.message, 'err'); } };
+      return;
+    }
+    root.innerHTML = `<div class="grid g4" style="margin-bottom:16px">
+        <div class="card stat"><span>ยอดขายวันนี้</span><b>${baht(sm.today)}</b></div><div class="card stat"><span>ออเดอร์ที่ชำระวันนี้</span><b>${sm.today_count}</b></div>
+        <div class="card stat"><span>รอตรวจสอบ</span><b>${sm.pending}</b></div><div class="card stat"><span>ยอดขายเดือนนี้</span><b>${baht(sm.month)}</b></div></div>
+      <div class="grid" style="grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);align-items:start" id="sh-grid">
+        <div class="card"><div class="card-head"><h2>คำสั่งซื้อ</h2><div class="row"><input class="input" id="sh-q" placeholder="เลขที่ / ชื่อ / เบอร์" style="width:180px">
+          <select class="input" id="sh-st" style="width:140px"><option value="">ทุกสถานะ</option>${Object.entries(SH.statuses).map(([k, l]) => `<option value="${k}" ${k === shFilter ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+          <div id="sh-orders" class="data-table-wrap"></div></div>
+        <div class="card pad"><div class="row between"><h2>ตั้งค่าร้าน</h2><label class="switch" title="เปิดขาย"><input type="checkbox" data-s="enabled" ${st.enabled ? 'checked' : ''}><span></span></label></div>
+          <div class="small muted" style="margin:4px 0 12px">สินค้า ${SH.products.count} รายการ · <a href="/sites/${site.id}/data/?c=${SH.products.id}">จัดการสินค้า</a> · <a href="/preview/${esc(site.slug)}/${esc(st.pages.shop)}" target="_blank">ดูหน้าร้าน</a></div>
+          <label class="field"><span>พร้อมเพย์ <small>(เบอร์มือถือหรือเลขบัตร/ผู้เสียภาษี)</small></span><input class="input mono" data-s="promptpay" value="${esc(st.promptpay)}" placeholder="0812345678"></label>
+          <label class="field"><span>บัญชีธนาคารสำหรับโอน <small>(แสดงให้ลูกค้า)</small></span><textarea class="input" rows="3" data-s="bank" placeholder="กสิกรไทย 123-4-56789-0 ชื่อบัญชี ...">${esc(st.bank)}</textarea></label>
+          <label class="check"><input type="checkbox" data-s="cod" ${st.cod ? 'checked' : ''}>เก็บเงินปลายทาง</label>
+          <label class="check"><input type="checkbox" data-s="stripe" ${st.stripe ? 'checked' : ''}>บัตรเครดิต/เดบิต (Stripe)</label>
+          <div class="small muted" style="margin:-4px 0 10px 26px">ใส่ <code>STRIPE_SECRET_KEY</code> ${SH.secrets.STRIPE_SECRET_KEY ? '✓' : '✗'} และ <code>STRIPE_WEBHOOK_SECRET</code> ${SH.secrets.STRIPE_WEBHOOK_SECRET ? '✓' : '✗'} ที่ <a href="/sites/${site.id}/logic/">Logic › ค่าลับ</a> · webhook URL: <code>…/${esc(SH.stripe_webhook)}</code></div>
+          <div class="grid g3" style="gap:0 10px"><label class="field"><span>ค่าส่ง</span><input class="input mono" data-s="shipping" value="${st.shipping}"></label>
+            <label class="field"><span>ส่งฟรีเมื่อซื้อครบ</span><input class="input mono" data-s="free_over" value="${st.free_over}"></label>
+            <label class="field"><span>คำนำหน้าเลขที่</span><input class="input mono" data-s="prefix" value="${esc(st.prefix)}"></label></div>
+          <button class="btn primary" id="sh-save">บันทึก</button>
+          <div class="small muted" style="margin-top:12px">แจ้งเตือนออเดอร์ใหม่ใช้ช่องทางใน <a href="/settings/notify/">การแจ้งเตือน</a> (LINE, Telegram, Discord, อีเมล)</div></div></div>`;
+    document.getElementById('sh-save').onclick = async () => {
+      const d = {}; root.querySelectorAll('[data-s]').forEach(x => d[x.dataset.s] = x.type === 'checkbox' ? x.checked : x.value);
+      try { await api(`/api/sites/${site.id}/shop`, { settings: d }); toast('บันทึกแล้ว', 'ok'); renderShop(); } catch (e) { showFieldError(root, e); }
+    };
+    root.querySelector('[data-s=enabled]').onchange = () => document.getElementById('sh-save').click();
+    let t = null;
+    document.getElementById('sh-q').oninput = () => { clearTimeout(t); t = setTimeout(loadOrders, 250); };
+    document.getElementById('sh-st').onchange = e => { shFilter = e.target.value; loadOrders(); };
+    loadOrders();
+  }
+  async function loadOrders() {
+    const r = await api(`/api/sites/${site.id}/shop/orders?status=${shFilter}&q=${encodeURIComponent(document.getElementById('sh-q').value)}`);
+    const box = document.getElementById('sh-orders'), baht = n => '฿' + Number(n || 0).toLocaleString('th-TH');
+    const cls = s => ({ pending: 'warn', paid: 'ok', shipped: 'ok', completed: 'ok', cancelled: 'err' }[s] || '');
+    box.innerHTML = r.orders.length ? `<table class="table"><thead><tr><th>เลขที่</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ชำระ</th><th>สถานะ</th><th>เมื่อ</th></tr></thead><tbody>
+      ${r.orders.map(o => `<tr data-id="${o._id}" style="cursor:pointer"><td class="mono">${esc(o.number)}</td><td>${esc(o.customer)}<div class="small muted">${esc(o.phone)}</div></td>
+        <td class="num"><b>${baht(o.total)}</b></td><td class="small">${esc(SH.payments[o.payment] || o.payment)}${o.slip ? ' <span class="badge brand">มีสลิป</span>' : ''}</td>
+        <td><span class="badge ${cls(o.status)}">${esc(SH.statuses[o.status] || o.status)}</span></td><td class="small muted">${o.created ? ago(o.created) : ''}</td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty-state">${BW_ICON('cards', 28)}<div style="margin-top:8px">ยังไม่มีคำสั่งซื้อ</div></div>`;
+    box.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => orderModal(r.orders.find(o => o._id === +tr.dataset.id)));
+  }
+  function orderModal(o) {
+    const baht = n => '฿' + Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 });
+    const m = modal(`<header><h2>คำสั่งซื้อ ${esc(o.number)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:16px"><div><b>${esc(o.customer)}</b><div class="small">${esc(o.phone)} ${o.email ? '· ' + esc(o.email) : ''}${o.member ? '<br>สมาชิก: ' + esc(o.member) : ''}</div>
+        <div class="small" style="white-space:pre-line;margin-top:6px">${esc(o.address || '')}</div>${o.note ? `<div class="alert info" style="margin-top:8px">${esc(o.note)}</div>` : ''}</div>
+        <div>${(o.items || []).map(i => `<div class="row between small"><span>${esc(i.name)} × ${i.qty}</span><span>${baht(i.price * i.qty)}</span></div>`).join('')}
+          <div class="row between small"><span>ค่าส่ง</span><span>${baht(o.shipping)}</span></div><div class="row between"><b>รวม</b><b>${baht(o.total)}</b></div>
+          <div class="small muted" style="margin-top:6px">${esc(SH.payments[o.payment] || o.payment)} · ${when(o.created)}</div></div></div>
+      ${o.slip ? `<div class="sect-title">สลิป</div><a href="${esc(o.slip)}" target="_blank"><img src="${esc(o.slip)}" style="max-width:260px;border-radius:10px;border:1px solid var(--line)"></a>` : ''}
+      <div class="sect-title">สถานะ</div><div class="row" style="gap:6px">${Object.entries(SH.statuses).map(([k, l]) => `<button class="btn sm ${k === o.status ? 'primary' : ''}" data-st="${k}">${l}</button>`).join('')}</div>
+      <label class="field" style="margin-top:12px"><span>บันทึกของร้าน <small>(ลูกค้าไม่เห็น)</small></span><textarea class="input" rows="2" id="o-note">${esc(o.admin_note || '')}</textarea></label></div>
+      <footer><button class="btn" data-close>ปิด</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    let status = o.status;
+    m.el.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { status = b.dataset.st; m.el.querySelectorAll('[data-st]').forEach(x => x.classList.toggle('primary', x === b)); });
+    m.el.querySelector('[data-save]').onclick = async () => {
+      if (status === 'cancelled' && o.status !== 'cancelled' && !await confirmBox('ยกเลิกคำสั่งซื้อ', 'คืนสต็อกสินค้าในคำสั่งซื้อนี้ด้วย', { ok: 'ยกเลิกคำสั่งซื้อ', danger: true })) return;
+      try { await api(`/api/sites/${site.id}/shop/orders/${o._id}`, { status, admin_note: m.el.querySelector('#o-note').value }); m.close(); toast('บันทึกแล้ว', 'ok'); renderShop(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
   }
 
   // ---------------------------------------------------------------- statistics

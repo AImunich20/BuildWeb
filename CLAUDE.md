@@ -64,6 +64,10 @@ user in Thai. The UI copy is in Thai.
   - `team.py`: team access. `TeamServer` serves the app on 0.0.0.0:<team port> with `TEAM_ENV_KEY`; there
     `LocalAdminMiddleware` requires login and `team.check()` applies roles (admin/developer/editor; regex path
     rules + `site_of()` to scope by site). `audit()` logs every write. `TeamMember`, `AuditLog`, `SavedBlock`.
+  - `shop.py`: settings in `Site.shop`; products/orders are collections (orders `options.server=True`).
+    `checkout()` re-reads prices/stock server-side; PromptPay payload = EMVCo TLV + CRC-16/CCITT-FALSE (QR drawn
+    in the browser by qrcodejs from cdnjs); Stripe Checkout via `logic.http_request` + signed webhook. Routes in
+    `restapi.route_shop`; cart/checkout/order JS is `widgets.SHOP_JS`; pages from `generate.create_shop`.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

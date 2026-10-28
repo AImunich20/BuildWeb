@@ -736,7 +736,7 @@ def system_shutdown(request):
 
 # --- settings: notifications / app ----------------------------------------------------------------
 
-SECRET_KEYS = ("telegram_token", "discord_webhook", "webhook_url")
+SECRET_KEYS = ("telegram_token", "discord_webhook", "webhook_url", "line_token")
 
 
 def notify_public(cfg):
@@ -756,7 +756,7 @@ def notify_settings(request):
         for k in ("enabled", "mac"):
             if k in d:
                 values[k] = as_bool(d[k])
-        for k in ("telegram_token", "telegram_chat", "discord_webhook", "webhook_url"):
+        for k in ("telegram_token", "telegram_chat", "discord_webhook", "webhook_url", "line_token", "line_to"):
             if k in d:
                 values[k] = (d[k] or "").strip()
         for k in ("discord_webhook", "webhook_url"):
@@ -1934,3 +1934,73 @@ def saved_block_delete(request, block_id):
 
     get_object_or_404(SavedBlock, pk=block_id).delete()
     return {"blocks": [block_json(b) for b in SavedBlock.objects.all()]}
+
+
+# --- shop -----------------------------------------------------------------------------------------
+
+def shop_error(e):
+    return ApiError(str(e), field=next(iter(e.fields or {}), None))
+
+
+@api
+def shop_settings(request, site_id):
+    from . import shop
+
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        try:
+            shop.save_settings(site, body(request).get("settings") or {})
+        except shop.ShopError as e:
+            raise shop_error(e)
+    prod, orders = shop.products_col(site), shop.orders_col(site)
+    return {"settings": shop.settings(site), "summary": shop.summary(site), "statuses": shop.STATUS_TH, "payments": shop.PAYMENTS,
+            "products": {"id": prod.id, "slug": prod.slug, "count": prod.records.count()} if prod else None,
+            "orders_col": orders.id if orders else None,
+            "secrets": {k: k in (site.secrets or {}) for k in ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET")},
+            "stripe_webhook": "api/v1/shop/stripe-webhook"}
+
+
+@require_POST
+@api
+def shop_setup(request, site_id):
+    from . import generate
+
+    site = get_object_or_404(Site, pk=site_id)
+    prod, orders, made = generate.create_shop(site)
+    return {"created": [page_json(p) for p in made], "products": prod.id}
+
+
+@require_GET
+@api
+def shop_orders(request, site_id):
+    from . import shop
+
+    site = get_object_or_404(Site, pk=site_id)
+    col = shop.orders_col(site)
+    if not col:
+        return {"orders": []}
+    rows = [{**r.data, "_id": r.id, "member": r.owner.email if r.owner_id else ""} for r in col.records.select_related("owner").order_by("-id")[:1000]]
+    st, q = request.GET.get("status"), (request.GET.get("q") or "").strip().lower()
+    if st:
+        rows = [r for r in rows if r.get("status") == st]
+    if q:
+        rows = [r for r in rows if q in f"{r.get('number')} {r.get('customer')} {r.get('phone')} {r.get('email')}".lower()]
+    for r in rows:
+        r.pop("token", None)
+    return {"orders": rows}
+
+
+@require_POST
+@api
+def shop_order_update(request, site_id, record_id):
+    from . import shop
+
+    site = get_object_or_404(Site, pk=site_id)
+    col = shop.orders_col(site)
+    rec = get_object_or_404(Record, pk=record_id, collection=col)
+    d = body(request)
+    try:
+        shop.set_status(site, rec, d.get("status") or rec.data.get("status"), d.get("admin_note"))
+    except shop.ShopError as e:
+        raise shop_error(e)
+    return {"order": {**{k: v for k, v in rec.data.items() if k != "token"}, "_id": rec.id}}

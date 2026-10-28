@@ -87,7 +87,7 @@ def team_page(request):
 
 def site_manage(request, site_id, tab="pages"):
     site = get_object_or_404(Site, pk=site_id)
-    if tab not in ("pages", "data", "api", "members", "logic", "files", "forms", "stats", "settings", "export"):
+    if tab not in ("pages", "data", "shop", "api", "members", "logic", "files", "forms", "stats", "settings", "export"):
         tab = "pages"
     data = {
         "site": site_json(site),

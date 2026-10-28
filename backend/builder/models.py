@@ -59,6 +59,7 @@ class Site(models.Model):
     publish = models.JSONField("ปลายทางเผยแพร่", default=dict, blank=True)  # {"github": {...}, "netlify": {...}, "ftp": {...}}
     api = models.JSONField("ตั้งค่า REST API", default=dict, blank=True)  # {"enabled", "cors", "rate", "log"}
     auth = models.JSONField("ตั้งค่าสมาชิก", default=dict, blank=True)  # see members.SETTINGS
+    shop = models.JSONField("ตั้งค่าร้านค้า", default=dict, blank=True)  # see shop.SETTINGS
     secrets = models.JSONField("ค่าลับ", default=dict, blank=True)  # {"NAME": "value"} used as {{secret.NAME}} server-side
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -112,6 +112,30 @@ def send_mail_to(to, subject, text, from_name=""):
     threading.Thread(target=run, daemon=True).start()
 
 
+def send_line(cfg, text):
+    """LINE Messaging API push (channel access token + a user/group id)."""
+    req = urllib.request.Request("https://api.line.me/v2/bot/message/push", method="POST",
+                                 data=json.dumps({"to": cfg["line_to"], "messages": [{"type": "text", "text": text[:4900]}]}).encode(),
+                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {cfg['line_token']}"})
+    urllib.request.urlopen(req, timeout=8).read()
+
+
+SENT = []  # notifications "sent" while testing
+
+
+def notify_text(site_name, text, payload):
+    """Any event worth telling the owner (new order, slip uploaded...), on every configured channel."""
+    from django.conf import settings as dj
+
+    if dj.TESTING:
+        SENT.append(text)
+        return
+    cfg = settings()
+    if not cfg.get("enabled", True) or not channels(cfg):
+        return
+    threading.Thread(target=deliver, args=(cfg, site_name, text, payload), daemon=True).start()
+
+
 def channels(cfg):
     out = []
     if cfg.get("mac"):
@@ -120,6 +144,8 @@ def channels(cfg):
         out.append("telegram")
     if cfg.get("discord_webhook"):
         out.append("discord")
+    if cfg.get("line_token") and cfg.get("line_to"):
+        out.append("line")
     if cfg.get("webhook_url"):
         out.append("webhook")
     e = cfg.get("email") or {}
@@ -141,10 +167,12 @@ def deliver(cfg, site_name, text, payload, only=None):
                 send_telegram(cfg, text)
             elif ch == "discord":
                 send_discord(cfg, text)
+            elif ch == "line":
+                send_line(cfg, text)
             elif ch == "webhook":
                 send_webhook(cfg, payload)
             elif ch == "email":
-                send_email(cfg, f"[BuildWeb] ฟอร์มใหม่จาก {site_name}", text)
+                send_email(cfg, f"[BuildWeb] {text.splitlines()[0][:80]} · {site_name}", text)
             results[ch] = "ok"
         except Exception as ex:  # report every channel; one failing must not stop the others
             results[ch] = str(ex)[:200]

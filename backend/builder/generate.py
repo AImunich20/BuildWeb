@@ -301,3 +301,99 @@ def create_member_pages(site):
     site.save(update_fields=["auth"])
     site.touch()
     return made
+
+
+# --- shop pages -----------------------------------------------------------------------------------
+
+SHOP_CSS = LIST_CSS + """
+.bw-price{font-weight:700;color:var(--bw-text)}.bw-price s{color:var(--bw-muted);font-weight:400;margin-left:6px;font-size:.9em}
+.bw-list-card .bw-btn{margin-top:10px;width:100%;text-align:center;cursor:pointer;font:inherit;font-weight:600}
+.bw-soldout{color:#dc2626;font-weight:600;font-size:.9em}
+.bw-shop-page{padding:48px 0 72px}.bw-shop-page h1{margin:0 0 20px}"""
+
+SAMPLE_PRODUCTS = [
+    ("เสื้อยืดคอตตอน", "t-shirt", 390, 490, "เสื้อผ้า", 25), ("หมวกแก๊ป", "cap", 290, 0, "เครื่องประดับ", 12),
+    ("กระเป๋าผ้า", "tote-bag", 250, 0, "เครื่องประดับ", 0), ("แก้วเก็บความเย็น", "tumbler", 450, 590, "ของใช้", 40),
+]
+
+
+def product_card_actions():
+    return ('<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" '
+            'data-image="{{image}}">ใส่ตะกร้า</button>')
+
+
+@transaction.atomic
+def create_shop(site):
+    """Products + orders collections, sample products and the shop pages (list, product, cart, checkout, order)."""
+    from . import shop
+
+    prod, orders = shop.ensure_collections(site)
+    if not prod.records.exists():
+        colors = [("#c4b5fd", "#67e8f9"), ("#fbcfe8", "#fde68a"), ("#a7f3d0", "#93c5fd"), ("#fde68a", "#fca5a5")]
+        Record.objects.bulk_create([Record(collection=prod, position=i, data={
+            "name": n, "slug": slug, "price": p, "compare_price": cp or "", "category": cat, "stock": st, "sku": f"SKU-{i + 1:03d}",
+            "active": True, "image": sections.placeholder(n, 800, 800, *colors[i % 4]),
+            "description": f"<p>{n} คุณภาพดี ผลิตจากวัสดุคัดสรร ใช้งานได้นาน</p><ul><li>จัดส่งทั่วประเทศ</li><li>เปลี่ยนสินค้าได้ใน 7 วัน</li></ul>"})
+            for i, (n, slug, p, cp, cat, st) in enumerate(SAMPLE_PRODUCTS)])
+    e = htmllib.escape
+    names = {}
+    made = []
+    existing = {p.slug for p in site.pages.all()}
+
+    def page(key, title, slug, html, css, **kw):
+        if slug in existing:
+            names[key] = f"{slug}.html"
+            return None
+        p = _page(site, title, slug, html, css, **kw)
+        names[key] = p.filename
+        made.append(p)
+        return p
+
+    detail_slug = services.unique_page_slug(site, "product") if "product" in existing else "product"
+    card = ('<section class="bw-list-sec bw-shop-page"><div class="bw-container"><h1>สินค้าทั้งหมด</h1>'
+            f'<div class="bw-list-grid" data-bw-repeat="{prod.slug}" data-bw-filter="active!=false" data-bw-search="ค้นหาสินค้า…" '
+            'data-bw-facet="category" data-bw-paginate="12" data-bw-empty="ยังไม่มีสินค้า">'
+            '<div class="bw-list-card"><a href="{{_url}}"><img src="{{image}}" alt="{{name}}" loading="lazy" data-bw-if="image"></a>'
+            '<div class="bw-list-body"><div class="bw-list-meta" data-bw-if="category">{{category}}</div>'
+            '<a href="{{_url}}" style="color:inherit;text-decoration:none"><h3>{{name}}</h3></a>'
+            '<div class="bw-price">฿{{price|number}} <s data-bw-if="compare_price">฿{{compare_price|number}}</s></div>'
+            + product_card_actions() + '</div></div></div></div></section>')
+    page("shop", "ร้านค้า", "shop", card, SHOP_CSS, show_in_nav=True)
+    detail = ('<section class="bw-detail"><div class="bw-container"><a class="bw-back" href="{shop}">← กลับไปร้านค้า</a>'
+              '<div class="bw-detail-grid"><img class="bw-detail-img" src="{{image}}" alt="{{name}}" data-bw-if="image">'
+              '<div><div class="bw-detail-meta"><span class="bw-pill" data-bw-if="category">{{category}}</span><span data-bw-if="sku">{{sku}}</span></div>'
+              '<h1>{{name}}</h1><p class="bw-price" style="font-size:1.6em">฿{{price|number}} <s data-bw-if="compare_price">฿{{compare_price|number}}</s></p>'
+              '<div class="bw-detail-text">{{{description}}}</div>'
+              '<div class="bw-buy"><input type="number" min="1" value="1" class="bw-qty" aria-label="จำนวน">'
+              '<button type="button" class="bw-btn" data-bw-add-to-cart="{{_id}}" data-name="{{name}}" data-price="{{price}}" data-image="{{image}}" data-bw-qty-from=".bw-qty">ใส่ตะกร้า</button></div>'
+              '</div></div>{pn}</div></section>')
+    pn = ('<nav class="bw-pn"><a class="bw-prev" href="{{_prev_url}}" data-bw-if="_prev_url"><small>← ก่อนหน้า</small>{{_prev_title}}</a>'
+          '<a class="bw-next" href="{{_next_url}}" data-bw-if="_next_url"><small>ถัดไป →</small>{{_next_title}}</a></nav>')
+    shop_file = names.get("shop", "shop.html")
+    if detail_slug not in existing:
+        p = _page(site, "สินค้า (หน้ารายละเอียด)", detail_slug, detail.replace("{shop}", shop_file).replace("{pn}", pn),
+                  DETAIL_CSS + "\n.bw-buy{display:flex;gap:10px;margin:22px 0}.bw-qty{width:84px;font:inherit;padding:10px;border:1px solid #d9d9e3;border-radius:10px}",
+                  show_in_nav=False, collection=prod)
+        made.append(p)
+    page("cart", "ตะกร้าสินค้า", "cart", '<section class="bw-shop-page"><div class="bw-container" style="max-width:860px"><h1>ตะกร้าสินค้า</h1>'
+         '<div data-bw-cart></div></div></section>', SHOP_CSS, show_in_nav=False)
+    page("checkout", "ชำระเงิน", "checkout", '<section class="bw-shop-page"><div class="bw-container" style="max-width:960px"><h1>ชำระเงิน</h1>'
+         '<form class="bw-checkout" data-bw-checkout><div class="bw-co-grid"><div>'
+         '<label>ชื่อ-นามสกุล<input name="customer" autocomplete="name" required></label>'
+         '<label>เบอร์โทร<input name="phone" type="tel" autocomplete="tel" required></label>'
+         '<label>อีเมล <small>(รับใบยืนยัน)</small><input name="email" type="email" autocomplete="email"></label>'
+         '<label>ที่อยู่จัดส่ง<textarea name="address" rows="3" autocomplete="street-address"></textarea></label>'
+         '<label>หมายเหตุ<textarea name="note" rows="2"></textarea></label>'
+         '<div class="bw-co-pay" data-bw-payments></div></div>'
+         '<aside class="bw-co-sum"><h3>สรุปคำสั่งซื้อ</h3><div data-bw-cart-summary></div>'
+         '<button type="submit" class="bw-btn" style="width:100%">ยืนยันคำสั่งซื้อ</button></aside></div></form></div></section>',
+         SHOP_CSS, show_in_nav=False, noindex=True)
+    page("order", "คำสั่งซื้อของคุณ", "order", '<section class="bw-shop-page"><div class="bw-container" style="max-width:760px">'
+         '<div data-bw-order></div></div></section>', SHOP_CSS, show_in_nav=False, noindex=True)
+    from . import shop as shop_mod
+
+    shop_mod.save_settings(site, {"enabled": True})
+    site.shop = {**site.shop, "pages": {**shop_mod.settings(site)["pages"], **names}}
+    site.save(update_fields=["shop"])
+    site.touch()
+    return prod, orders, made

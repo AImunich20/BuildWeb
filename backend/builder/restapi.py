@@ -33,7 +33,7 @@ from django.db.models import Max
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 
-from . import data, logic, members, schema
+from . import data, logic, members, schema, shop
 from .models import ApiKey, ApiLog, Collection, Record
 
 ACTIONS = ("list", "view", "create", "update", "delete")
@@ -151,24 +151,34 @@ def handle(request, site, path, base_url="", root_path="/"):
     key, status, err = None, 500, ""
     owner = is_owner(request)
     request._bw_base, request._bw_root = base_url, root_path
-    is_auth = path.strip("/").split("/")[:2] == ["v1", "auth"]
+    segs = path.strip("/").split("/")
+    is_auth = segs[:2] == ["v1", "auth"]
+    is_shop = segs[:2] == ["v1", "shop"]
     try:
         if request.method == "OPTIONS":
             resp = HttpResponse(status=204)
             status = 204
             return cors(resp, site, request)
         cfg = site_settings(site)
-        if not cfg["enabled"] and not owner and not is_auth:
+        if not cfg["enabled"] and not owner and not is_auth and not is_shop:
             raise ApiError(404, "api_disabled", "API ของเว็บนี้ยังไม่ได้เปิดใช้งาน")
         key = find_key(request, site)
         if not owner:
             check_rate(site, request, key, int(cfg.get("rate") or 0))
         request._bw_user = members.current_user(request, site)
-        resp = route_auth(request, site, "/".join(path.strip("/").split("/")[2:])) if is_auth else route(request, site, path.strip("/"), key, owner, base_url)
+        rest = "/".join(segs[2:])
+        if is_auth:
+            resp = route_auth(request, site, rest)
+        elif is_shop:
+            resp = route_shop(request, site, rest)
+        else:
+            resp = route(request, site, path.strip("/"), key, owner, base_url)
         status = resp.status_code
         set_cookie(resp, site, request)
     except ApiError as e:
         resp, status, err = error_response(e), e.status, str(e)
+    except shop.ShopError as e:
+        resp, status, err = error_response(ApiError(e.status, e.code, str(e), e.fields)), e.status, str(e)
     except members.AuthError as e:
         resp, status, err = error_response(ApiError(e.status, e.code, str(e), e.fields)), e.status, str(e)
     except schema.ValidationError as e:
@@ -310,6 +320,39 @@ def call_fn(request, site, slug, key, owner, user):
                "user": members.user_json(user) if user else None}
     status, out, _ = logic.call_function(fn, payload)
     return JsonResponse(out, status=int(status), safe=False, json_dumps_params={"ensure_ascii": False})
+
+
+# --- shop -----------------------------------------------------------------------------------------
+
+def route_shop(request, site, action):
+    s = shop.settings(site)
+    if not s["enabled"] and not is_owner(request):
+        raise ApiError(404, "shop_disabled", "ร้านค้ายังไม่เปิด")
+    parts = [p for p in action.split("/") if p]
+    user = getattr(request, "_bw_user", None)
+    if parts == ["config"]:
+        return ok(shop.public_config(site))
+    if parts == ["checkout"] and request.method == "POST":
+        if not is_owner(request):
+            members.throttle(f"checkout:{site.id}:{client_ip(request)}", limit=20, window=600)
+            members.failed(f"checkout:{site.id}:{client_ip(request)}")
+        return ok(shop.checkout(site, body(request), user, getattr(request, "_bw_base", "")), 201)
+    if parts == ["my-orders"]:
+        if not user:
+            raise ApiError(401, "login_required", "ต้องเข้าสู่ระบบสมาชิกก่อน")
+        col = shop.orders_col(site)
+        recs = col.records.filter(owner=user).order_by("-id")[:100] if col else []
+        return ok({"items": [{**shop.order_public(site, r), "token": r.data.get("token")} for r in recs]})
+    if parts == ["stripe-webhook"] and request.method == "POST":
+        return ok(shop.stripe_webhook(site, request.body, request.META.get("HTTP_STRIPE_SIGNATURE", "")))
+    if len(parts) >= 2 and parts[0] == "orders":
+        rec = shop.find_order(site, parts[1], request.GET.get("t") or request.POST.get("t"))
+        if len(parts) == 2 and request.method == "GET":
+            return ok(shop.order_public(site, rec))
+        if parts[2:] == ["slip"] and request.method == "POST":
+            shop.attach_slip(site, rec, request.FILES.get("slip"))
+            return ok(shop.order_public(site, rec))
+    raise ApiError(404, "not_found", "ไม่พบ endpoint นี้")
 
 
 # --- members (auth) -------------------------------------------------------------------------------
