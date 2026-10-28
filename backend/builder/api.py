@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from buildweb import config
 
-from . import data, dbtools, exporter, importer, navbar, notify, sections, services, system
+from . import data, dbtools, exporter, generate, importer, navbar, notify, publish, sections, seo, services, stats, system, widgets
 from .hosting import server as hosting
 from .models import (DEFAULT_THEME, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
                      SharedSection, Site)
@@ -70,7 +70,19 @@ def site_json(site):
         "host_port": site.host_port, "use_base_styles": site.use_base_styles,
         "home_page": home.id if home else None, "page_count": site.pages.count(),
         "shared": [shared_json(sec) for sec in site.shared_sections.order_by("-kind")],
+        "base_url": site.base_url, "contact": widgets.clean_contact(site.contact), "publish": publish_json(site),
     }
+
+
+def publish_json(site):
+    """Per-site publish targets without secrets."""
+    out = {}
+    for target, cfg in (site.publish or {}).items():
+        cfg = dict(cfg or {})
+        if cfg.pop("password", None):
+            cfg["password_set"] = True
+        out[target] = cfg
+    return out
 
 
 def shared_json(sec):
@@ -122,6 +134,13 @@ def site_update(request, site_id):
         site.theme = {k: str(v) for k, v in {**site.get_theme(), **d["theme"]}.items() if k in DEFAULT_THEME}
     if "use_base_styles" in d:
         site.use_base_styles = as_bool(d["use_base_styles"])
+    if "base_url" in d:
+        url = (d["base_url"] or "").strip()
+        if url and not re.match(r"^https?://[^\s/]+", url):
+            raise ApiError("ที่อยู่เว็บต้องขึ้นต้นด้วย https:// เช่น https://myshop.com/", field="base_url")
+        site.base_url = url if not url or url.endswith("/") else url + "/"
+    if "contact" in d and isinstance(d["contact"], dict):
+        site.contact = widgets.clean_contact(d["contact"])
     if not site.name.strip():
         raise ApiError("กรุณาตั้งชื่อเว็บ", field="name")
     site.save()
@@ -163,6 +182,9 @@ def page_json(p):
         "parent": p.parent_id, "seo_title": p.seo_title, "seo_description": p.seo_description,
         "seo_keywords": p.seo_keywords, "og_image": p.og_image, "noindex": p.noindex, "head_code": p.head_code,
         "custom_css": p.custom_css, "custom_js": p.custom_js, "filename": p.filename,
+        "collection": p.collection_id, "detail_field": p.detail_field,
+        "collection_slug": p.collection.slug if p.collection_id else "",
+        "collection_name": p.collection.name if p.collection_id else "",
         "updated_at": p.updated_at.isoformat(), "edit_url": f"/sites/{p.site_id}/edit/{p.id}/",
     }
 
@@ -176,6 +198,15 @@ def apply_page_fields(page, d):
             setattr(page, f, as_bool(d[f]))
     if "status" in d and d["status"] in (Page.DRAFT, Page.PUBLISHED):
         page.status = d["status"]
+    if "collection" in d:
+        cid = d["collection"] or None
+        if cid and not page.site.collections.filter(pk=cid).exists():
+            raise ApiError("เลือกชุดข้อมูลไม่ถูกต้อง", field="collection")
+        if cid and page.is_home:
+            raise ApiError("หน้าแรกเป็นหน้ารายละเอียดไม่ได้ — สร้างหน้าใหม่สำหรับรายละเอียด", field="collection")
+        page.collection_id = int(cid) if cid else None
+    if "detail_field" in d:
+        page.detail_field = (d["detail_field"] or "")[:60]
     if "parent" in d:
         pid = d["parent"] or None
         if pid and (int(pid) == page.pk or not page.site.pages.filter(pk=pid).exists()):
@@ -206,7 +237,8 @@ def page_create(request, site_id):
         raise ApiError(err, field="slug")
     probe = Page(site=site, title=title)
     apply_page_fields(probe, d)
-    fields = {f: getattr(probe, f) for f in PAGE_FIELDS + ("show_in_nav", "noindex", "use_header", "use_footer", "status", "parent_id")
+    fields = {f: getattr(probe, f) for f in PAGE_FIELDS + ("show_in_nav", "noindex", "use_header", "use_footer", "status", "parent_id",
+                                                           "collection_id", "detail_field")
               if f != "title"}
     page = services.create_page(site, title, slug, d.get("layout") or "basic", **fields)
     if as_bool(d.get("is_home")):
@@ -822,7 +854,10 @@ def collection_json(c, with_count=True):
         "id": c.id, "name": c.name, "slug": c.slug, "fields": c.fields, "mode": c.mode, "count": count,
         "connection": c.connection_id, "connection_name": c.connection.name if c.connection else "",
         "source_database": c.source_database, "source_table": c.source_table, "live_order": c.live_order,
-        "live_desc": c.live_desc, "live_limit": c.live_limit,
+        "live_desc": c.live_desc, "live_limit": c.live_limit, "options": c.options or {},
+        "pending": c.records.filter(approved=False).count() if c.mode == Collection.COPY else 0,
+        "detail_pages": [{"id": p.id, "title": p.title, "slug": p.slug, "edit_url": f"/sites/{p.site_id}/edit/{p.id}/"}
+                         for p in c.detail_pages.all()],
         "last_synced": c.last_synced.isoformat() if c.last_synced else None, "updated_at": c.updated_at.isoformat(),
     }
 
@@ -960,7 +995,7 @@ def collection_import_mysql(request, site_id):
 def collection_detail(request, col_id):
     c = get_object_or_404(Collection, pk=col_id)
     if c.mode == Collection.COPY:
-        rows = [{**r.data, "_id": r.id} for r in c.records.all()[:5000]]  # "_id": tables often have their own "id"
+        rows = [{**r.data, "_id": r.id, "_approved": r.approved} for r in c.records.all()[:5000]]  # "_id": tables often have their own "id"
         return {"collection": collection_json(c), "rows": rows, "editable": True}
     try:
         rows = data.rows_for(c)
@@ -999,6 +1034,8 @@ def collection_update(request, col_id):
     for k in ("live_order",):
         if k in d:
             setattr(c, k, (d[k] or "")[:100])
+    if "options" in d and isinstance(d["options"], dict):
+        c.options = {k: as_bool(d["options"].get(k)) for k in ("forms", "auto_approve", "rss")}
     if "live_desc" in d:
         c.live_desc = as_bool(d["live_desc"])
     if "live_limit" in d:
@@ -1041,7 +1078,130 @@ def record_save(request, col_id):
         pos = (c.records.order_by("-position").values_list("position", flat=True).first() or 0) + 1
         r = Record.objects.create(collection=c, data=values, position=pos)
     c.save(update_fields=["updated_at"])
-    return {"row": {**r.data, "_id": r.id}}
+    return {"row": {**r.data, "_id": r.id, "_approved": r.approved}}
+
+
+@require_POST
+@api
+def record_approve(request, col_id):
+    c = get_object_or_404(Collection, pk=col_id)
+    d = body(request)
+    ids = [int(i) for i in d.get("ids", [])]
+    n = c.records.filter(id__in=ids).update(approved=as_bool(d.get("value", True)))
+    c.save(update_fields=["updated_at"])
+    return {"updated": n}
+
+
+@require_POST
+@api
+def collection_pages(request, col_id):
+    """Generate a list page + detail page (or only the detail page) for a collection."""
+    c = get_object_or_404(Collection, pk=col_id)
+    d = body(request)
+    lst, detail = generate.create_pages_for(c, (d.get("title") or "").strip(), with_list=as_bool(d.get("with_list", True)))
+    return {"list": page_json(lst) if lst else None, "detail": page_json(detail)}
+
+
+@require_POST
+@api
+def blog_create(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    col, lst, detail = generate.create_blog(site, (body(request).get("name") or "บทความ").strip())
+    return {"collection": collection_json(col), "list": page_json(lst), "detail": page_json(detail)}
+
+
+# --- SEO, statistics -------------------------------------------------------------------------------
+
+@require_GET
+@api
+def site_seo(request, site_id):
+    return seo.analyze_site(get_object_or_404(Site, pk=site_id))
+
+
+@require_GET
+@api
+def site_stats(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    days = max(7, min(365, int(request.GET.get("days") or 30)))
+    return {"stats": stats.summary(site, days), "hosting": hosting.running}
+
+
+# --- publishing -----------------------------------------------------------------------------------
+
+PUBLISH_FIELDS = {
+    "github": ("repo", "branch", "url", "pages"),
+    "netlify": ("site_id", "name", "url"),
+    "ftp": ("host", "port", "user", "password", "path", "tls", "url"),
+}
+
+
+@api
+def publish_settings(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request)
+        target = d.get("target")
+        if target not in PUBLISH_FIELDS:
+            raise ApiError("ไม่รู้จักปลายทางนี้")
+        cur = dict((site.publish or {}).get(target) or {})
+        for k in PUBLISH_FIELDS[target]:
+            if k not in d:
+                continue
+            v = d[k]
+            if k in ("pages", "tls"):
+                v = as_bool(v)
+            elif k == "port":
+                v = int(v or 21)
+            elif k == "password" and not v:
+                continue  # empty = keep the saved one
+            else:
+                v = str(v or "").strip()
+            cur[k] = v
+        if cur.get("url") and not re.match(r"^https?://", cur["url"]):
+            raise ApiError("ที่อยู่เว็บต้องขึ้นต้นด้วย https://", field="url")
+        if target == "github" and cur.get("repo") and not re.fullmatch(r"[\w.-]+(/[\w.-]+)?", cur["repo"]):
+            raise ApiError("ชื่อ repo ต้องเป็นแบบ ชื่อ หรือ เจ้าของ/ชื่อ", field="repo")
+        site.publish = {**(site.publish or {}), target: cur}
+        site.save(update_fields=["publish"])
+        if f"{target}_token" in d and d[f"{target}_token"]:
+            config.update("publish", {f"{target}_token": d[f"{target}_token"].strip()})
+    toks = publish.tokens()
+    return {"publish": publish_json(site), "tokens": {t: bool(toks.get(f"{t}_token")) for t in ("github", "netlify")},
+            "base_url": site.base_url}
+
+
+@require_POST
+@api
+def publish_start(request, site_id, target):
+    site = get_object_or_404(Site, pk=site_id)
+    try:
+        job = publish.start(site, target)
+    except publish.PublishError as e:
+        raise ApiError(str(e))
+    return {"job": job}
+
+
+@require_GET
+@api
+def publish_job(request, job_id):
+    job = publish.job(job_id)
+    if not job:
+        raise ApiError("ไม่พบงานนี้ (โปรแกรมอาจถูกเปิดใหม่)", status=404)
+    return {"job": job}
+
+
+@require_POST
+@api
+def publish_test_ftp(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    cfg = {**((site.publish or {}).get("ftp") or {}), **{k: v for k, v in body(request).items() if v not in ("", None)}}
+    try:
+        ftp = publish.ftp_connect(cfg)
+        where = ftp.pwd()
+        ftp.quit()
+    except publish.PublishError as e:
+        raise ApiError(str(e))
+    return {"message": f"เชื่อมต่อได้ (โฟลเดอร์เริ่มต้น {where})"}
 
 
 @require_POST

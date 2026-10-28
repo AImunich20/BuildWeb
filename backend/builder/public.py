@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from buildweb import config
 
-from . import notify, render
+from . import forms, notify, render, stats
 from .middleware import SITE_ENV_KEY
 from .models import FormSubmission, Site
 
@@ -19,7 +19,9 @@ MAX_VALUE = 5000
 def serve(request, site, path, include_drafts):
     if path.endswith("__form"):
         return receive_form(request, site)
-    found = render.resolve(site, path, include_drafts)
+    root = request.path[:len(request.path) - len(path)] if path and request.path.endswith(path) else request.path
+    base = request.build_absolute_uri(root if root.endswith("/") else root + "/")
+    found = render.resolve(site, path, include_drafts, base=base)
     if found is None:
         return not_found(site)
     kind = found[0]
@@ -35,8 +37,10 @@ def serve(request, site, path, include_drafts):
         except (FileNotFoundError, IsADirectoryError):
             return not_found(site)
     else:
-        resp = HttpResponse(render.render_page(found[1], "__form", include_drafts=include_drafts),
+        resp = HttpResponse(render.render_page(found[1], "__form", include_drafts=include_drafts, row=found[2]),
                             content_type="text/html; charset=utf-8")
+        if getattr(request, "is_public", False):
+            stats.hit(site, request, path)
     resp["Cache-Control"] = "no-cache"
     return resp
 
@@ -64,14 +68,37 @@ def receive_form(request, site):
                 continue
             values = [v[:MAX_VALUE] for v in request.POST.getlist(key)]
             data[key[:100]] = values[0] if len(values) == 1 else values
+        if request.POST.get("_hp"):  # honeypot filled in: a bot. Pretend it worked.
+            return cors(JsonResponse({"ok": True}))
+        if not forms.allow(site, client_ip(request)):
+            return cors(JsonResponse({"ok": False, "error": "ส่งบ่อยเกินไป กรุณารอสักครู่"}, status=429))
+        data.pop("_hp", None)
+        data.pop("_collection", None)
         page = site.pages.filter(slug=request.POST.get("_page", "")).first()
+        saved = None
+        if request.POST.get("_collection"):
+            try:
+                saved = forms.save_to_collection(site, request.POST.get("_collection"), data)
+            except forms.FormError as e:
+                return cors(JsonResponse({"ok": False, "error": str(e)}, status=400))
         sub = FormSubmission.objects.create(
             site=site, page=page, form_name=request.POST.get("_form", "")[:200], data=data,
-            ip=(request.META.get("HTTP_X_FORWARDED_FOR") or request.META.get("REMOTE_ADDR") or "")[:64],
+            ip=client_ip(request)[:64],
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
         )
+        if saved:
+            sub.data = {**sub.data, "_บันทึกลง": saved["label"]}
+            sub.save(update_fields=["data"])
         notify.notify_submission(sub)
-        resp = JsonResponse({"ok": True})
+        resp = JsonResponse({"ok": True, "pending": bool(saved and saved["pending"])})
+    return cors(resp)
+
+
+def client_ip(request):
+    return (request.META.get("HTTP_X_FORWARDED_FOR") or request.META.get("REMOTE_ADDR") or "").split(",")[0].strip()
+
+
+def cors(resp):
     # Exported copies of the site (opened from disk or XAMPP) may post here from another origin.
     resp["Access-Control-Allow-Origin"] = "*"
     resp["Access-Control-Allow-Methods"] = "POST, OPTIONS"

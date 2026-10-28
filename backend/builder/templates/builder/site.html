@@ -15,8 +15,9 @@
   <a href="/sites/{{ site.id }}/data/" class="{% if tab == 'data' %}active{% endif %}">ข้อมูล</a>
   <a href="/sites/{{ site.id }}/files/" class="{% if tab == 'files' %}active{% endif %}">ไฟล์ & รูปภาพ</a>
   <a href="/sites/{{ site.id }}/forms/" class="{% if tab == 'forms' %}active{% endif %}">ข้อมูลจากฟอร์ม{% if unread %}<span class="badge brand">{{ unread }}</span>{% endif %}</a>
+  <a href="/sites/{{ site.id }}/stats/" class="{% if tab == 'stats' %}active{% endif %}">สถิติ</a>
   <a href="/sites/{{ site.id }}/settings/" class="{% if tab == 'settings' %}active{% endif %}">ตั้งค่าเว็บ & ธีม</a>
-  <a href="/sites/{{ site.id }}/export/" class="{% if tab == 'export' %}active{% endif %}">ส่งออก & เผยแพร่</a>
+  <a href="/sites/{{ site.id }}/export/" class="{% if tab == 'export' %}active{% endif %}">เผยแพร่ & ส่งออก</a>
 </nav>
 <div id="tab" data-tab="{{ tab }}"></div>
 <script id="site-data" type="application/json">{{ data_json|safe }}</script>

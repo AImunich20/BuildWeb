@@ -51,6 +51,12 @@ class Site(models.Model):
         "ใช้สไตล์พื้นฐานของ BuildWeb", default=True,
         help_text="ปิดสำหรับเว็บที่นำเข้า เพื่อให้หน้าตาเหมือนต้นฉบับ (ไม่ใส่ฟอนต์/รีเซ็ต CSS ของธีม)",
     )
+    base_url = models.CharField(
+        "ที่อยู่เว็บจริง", max_length=300, blank=True,
+        help_text="เช่น https://myshop.com/ — ใช้ใน sitemap.xml, RSS และลิงก์ตอนแชร์ (ตั้งให้เองหลังเผยแพร่ครั้งแรก)",
+    )
+    contact = models.JSONField("ปุ่มติดต่อลอย", default=dict, blank=True)
+    publish = models.JSONField("ปลายทางเผยแพร่", default=dict, blank=True)  # {"github": {...}, "netlify": {...}, "ftp": {...}}
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -101,6 +107,10 @@ class Page(models.Model):
     html = models.TextField(blank=True)
     css = models.TextField(blank=True)
     js = models.TextField(blank=True)  # scripts of interactive components (tabs, countdown, ...)
+    # Detail page: rendered once per row of ``collection`` at <slug>/<row>.html, with {{field}} = that row.
+    collection = models.ForeignKey("Collection", null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="detail_pages", verbose_name="หน้ารายละเอียดของชุดข้อมูล")
+    detail_field = models.CharField("ฟิลด์ที่ใช้ตั้งชื่อลิงก์", max_length=60, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -116,6 +126,10 @@ class Page(models.Model):
     @property
     def filename(self):
         return "index.html" if self.is_home else f"{self.slug}.html"
+
+    @property
+    def is_detail(self):
+        return self.collection_id is not None
 
     @property
     def menu_label(self):
@@ -300,6 +314,8 @@ class Collection(models.Model):
     live_order = models.CharField(max_length=100, blank=True)
     live_desc = models.BooleanField(default=False)
     live_limit = models.PositiveIntegerField(default=500)
+    # {"forms": accept form posts, "auto_approve": show them without review, "rss": include in rss.xml}
+    options = models.JSONField(default=dict, blank=True)
     last_synced = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -317,11 +333,15 @@ class Collection(models.Model):
     def field_names(self):
         return [f["name"] for f in self.fields]
 
+    def opt(self, key):
+        return bool((self.options or {}).get(key))
+
 
 class Record(models.Model):
     collection = models.ForeignKey(Collection, on_delete=models.CASCADE, related_name="records")
     data = models.JSONField(default=dict)
     position = models.IntegerField(default=0)
+    approved = models.BooleanField("แสดงบนเว็บ", default=True)  # rows sent from a form wait for approval
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -329,3 +349,20 @@ class Record(models.Model):
         ordering = ["position", "id"]
         verbose_name = "แถวข้อมูล"
         verbose_name_plural = "แถวข้อมูล"
+
+
+class Stat(models.Model):
+    """Visitor counts of the hosting server, aggregated per day.
+    kind: views (key ""), visitors (key ""), page (key = path), ref (key = referrer host), device (mobile/desktop)."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="stats")
+    day = models.DateField()
+    kind = models.CharField(max_length=10)
+    key = models.CharField(max_length=200, blank=True, default="")
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["site", "day", "kind", "key"], name="unique_stat")]
+        indexes = [models.Index(fields=["site", "day"])]
+        verbose_name = "สถิติผู้เข้าชม"
+        verbose_name_plural = "สถิติผู้เข้าชม"

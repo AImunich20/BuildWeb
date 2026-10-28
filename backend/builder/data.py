@@ -7,6 +7,13 @@ In page HTML:
       The element's content is repeated for every row. {{field}} is HTML-escaped, {{{field}}} is raw,
       {{#}} is the row number.
   Anywhere: {{products.count}}, {{products.name}} (first row), {{site.name}}, {{page.title}}, {{now.year}}.
+  Filters: {{date|date}} (28 ต.ค. 2569), {{price|number}} (1,250), {{detail|truncate:120}}, {{content|text}}.
+  Rows of a collection that has a detail page also get {{_url}} (link to that row's page) and {{_slug}}.
+  data-bw-if="field" (or "!field") on any element keeps it only when the field has a value.
+  data-bw-search / data-bw-facet="category" / data-bw-paginate="9" on a repeat add a search box, category
+  buttons and paging (done in the browser by site.js).
+A detail page (Page.collection) is rendered once per row at <page>/<row>.html, where {{field}} is that row
+and {{_prev_url}} / {{_next_url}} link to its neighbours.
 Placeholders that do not resolve are left untouched, so imported sites using {{ }} for something else keep
 working.
 """
@@ -285,10 +292,49 @@ def rows_for(col):
         _, rows = fetch_table(cfg, col.source_database, col.source_table, col.live_order, col.live_desc, col.live_limit)
         by_source = {f.get("source", f["name"]): f["name"] for f in col.fields}
         out = [{by_source.get(k, field_key(k)): v for k, v in r.items()} for r in rows]
+        if col.opt("forms") and "approved" in col.field_names:  # rows sent from the site wait for approved=1
+            out = [r for r in out if str(r.get("approved", "1")).strip().lower() not in ("0", "", "false", "no")]
         with _live_lock:
             _live_cache[col.id] = (now, out)
         return out
-    return [r.data for r in col.records.all()]
+    return [r.data for r in col.records.filter(approved=True)]
+
+
+# --- detail pages ---------------------------------------------------------------------------------
+
+SLUG_CHARS_RE = re.compile(r"[^a-z0-9\u0E00-\u0E7F]+")
+TITLE_NAMES = ("title", "name", "ชื่อ", "หัวข้อ", "product_name", "productname", "post_title", "subject", "label")
+
+
+def title_field(fields):
+    """The field that names a row: title/name/ชื่อ…, else the first plain text field that is not an id."""
+    names = {f["name"].lower(): f["name"] for f in fields}
+    for n in TITLE_NAMES:
+        if n in names:
+            return names[n]
+    for f in fields:
+        if f.get("type", "text") == "text" and not re.fullmatch(r"(id|slug|_?id|.*_id)", f["name"], re.I):
+            return f["name"]
+    return fields[0]["name"] if fields else ""
+
+
+def slug_text(value):
+    """A URL-safe name; Thai letters are kept (browsers and static hosts handle them)."""
+    return SLUG_CHARS_RE.sub("-", str(value or "").lower()).strip("-")[:80].strip("-")
+
+
+def detail_rows(col, field=""):
+    """[(slug, row)] for every row of ``col``, each row with _slug, _prev_url and _next_url."""
+    rows = rows_for(col)
+    slugs = row_slugs(col, rows, field)
+    return [(s, r) for s, r in zip(slugs, rows)]
+
+
+def detail_href(page, slug):
+    """Link to a row's page, relative to the site root (detail pages use <base href="../">)."""
+    from urllib.parse import quote
+
+    return f"{page.slug}/{quote(slug)}.html"
 
 
 # --- CSV / .sql import ----------------------------------------------------------------------------
@@ -467,19 +513,127 @@ def _apply_query(rows, attrs):
     return rows
 
 
+THAI_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_tags(v):
+    return re.sub(r"\s+", " ", htmllib.unescape(TAG_RE.sub(" ", str(v or "")))).strip()
+
+
+def parse_date(v):
+    if isinstance(v, (date, datetime)):
+        return v
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", str(v or "").strip())
+    if not m:
+        return None
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def apply_filter(value, name, arg):
+    if name == "date":
+        d = parse_date(value)
+        if not d:
+            return value
+        if arg == "en":
+            return d.strftime("%-d %b %Y") if hasattr(d, "strftime") else value
+        return f"{d.day} {THAI_MONTHS[d.month - 1]} {d.year + 543}"
+    if name == "number":
+        try:
+            f = float(str(value).replace(",", ""))
+        except ValueError:
+            return value
+        digits = int(arg) if arg.isdigit() else (0 if f.is_integer() else 2)
+        return f"{f:,.{digits}f}"
+    if name == "text":
+        return strip_tags(value)
+    if name == "truncate":
+        text, n = strip_tags(value), int(arg) if arg.isdigit() else 120
+        return text if len(text) <= n else text[:n].rstrip() + "…"
+    if name == "upper":
+        return str(value).upper()
+    if name == "lower":
+        return str(value).lower()
+    if name == "default":
+        return value if str(value or "").strip() else arg
+    return value
+
+
 def _fill(template, resolve):
     def sub(m):
         raw, key = (m.group(1), False) if m.group(1) is not None else (m.group(2), True)
-        value = resolve(raw)
+        name, *filters = raw.split("|")
+        value = resolve(name)
         if value is None:
             return m.group(0)
+        for f in filters:
+            fname, _, arg = f.partition(":")
+            value = apply_filter(value, fname, arg)
         return htmllib.escape(str(value)) if key else str(value)
 
     return PLACEHOLDER_RE.sub(sub, template)
 
 
+def truthy(v):
+    return v not in (None, "", 0, "0", False, "false", "False") and str(v).strip() != ""
+
+
+def _conditions(html, resolve):
+    """Remove elements whose data-bw-if field (resolved by ``resolve``) is empty; "!field" inverts.
+    Fields that do not resolve here (e.g. inside a nested repeat) are left for a later pass."""
+    if "data-bw-if" not in html:
+        return html
+    out, pos = [], 0
+    while True:
+        m = REPEAT_RE.search(html, pos)
+        while m and not ATTR("data-bw-if").search(m.group(2)):
+            m = REPEAT_RE.search(html, m.end())
+        if not m:
+            out.append(html[pos:])
+            return "".join(out)
+        cond = ATTR("data-bw-if").search(m.group(2)).group(1).strip()
+        neg = cond.startswith("!")
+        value = resolve(cond.lstrip("!").strip())
+        if value is None:  # unknown here: keep as is
+            out.append(html[pos:m.end()])
+            pos = m.end()
+            continue
+        if truthy(value) != neg:  # kept: continue inside it (nested conditions)
+            out.append(html[pos:m.end()])
+            pos = m.end()
+        else:
+            out.append(html[pos:m.start()])
+            pos = _match_end(html, m.group(1), m.end())[1]
+
+
+ROOT_TAG_RE = re.compile(r"\s*<([a-zA-Z][\w-]*)")
+
+
+def _mark_item(item, row, facet):
+    """Tag one rendered row for the browser-side search/category/paging of site.js."""
+    text = strip_tags(" ".join(str(v) for k, v in row.items() if not str(k).startswith("_")))[:600].lower()
+    attrs = f' data-bw-item data-bw-s="{htmllib.escape(text)}"'
+    if facet:
+        attrs += f' data-bw-c="{htmllib.escape(str(row.get(facet, "")).strip())}"'
+    m = ROOT_TAG_RE.match(item)
+    if m:
+        open_m = REPEAT_RE.match(item, m.start(1) - 1)
+        end = _match_end(item, m.group(1), open_m.end())[1] if open_m else len(item)
+        if not item[end:].strip():  # a single root element: put the attributes on it
+            return item[:m.end()] + attrs + item[m.end():]
+    return f'<div style="display:contents"{attrs}>{item}</div>'
+
+
+VOID_TAGS = {"img", "input", "br", "hr", "source", "meta", "link", "area", "col", "embed", "track", "wbr", "param"}
+
+
 def _match_end(html, tag, start):
     """Index just past the closing tag that matches the element opened right before ``start``."""
+    if tag.lower() in VOID_TAGS:  # no closing tag: the element ends with its start tag
+        return start, start
     depth = 1
     for m in re.finditer(rf"<(/?){tag}\b[^>]*?(/?)>", html[start:], re.I):
         if m.group(2):
@@ -491,16 +645,32 @@ def _match_end(html, tag, start):
 
 
 class Binder:
-    def __init__(self, site, page=None):
-        self.site, self.page = site, page
+    """Fills one page: repeats, {{placeholders}} and data-bw-if. ``row`` is the row a detail page shows."""
+
+    def __init__(self, site, page=None, row=None, include_drafts=False):
+        self.site, self.page, self.row, self.include_drafts = site, page, row, include_drafts
         self._cols = None
         self._rows = {}
+        self._detail = None
         self.errors = []
 
     def collections(self):
         if self._cols is None:
             self._cols = {c.slug: c for c in self.site.collections.select_related("connection")}
         return self._cols
+
+    def detail_pages(self):
+        """{collection_id: Page} — the page each collection's rows link to through {{_url}}."""
+        if self._detail is None:
+            from .models import Page
+
+            qs = self.site.pages.filter(collection__isnull=False)
+            if not self.include_drafts:
+                qs = qs.filter(status=Page.PUBLISHED)
+            self._detail = {}
+            for p in qs:
+                self._detail.setdefault(p.collection_id, p)
+        return self._detail
 
     def rows(self, slug):
         if slug not in self._rows:
@@ -509,13 +679,20 @@ class Binder:
                 self._rows[slug] = None
             else:
                 try:
-                    self._rows[slug] = rows_for(col)
+                    rows = rows_for(col)
+                    dp = self.detail_pages().get(col.id)
+                    if dp:
+                        rows = [{**r, "_slug": s, "_url": detail_href(dp, s)}
+                                for s, r in zip(row_slugs(col, rows, dp.detail_field), rows)]
+                    self._rows[slug] = rows
                 except Exception as e:  # a live source being down must not break the page
                     self.errors.append(f"{slug}: {e}")
                     self._rows[slug] = []
         return self._rows[slug]
 
     def global_value(self, key):
+        if self.row is not None and key in self.row:
+            return self.row[key]
         head, _, rest = key.partition(".")
         if head == "site" and rest in ("name", "description", "slug"):
             return getattr(self.site, rest)
@@ -532,9 +709,10 @@ class Binder:
         return None
 
     def render(self, html):
-        if "{{" not in html and "data-bw-repeat" not in html:
+        if "{{" not in html and "data-bw-repeat" not in html and "data-bw-if" not in html:
             return html
         html = self._repeats(html)
+        html = _conditions(html, self.global_value)
         return _fill(html, self.global_value)
 
     def _repeats(self, html):
@@ -546,7 +724,8 @@ class Binder:
             if not m:
                 out.append(html[pos:])
                 return "".join(out)
-            tag, slug = m.group(1), ATTR("data-bw-repeat").search(m.group(2)).group(1).strip()
+            tag, attrs = m.group(1), m.group(2)
+            slug = ATTR("data-bw-repeat").search(attrs).group(1).strip()
             inner_start = m.end()
             close_start, close_end = _match_end(html, tag, inner_start)
             template = html[inner_start:close_start]
@@ -555,16 +734,39 @@ class Binder:
             if rows is None:  # unknown collection: leave the template visible
                 out.append(template)
             else:
-                rows = _apply_query(rows, m.group(2))
+                rows = _apply_query(rows, attrs)
+                interactive = any(ATTR(a).search(attrs) or re.search(rf"(?:^|\s){a}(?:\s|=|$)", attrs)
+                                  for a in ("data-bw-search", "data-bw-facet", "data-bw-paginate"))
+                facet_m = ATTR("data-bw-facet").search(attrs)
+                facet = facet_m.group(1).strip() if facet_m else ""
                 if not rows:
-                    empty = ATTR("data-bw-empty").search(m.group(2))
+                    empty = ATTR("data-bw-empty").search(attrs)
                     out.append(f'<p class="bw-empty">{htmllib.escape(empty.group(1)) if empty else ""}</p>' if empty else "")
                 for i, row in enumerate(rows, 1):
-                    item = _fill(template, lambda k, row=row, i=i: i if k == "#" else (row.get(k) if k in row else None))
-                    out.append(self._repeats(item))  # nested repeats of other collections
+                    def resolve(k, row=row, i=i):
+                        return i if k == "#" else (row.get(k) if k in row else None)
+
+                    item = _fill(_conditions(template, resolve), resolve)
+                    item = self._repeats(item)  # nested repeats of other collections
+                    out.append(_mark_item(item, row, facet) if interactive else item)
             out.append(html[close_start:close_end])
             pos = close_end
 
 
-def render_html(html, site, page=None):
-    return Binder(site, page).render(html)
+def row_slugs(col, rows, field=""):
+    """Unique URL names for ``rows`` of ``col``: from ``field``, a "slug" field, or the title field."""
+    names = col.field_names
+    field = field if field in names else ("slug" if "slug" in names else title_field(col.fields))
+    out, used = [], set()
+    for i, row in enumerate(rows):
+        base = slug_text(row.get(field)) or (str(row["id"]) if str(row.get("id", "")).isdigit() else f"item-{i + 1}")
+        slug, n = base, 2
+        while slug in used:
+            slug, n = f"{base}-{n}", n + 1
+        used.add(slug)
+        out.append(slug)
+    return out
+
+
+def render_html(html, site, page=None, row=None, include_drafts=False):
+    return Binder(site, page, row, include_drafts).render(html)

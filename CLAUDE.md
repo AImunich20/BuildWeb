@@ -33,6 +33,14 @@ user in Thai. The UI copy is in Thai.
     `Binder` renders `data-bw-repeat` blocks and `{{field}}` placeholders at render time. Unresolved
     placeholders are left as-is, because imported Vue/Handlebars sites use `{{ }}` too. API rows use `_id`
     for the record id (tables often have their own `id`).
+  - Detail pages: `Page.collection` renders one file per row at `<page.slug>/<row>.html` with `<base href="../">`
+    (`render.detail_items`, `data.row_slugs`); the template page itself is not exported. `generate.py` builds
+    list/detail pages, the blog and collection forms. `widgets.py` holds the browser-side search/facet/paging
+    JS and the floating contact buttons (`Site.contact`). Forms with `data-bw-collection` go through
+    `forms.py` (only collections with `options.forms`, rows wait in `Record.approved=False`).
+  - `seo.py` (scores), `stats.py` (hosting-server visit counters in `Stat`, buffered), `publish.py` (GitHub
+    Pages via the git data API, Netlify zip deploy, FTP; background jobs; tokens in config.json "publish").
+    Never publish to real GitHub/Netlify accounts in tests: `publish.http`/`FTP` are mocked.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

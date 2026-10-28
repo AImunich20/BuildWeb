@@ -6,7 +6,9 @@ works for a folder opened from disk, for XAMPP htdocs and for the hosting server
 """
 import html as htmllib
 import re
-from urllib.parse import quote, unquote
+from datetime import datetime, time as dtime
+from email.utils import format_datetime
+from urllib.parse import quote, unquote, urljoin
 
 from django.conf import settings
 
@@ -50,6 +52,9 @@ SITE_JS = r"""(function(){
   });
   document.querySelectorAll('form').forEach(function(form){
     if (form.hasAttribute('data-bw-native')) return;
+    var hp = document.createElement('input'); hp.type = 'text'; hp.name = '_hp'; hp.tabIndex = -1; hp.autocomplete = 'off';
+    hp.setAttribute('aria-hidden', 'true'); hp.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;opacity:0';
+    form.appendChild(hp);
     form.addEventListener('submit', function(e){
       e.preventDefault();
       var status = form.querySelector('.bw-form-status');
@@ -58,14 +63,18 @@ SITE_JS = r"""(function(){
       var data = new FormData(form);
       data.append('_form', form.getAttribute('name') || form.id || 'form');
       data.append('_page', document.body.getAttribute('data-bw-page') || '');
+      if (form.getAttribute('data-bw-collection')) data.append('_collection', form.getAttribute('data-bw-collection'));
       var btn = form.querySelector('[type=submit],button'); if (btn) btn.disabled = true;
       fetch(endpoint, {method: 'POST', body: data}).then(function(r){
-        if (!r.ok) throw new Error(r.status);
+        return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok) throw new Error(j.error || r.status); return j; });
+      }).then(function(j){
         status.className = 'bw-form-status ok';
-        status.textContent = form.getAttribute('data-bw-success') || 'ส่งข้อมูลเรียบร้อย ขอบคุณค่ะ';
+        status.textContent = (j.pending && form.getAttribute('data-bw-pending')) || form.getAttribute('data-bw-success') ||
+          (j.pending ? 'ส่งเรียบร้อย ข้อมูลจะแสดงหลังผ่านการตรวจสอบ' : 'ส่งข้อมูลเรียบร้อย ขอบคุณค่ะ');
         form.reset();
-      }).catch(function(){
-        status.className = 'bw-form-status err'; status.textContent = 'ส่งไม่สำเร็จ กรุณาลองใหม่';
+      }).catch(function(err){
+        status.className = 'bw-form-status err';
+        status.textContent = err && err.message && !/^\d+$/.test(err.message) ? err.message : 'ส่งไม่สำเร็จ กรุณาลองใหม่';
       }).finally(function(){ if (btn) btn.disabled = false; });
     });
   });
@@ -124,16 +133,21 @@ def site_css(site):
     from .anim import ANIM_CSS
     from .navbar import NAV_CSS
 
+    from .widgets import CONTACT_CSS, DATA_CSS
+
     shared = "\n".join(sec.css for sec in site.shared_sections.filter(enabled=True) if sec.css and not sec.managed)
     base = BASE_CSS if site.use_base_styles else ""
-    return theme_css(site) + base + NAV_CSS + ANIM_CSS + "\n" + shared + "\n" + (site.custom_css or "")
+    return (theme_css(site) + base + NAV_CSS + ANIM_CSS + DATA_CSS + CONTACT_CSS + "\n" + shared + "\n"
+            + (site.custom_css or ""))
 
 
 def site_js(site):
     from .anim import ANIM_JS
     from .navbar import NAV_JS
 
-    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + "\n})();", 1)
+    from .widgets import DATA_JS
+
+    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1)
     shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
     return core + "\n" + shared + "\n" + (site.custom_js or "")
 
@@ -149,7 +163,7 @@ def header_html(sec, site, pages, page):
 
 def nav_html(pages, current=None):
     """Menu links for the pages shown in the menu; child pages become a dropdown under their parent."""
-    shown = [p for p in pages if p.show_in_nav]
+    shown = [p for p in pages if p.show_in_nav and not p.collection_id]  # detail pages have no menu entry
     ids = {p.id for p in shown}
     e = htmllib.escape
 
@@ -187,8 +201,9 @@ def body_html(page):
     return strip_body(page.html)
 
 
-def full_body(page, pages, shared=None):
-    """Shared header + page content + shared footer, with auto menus filled in."""
+def full_body(page, pages, shared=None, row=None, include_drafts=False):
+    """Shared header + page content + shared footer, with auto menus filled in. ``row``: the row a detail
+    page shows."""
     shared = shared if shared is not None else shared_sections(page.site)
     parts = []
     head, foot = shared.get(SharedSection.HEADER), shared.get(SharedSection.FOOTER)
@@ -199,7 +214,7 @@ def full_body(page, pages, shared=None):
         parts.append(strip_body(foot.html))
     from .data import render_html
 
-    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page)
+    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts)
 
 
 def visible_pages(site, include_drafts):
@@ -207,18 +222,65 @@ def visible_pages(site, include_drafts):
     return list(qs if include_drafts else qs.filter(status=Page.PUBLISHED))
 
 
-def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, pages=None, shared=None):
-    """Full HTML document for a page. ``form_endpoint`` is where forms POST (empty = not configured)."""
+def page_meta(page, row=None, include_drafts=False):
+    """(title, description, og_image) of a page; on a detail page {{fields}} in the SEO settings are filled
+    from the row and empty ones fall back to the row's title / text / image."""
+    site = page.site
+    if row is None:
+        title = page.seo_title or (page.title if page.is_home and page.title == site.name else f"{page.title} | {site.name}")
+        return title, page.seo_description or site.description, page.og_image
+    from .data import render_html, strip_tags, title_field
+
+    fields = page.collection.fields if page.collection_id else []
+
+    def fill(text):
+        return strip_tags(render_html(text, site, page, row, include_drafts)) if text else ""
+
+    name = strip_tags(row.get(title_field(fields), "")) or page.title
+    title = fill(page.seo_title) or f"{name} | {site.name}"
+    desc = fill(page.seo_description)
+    if not desc:
+        for f in fields:
+            if f.get("type") in ("longtext", "html") or f["name"] in ("excerpt", "description", "detail", "summary"):
+                desc = strip_tags(row.get(f["name"], ""))
+                if desc:
+                    break
+    if len(desc) > 160:
+        desc = desc[:157].rstrip() + "…"
+    image = render_html(page.og_image, site, page, row, include_drafts) if page.og_image else ""
+    if not image or "{{" in image:
+        image = next((str(row.get(f["name"]) or "") for f in fields if f.get("type") == "image" and row.get(f["name"])), "")
+    return title, desc or site.description, image
+
+
+def page_path(page, row=None):
+    """Path of a page (or one row of a detail page) relative to the site root."""
+    if row is not None:
+        return row.get("_url") or f"{page.slug}/{quote(str(row.get('_slug', '')))}.html"
+    return "" if page.is_home else page.filename
+
+
+def absolute(site, rel, base=None):
+    base = base if base is not None else site.base_url
+    if not base or re.match(r"^[a-z]+:", rel or "", re.I):
+        return rel
+    return urljoin(base if base.endswith("/") else base + "/", rel or "")
+
+
+def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, pages=None, shared=None, row=None):
+    """Full HTML document for a page. ``form_endpoint`` is where forms POST (empty = not configured).
+    ``row``: render a detail page for this row (it lives one folder down, so it gets <base href="../">)."""
     site = page.site
     if pages is None:
         pages = visible_pages(site, include_drafts)
     e = htmllib.escape
-    title = page.seo_title or (page.title if page.is_home and page.title == site.name else f"{page.title} | {site.name}")
-    desc = page.seo_description or site.description
+    title, desc, og_image = page_meta(page, row, include_drafts)
     from .anim import ANIM_HEAD
 
-    head = [
-        '<meta charset="utf-8">',
+    head = ['<meta charset="utf-8">']
+    if row is not None:
+        head.append('<base href="../">')
+    head += [
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         ANIM_HEAD,
         f"<title>{e(title)}</title>",
@@ -230,12 +292,21 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
         head.append(f'<meta name="keywords" content="{e(page.seo_keywords)}">')
     if page.noindex:
         head.append('<meta name="robots" content="noindex">')
-    head.append(f'<meta property="og:title" content="{e(page.seo_title or page.title)}">')
-    head.append('<meta property="og:type" content="website">')
+    og_title = title if row is not None else (page.seo_title or page.title)
+    head.append(f'<meta property="og:title" content="{e(og_title)}">')
+    head.append(f'<meta property="og:type" content="{"article" if row is not None else "website"}">')
+    head.append(f'<meta property="og:site_name" content="{e(site.name)}">')
     if desc:
         head.append(f'<meta property="og:description" content="{e(desc)}">')
-    if page.og_image:
-        head.append(f'<meta property="og:image" content="{e(rel_media(page.og_image))}">')
+    if og_image:
+        head.append(f'<meta property="og:image" content="{e(absolute(site, rel_media(og_image)))}">')
+        head.append('<meta name="twitter:card" content="summary_large_image">')
+    if site.base_url and not page.noindex:
+        url = absolute(site, page_path(page, row))
+        head.append(f'<link rel="canonical" href="{e(url)}">')
+        head.append(f'<meta property="og:url" content="{e(url)}">')
+    if feed_collections(site, include_drafts):
+        head.append(f'<link rel="alternate" type="application/rss+xml" title="{e(site.name)}" href="{depth_prefix}rss.xml">')
     if site.favicon:
         head.append(f'<link rel="icon" href="{e(rel_media(site.favicon))}">')
     fu = fonts_url(site)
@@ -250,7 +321,9 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
     if page.head_code:
         head.append(rel_media(page.head_code))
 
-    body = rel_media(full_body(page, pages, shared))
+    from .widgets import contact_html
+
+    body = rel_media(full_body(page, pages, shared, row, include_drafts)) + "\n" + rel_media(contact_html(site))
     scripts = [f'<script src="{depth_prefix}js/site.js"></script>']
     if page.js:
         scripts.append(f"<script>\n{page.js}\n</script>")
@@ -292,10 +365,25 @@ def build_files(site, mode="export", include_drafts=False, php_forms=False):
             referenced |= media_paths(sec.html) | media_paths(sec.css)
     pages = visible_pages(site, include_drafts)
     for page in pages:
-        files[page.filename] = render_page(page, endpoint, pages=pages, shared=shared)
+        if page.collection_id:  # one file per row: <page>/<row>.html
+            for row in detail_items(page, include_drafts):
+                files[f"{page.slug}/{row['_slug']}.html"] = render_page(page, endpoint, include_drafts=include_drafts,
+                                                                        pages=pages, shared=shared, row=row)
+                referenced |= media_paths(" ".join(str(v) for v in row.values()))
+        else:
+            files[page.filename] = render_page(page, endpoint, include_drafts=include_drafts, pages=pages, shared=shared)
         files[f"css/{page.slug}.css"] = page_css(page)
         for src in (page.html, page.css, page.custom_css, page.og_image, page.head_code):
             referenced |= media_paths(src)
+    files["robots.txt"] = robots_txt(site, site.base_url, include_drafts)
+    if site.base_url:
+        files["sitemap.xml"] = sitemap_xml(site, site.base_url, include_drafts)
+    if feed_collections(site, include_drafts):
+        files["rss.xml"] = rss_xml(site, site.base_url, include_drafts)
+    for c in site.collections.all():  # images of collection rows
+        if c.mode == c.COPY:
+            for rec in c.records.filter(approved=True):
+                referenced |= media_paths(" ".join(str(v) for v in rec.data.values()))
     # Every file uploaded to the site goes along, so links to PDFs etc. typed by hand keep working.
     for path in site.assets.values_list("file", flat=True):
         referenced.add(path)
@@ -305,9 +393,17 @@ def build_files(site, mode="export", include_drafts=False, php_forms=False):
     return files, assets
 
 
-def resolve(site, path, include_drafts):
-    """Map a request path inside a site to ('text', content_type, str) / ('media', path) / None."""
-    path = path.lstrip("/") or "index.html"
+def resolve(site, path, include_drafts, base=""):
+    """Map a request path inside a site to ('text', content_type, str) / ('media', path) /
+    ('page', page, row) / None. ``base``: absolute URL of the site root (for sitemap/RSS)."""
+    path = unquote(path.lstrip("/")) or "index.html"
+    base = site.base_url or base
+    if path == "robots.txt":
+        return "text", "text/plain", robots_txt(site, base, include_drafts)
+    if path == "sitemap.xml":
+        return "text", "application/xml", sitemap_xml(site, base, include_drafts)
+    if path == "rss.xml" and feed_collections(site, include_drafts):
+        return "text", "application/rss+xml", rss_xml(site, base, include_drafts)
     if path == "css/site.css":
         return "text", "text/css", rel_media(site_css(site), "../")
     if path == "js/site.js":
@@ -320,14 +416,108 @@ def resolve(site, path, include_drafts):
         return ("text", "text/css", page_css(page)) if page else None
     if path.endswith("/"):
         path = path[:-1]
+    folder, _, name = path.rpartition("/")
+    if folder and "/" not in folder:  # <detail page>/<row>.html
+        page = pages.filter(slug=folder, collection__isnull=False).first()
+        if not page:
+            return None
+        want = name[:-5] if name.endswith(".html") else name
+        row = next((r for r in detail_items(page, include_drafts) if r["_slug"] == want), None)
+        return ("page", page, row) if row else None
     if path in ("", "index.html", "index"):
-        page = pages.filter(is_home=True).first() or pages.first()
+        page = pages.filter(is_home=True, collection__isnull=True).first() or pages.filter(collection__isnull=True).first()
     else:
         slug = path[:-5] if path.endswith(".html") else path
         page = pages.filter(slug=slug).first()
     if not page:
         return None
-    return "page", page
+    if page.collection_id:  # the template itself: show its first row while designing, nothing on the live site
+        rows = detail_items(page, include_drafts) if include_drafts else []
+        return ("page", page, rows[0]) if rows else None
+    return "page", page, None
+
+
+# --- detail pages, sitemap, robots, RSS -----------------------------------------------------------
+
+def detail_items(page, include_drafts=False):
+    """Rows of a detail page, each with _slug, _url, _prev_url/_next_url and _prev_title/_next_title."""
+    from .data import detail_href, detail_rows, strip_tags, title_field
+
+    try:
+        items = detail_rows(page.collection, page.detail_field)
+    except Exception:  # live MySQL down: no detail pages rather than a crash
+        return []
+    tf = title_field(page.collection.fields)
+    out = []
+    for i, (slug, row) in enumerate(items):
+        prev, nxt = (items[i - 1] if i else None), (items[i + 1] if i + 1 < len(items) else None)
+        out.append({**row, "_slug": slug, "_url": detail_href(page, slug), "_index": i + 1,
+                    "_prev_url": detail_href(page, prev[0]) if prev else "", "_prev_title": strip_tags(prev[1].get(tf, "")) if prev else "",
+                    "_next_url": detail_href(page, nxt[0]) if nxt else "", "_next_title": strip_tags(nxt[1].get(tf, "")) if nxt else ""})
+    return out
+
+
+def site_urls(site, include_drafts=False):
+    """[(relative path, lastmod datetime)] of every indexable page, detail rows included."""
+    out = []
+    for page in visible_pages(site, include_drafts):
+        if page.noindex:
+            continue
+        if page.collection_id:
+            out += [(page_path(page, row), page.updated_at) for row in detail_items(page, include_drafts)]
+        else:
+            out.append((page_path(page), page.updated_at))
+    return out
+
+
+def sitemap_xml(site, base, include_drafts=False):
+    e = htmllib.escape
+    items = "".join(f"<url><loc>{e(absolute(site, path, base))}</loc><lastmod>{mod:%Y-%m-%d}</lastmod></url>\n"
+                    for path, mod in site_urls(site, include_drafts))
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{items}</urlset>\n'
+
+
+def robots_txt(site, base, include_drafts=False):
+    lines = ["User-agent: *"]
+    hidden = [p for p in visible_pages(site, include_drafts) if p.noindex]
+    lines += [f"Disallow: /{p.slug + '/' if p.collection_id else p.filename}" for p in hidden] or ["Disallow:"]
+    if base:
+        lines.append(f"Sitemap: {absolute(site, 'sitemap.xml', base)}")
+    return "\n".join(lines) + "\n"
+
+
+def feed_collections(site, include_drafts=False):
+    """Detail pages whose collection has RSS turned on."""
+    qs = site.pages.filter(collection__isnull=False).select_related("collection")
+    if not include_drafts:
+        qs = qs.filter(status=Page.PUBLISHED)
+    return [p for p in qs if p.collection.opt("rss")]
+
+
+def rss_xml(site, base, include_drafts=False):
+    from .data import parse_date, strip_tags, title_field
+
+    e = htmllib.escape
+    items = []
+    for page in feed_collections(site, include_drafts):
+        fields = page.collection.fields
+        tf = title_field(fields)
+        date_f = next((f["name"] for f in fields if f.get("type") == "date"), None)
+        cat_f = next((f["name"] for f in fields if f["name"].lower() in ("category", "หมวด", "หมวดหมู่", "tag")), None)
+        for row in detail_items(page, include_drafts):
+            _, desc, _ = page_meta(page, row, include_drafts)
+            d = parse_date(row.get(date_f)) if date_f else None
+            when = datetime.combine(d, dtime(9, 0)).astimezone() if d else page.updated_at
+            link = absolute(site, row["_url"], base)
+            items.append((when, f"<item><title>{e(strip_tags(row.get(tf, '')))}</title><link>{e(link)}</link>"
+                                f"<guid>{e(link)}</guid><pubDate>{format_datetime(when)}</pubDate>"
+                                + (f"<category>{e(str(row.get(cat_f)))}</category>" if cat_f and row.get(cat_f) else "")
+                                + f"<description>{e(desc)}</description></item>"))
+    items.sort(key=lambda x: x[0], reverse=True)
+    home = absolute(site, "", base) or "./"
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
+            f"<title>{e(site.name)}</title><link>{e(home)}</link><description>{e(site.description or site.name)}</description>"
+            f"<language>{e(site.language or 'th')}</language>\n" + "\n".join(i for _, i in items[:50]) + "\n</channel></rss>\n")
 
 
 def site_for_slug(slug, published_only):

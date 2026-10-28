@@ -62,6 +62,10 @@ DEFAULTS = {
         "last_target": "downloads",
         "custom_path": "",
     },
+    "publish": {
+        "github_token": "",   # personal access token (repo scope) for GitHub Pages
+        "netlify_token": "",  # personal access token from app.netlify.com/user/applications
+    },
 }
 
 _lock = threading.Lock()

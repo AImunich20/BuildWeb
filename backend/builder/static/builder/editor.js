@@ -372,7 +372,7 @@
         <article class="bw-data-card">${img ? `<img src="${fieldPh(img)}" alt="${title ? fieldPh(title) : ''}">` : ''}
           <div class="bw-data-body">${title ? `<h3>${fieldPh(title)}</h3>` : ''}
           ${rest.filter(f => f !== link).slice(0, 3).map(f => `<p>${fieldPh(f)}</p>`).join('')}
-          ${link ? `<a class="bw-btn" href="${fieldPh(link)}">ดูเพิ่มเติม</a>` : ''}</div></article></div></div></section>
+          ${c.has_detail ? `<a class="bw-btn" href="{{_url}}">ดูรายละเอียด</a>` : link ? `<a class="bw-btn" href="${fieldPh(link)}">ดูเพิ่มเติม</a>` : ''}</div></article></div></div></section>
       <style>.bw-data-sec{padding:60px 0}.bw-data-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
       .bw-data-card{background:#fff;border:1px solid #eee;border-radius:var(--bw-radius);overflow:hidden}
       .bw-data-card img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block}
@@ -388,7 +388,9 @@
   COLS.forEach(c => {
     bm.add('bw-data-cards-' + c.slug, { label: `${c.name} (การ์ด)`, category: 'ข้อมูล', content: cardTemplate(c), media: `<div class="bw-bicon">${BW_ICON('cards', 20)}</div>` });
     bm.add('bw-data-table-' + c.slug, { label: `${c.name} (ตาราง)`, category: 'ข้อมูล', content: tableTemplate(c), media: `<div class="bw-bicon">${BW_ICON('table', 20)}</div>` });
+    if (c.forms) bm.add('bw-data-form-' + c.slug, { label: `ฟอร์ม ${c.name}`, category: 'ข้อมูล', content: c.form_html, media: `<div class="bw-bicon">${BW_ICON('form', 20)}</div>` });
   });
+  const DETAIL = D.page && D.page.collection_slug ? colBySlug[D.page.collection_slug] : null;
 
   function drawData() {
     const box = $('#data-panel');
@@ -396,9 +398,11 @@
       box.innerHTML = `<div class="r-empty">ยังไม่มีชุดข้อมูล<br><a class="btn sm" style="margin-top:10px" href="/sites/${site.id}/data/">นำเข้าจาก XAMPP / .sql / CSV</a></div>`;
       return;
     }
-    box.innerHTML = `<div class="small muted" style="padding:10px 12px">คลิกฟิลด์เพื่อแทรก <code>{{ฟิลด์}}</code> ในข้อความที่เลือก · ลากบล็อกจากหมวด “ข้อมูล” เพื่อแสดงทั้งชุด</div>` +
+    box.innerHTML = (DETAIL ? `<div style="margin:10px 12px 0;padding:10px 12px;border-radius:8px;background:var(--brand-soft,rgba(124,92,255,.1));font-size:12.5px;line-height:1.7">หน้านี้คือ<b>หน้ารายละเอียด</b>ของ “${BW.esc(DETAIL.name)}” — สร้างหนึ่งหน้าต่อหนึ่งแถว <code>{{ฟิลด์}}</code> คือค่าของแถวนั้น · ลิงก์ก่อนหน้า/ถัดไป: <code>{{_prev_url}}</code> <code>{{_next_url}}</code></div>` : '') +
+      `<div class="small muted" style="padding:10px 12px">คลิกฟิลด์เพื่อแทรก <code>{{ฟิลด์}}</code> ในข้อความที่เลือก · ลากบล็อกจากหมวด “ข้อมูล” เพื่อแสดงทั้งชุด · ตัวแปลงค่า: <code>{{price|number}}</code> <code>{{date|date}}</code> <code>{{detail|truncate:100}}</code></div>` +
       COLS.map(c => `<div class="data-col"><div class="row between"><b>${BW.esc(c.name)}</b><code>${BW.esc(c.slug)}</code></div>
         <div class="chips">${c.fields.map(f => `<button class="chip" data-col="${c.slug}" data-f="${BW.esc(f.name)}" title="${BW.esc(f.label)} · ${f.type}">${BW.esc(f.name)}</button>`).join('')}
+        ${c.has_detail ? `<button class="chip ghost" data-col="${c.slug}" data-f="_url" title="ลิงก์ไปหน้ารายละเอียดของแถว (ใช้ในกล่องวนซ้ำ)">_url</button>` : ''}
         <button class="chip ghost" data-col="${c.slug}" data-f="count" title="จำนวนแถว">count</button></div></div>`).join('');
     box.querySelectorAll('.chip').forEach(b => b.onclick = () => insertField(b.dataset.col, b.dataset.f));
   }
@@ -407,6 +411,7 @@
     // Inside a repeat block use {{field}}; elsewhere {{collection.field}} (first row / count).
     let inRepeat = false;
     for (let c = sel; c; c = c.parent()) { if ((c.getAttributes()['data-bw-repeat'] || '') === slug) { inRepeat = true; break; } }
+    if (DETAIL && DETAIL.slug === slug) inRepeat = true; // a detail page shows one row: plain {{field}}
     const ph = inRepeat && field !== 'count' ? `{{${field}}}` : `{{${slug}.${field}}}`;
     const rte = editor.RichTextEditor;
     if (sel && sel.is('text') && rte && sel.getView() && sel.getView().rte && sel.getView().rte.actionbar) {
@@ -427,10 +432,25 @@
       { type: 'select', name: 'data-bw-order', label: 'ลำดับ', options: [{ id: '', name: 'น้อย → มาก' }, { id: 'desc', name: 'มาก → น้อย' }] },
       { name: 'data-bw-filter', label: 'กรอง (เช่น category=coffee;price>50)' },
       { name: 'data-bw-empty', label: 'ข้อความเมื่อไม่มีข้อมูล' },
+      { name: 'data-bw-search', label: 'ช่องค้นหา (ข้อความในช่อง เช่น ค้นหาสินค้า…)' },
+      { name: 'data-bw-facet', label: 'ปุ่มหมวดหมู่จากฟิลด์ (เช่น category)' },
+      { type: 'number', name: 'data-bw-paginate', label: 'แบ่งหน้า: กี่รายการต่อหน้า', min: 0 },
+      { type: 'select', name: 'data-bw-pager', label: 'รูปแบบแบ่งหน้า', options: [{ id: '', name: 'เลขหน้า 1 2 3' }, { id: 'more', name: 'ปุ่ม “โหลดเพิ่ม”' }] },
     ];
   };
+  // Forms can save into a collection (rows wait for approval unless the collection says otherwise).
+  const formTraits = () => [
+    { type: 'select', name: 'data-bw-collection', label: 'บันทึกลงชุดข้อมูล',
+      options: [{ id: '', name: '— เก็บในข้อมูลจากฟอร์มเท่านั้น —' }, ...COLS.filter(c => c.forms).map(c => ({ id: c.slug, name: c.name }))] },
+    { name: 'data-bw-success', label: 'ข้อความเมื่อส่งสำเร็จ' },
+    { name: 'data-bw-pending', label: 'ข้อความเมื่อรออนุมัติ' },
+  ];
   editor.on('component:selected', comp => {
     if (!comp || comp.get('type') === 'bw-shared' || comp.is('textnode') || comp.get('tagName') === 'body') return;
+    if (comp.get('tagName') === 'form') {
+      if (!comp.getTrait('data-bw-collection')) comp.addTrait(formTraits(), { at: comp.getTraits().length });
+      return;
+    }
     if (!['div', 'section', 'ul', 'ol', 'tbody', 'article', 'nav', 'main', 'aside', 'span'].includes(comp.get('tagName'))) return;
     if (comp.getTrait('data-bw-repeat')) return;
     comp.addTrait(repeatTraits(), { at: comp.getTraits().length });

@@ -5,7 +5,7 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { data: renderData, pages: renderPages, files: renderFiles, forms: renderForms, settings: renderSettings, export: renderExport };
+  const tabs = { data: renderData, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
 
 
 
@@ -200,18 +200,24 @@
     const sel = selectId || +(new URLSearchParams(location.search).get('c')) || (DATA.collections[0] || {}).id;
     root.innerHTML = `<div class="row between" style="margin-bottom:14px">
         <div class="muted">ชุดข้อมูลที่หน้าเว็บนำไปแสดงได้ — ใช้บล็อก “ข้อมูล” ในตัวออกแบบ หรือพิมพ์ <code>{{ฟิลด์}}</code></div>
-        <div class="row"><button class="btn" id="d-mysql">${BW_ICON('database')} นำเข้าจาก MySQL / XAMPP</button>
+        <div class="row"><button class="btn" id="d-blog">${BW_ICON('article')} สร้างระบบบทความ</button><button class="btn" id="d-mysql">${BW_ICON('database')} นำเข้าจาก MySQL / XAMPP</button>
         <button class="btn" id="d-file">${BW_ICON('upload')} นำเข้า .sql / CSV</button><button class="btn primary" id="d-new">${BW_ICON('plus')} สร้างเอง</button></div></div>
       <div class="data-layout"><div class="card data-list" id="d-list"></div><div id="d-main"></div></div>`;
     const list = document.getElementById('d-list');
     list.innerHTML = DATA.collections.length ? DATA.collections.map(c => `<a class="data-item ${c.id === sel ? 'active' : ''}" data-id="${c.id}">
         <div class="row between"><b>${esc(c.name)}</b>${c.mode === 'live' ? '<span class="badge brand">สด</span>' : ''}</div>
-        <div class="small muted mono">${esc(c.slug)} · ${c.fields.length} ฟิลด์${c.count != null ? ' · ' + c.count + ' แถว' : ''}</div></a>`).join('')
+        <div class="small muted mono">${esc(c.slug)} · ${c.fields.length} ฟิลด์${c.count != null ? ' · ' + c.count + ' แถว' : ''}</div>
+        ${c.pending ? `<div style="margin-top:4px"><span class="badge warn">รออนุมัติ ${c.pending}</span></div>` : ''}</a>`).join('')
       : `<div class="empty-state">${BW_ICON('table', 28)}<div style="margin-top:8px">ยังไม่มีชุดข้อมูล</div></div>`;
     list.querySelectorAll('[data-id]').forEach(a => a.onclick = () => openCollection(+a.dataset.id));
     document.getElementById('d-mysql').onclick = mysqlWizard;
     document.getElementById('d-file').onclick = fileImport;
     document.getElementById('d-new').onclick = newCollection;
+    document.getElementById('d-blog').onclick = async () => {
+      if (!await confirmBox('สร้างระบบบทความ', 'จะสร้างชุดข้อมูล “บทความ” พร้อมบทความตัวอย่าง 3 เรื่อง, หน้ารวมบทความ (ค้นหา · หมวดหมู่ · แบ่งหน้า), หน้าอ่านบทความ และ RSS ให้อัตโนมัติ', { ok: 'สร้างเลย' })) return;
+      try { const r = await api(`/api/sites/${site.id}/blog`, {}); toast('สร้างระบบบทความแล้ว', 'ok'); renderData(r.collection.id); }
+      catch (e) { toast(e.message, 'err'); }
+    };
     if (sel) openCollection(sel); else document.getElementById('d-main').innerHTML = `<div class="card pad"><h2>เริ่มใช้ข้อมูลในเว็บ</h2>
       <div class="hint">ตัวอย่าง: นำตาราง <code>products</code> จาก XAMPP มาแสดงเป็นการ์ดสินค้าในหน้าเว็บ — แก้ใน phpMyAdmin แล้วหน้าเว็บเปลี่ยนตาม (โหมดเชื่อมสด)</div>
       <ol class="small" style="line-height:2;margin:0;padding-left:18px"><li>กด “นำเข้าจาก MySQL / XAMPP” หรือ “นำเข้า .sql / CSV”</li>
@@ -226,6 +232,9 @@
     main.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
     const r = await api(`/api/collections/${id}`);
     const c = r.collection, rows = r.rows;
+    const opts = c.options || {};
+    const pending = rows.filter(x => x._approved === false).length;
+    const showStatus = r.editable && (opts.forms || pending);
     const src = c.connection ? `${esc(c.connection_name)} › ${esc(c.source_database)}.${esc(c.source_table)}` : '';
     main.innerHTML = `<div class="card">
       <div class="card-head"><div><h2>${esc(c.name)}</h2><div class="small muted">ใช้อ้างอิง <code>${esc(c.slug)}</code>${src ? ' · จาก ' + src : ''}${c.last_synced ? ' · ซิงก์ ' + ago(c.last_synced) : ''}</div></div>
@@ -234,13 +243,30 @@
           <button class="btn sm danger icon" id="c-del" title="ลบชุดข้อมูล">${BW_ICON('trash')}</button></div></div>
       ${r.error ? `<div class="alert err" style="margin:14px 16px 0">${esc(r.error)}</div>` : ''}
       ${c.mode === 'live' ? `<div class="alert info" style="margin:14px 16px 0">โหมดเชื่อมสด: อ่านจาก MySQL ทุกครั้งที่มีคนเปิดเว็บ (แคช 15 วินาที) · แก้ข้อมูลที่ phpMyAdmin</div>` : ''}
-      <div class="data-table-wrap"><table class="table data-table"><thead><tr>${r.editable ? '<th style="width:32px"><input type="checkbox" id="c-all"></th>' : ''}
+      ${pending ? `<div class="alert warn" style="margin:14px 16px 0">มี ${pending} แถวที่ส่งมาจากฟอร์มรออนุมัติ — เลือกแล้วกด “อนุมัติ” เพื่อให้แสดงบนเว็บ</div>` : ''}
+      <div class="data-table-wrap"><table class="table data-table"><thead><tr>${r.editable ? '<th style="width:32px"><input type="checkbox" id="c-all"></th><th style="width:34px"></th>' : ''}
+        ${showStatus ? '<th>สถานะ</th>' : ''}
         ${c.fields.map(f => `<th title="${esc(f.label)}">${esc(f.name)} <span class="muted small">${TYPES[f.type] || f.type}</span></th>`).join('')}</tr></thead>
-        <tbody>${rows.map(row => `<tr data-id="${row._id || ''}">${r.editable ? '<td><input type="checkbox" class="c-row"></td>' : ''}
+        <tbody>${rows.map(row => `<tr data-id="${row._id || ''}" class="${row._approved === false ? 'row-pending' : ''}">${r.editable ? `<td><input type="checkbox" class="c-row"></td><td><button class="btn sm ghost icon" data-edit title="แก้ไขแถวนี้แบบเต็ม">${BW_ICON('edit', 14)}</button></td>` : ''}
+          ${showStatus ? `<td>${row._approved === false ? '<span class="badge warn">รออนุมัติ</span>' : '<span class="badge ok">แสดงอยู่</span>'}</td>` : ''}
           ${c.fields.map(f => cell(f, row[f.name], r.editable)).join('')}</tr>`).join('')}</tbody></table>
         ${rows.length ? '' : '<div class="empty-state">ยังไม่มีแถวข้อมูล</div>'}</div>
       ${r.editable ? `<div class="row" style="padding:12px 16px;border-top:1px solid var(--line)"><button class="btn sm" id="c-add">${BW_ICON('plus')} เพิ่มแถว</button>
-        <button class="btn sm danger" id="c-remove" disabled>ลบแถวที่เลือก</button><span class="small muted" style="margin-left:auto">คลิกช่องเพื่อแก้ไข · บันทึกเมื่อออกจากช่อง</span></div>` : ''}
+        ${showStatus ? `<button class="btn sm" id="c-approve" disabled>${BW_ICON('check')} อนุมัติ</button><button class="btn sm" id="c-hide" disabled>ซ่อนจากเว็บ</button>` : ''}
+        <button class="btn sm danger" id="c-remove" disabled>ลบแถวที่เลือก</button><span class="small muted" style="margin-left:auto">คลิกช่องเพื่อแก้ไข · ปุ่ม ${BW_ICON('edit', 12)} แก้แบบเต็ม (ตัวแก้ไขข้อความ, เลือกรูป)</span></div>` : ''}
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card pad"><h2>หน้าเว็บจากข้อมูลชุดนี้</h2>
+        ${c.detail_pages.length ? `<div class="hint">แต่ละแถวมีหน้าของตัวเองที่ <code>${esc(c.detail_pages[0].slug)}/ชื่อแถว.html</code> — ในบล็อกรายการใช้ลิงก์ <code>{{_url}}</code></div>
+          ${c.detail_pages.map(p => `<div class="row" style="margin-bottom:6px"><b style="flex:1">${esc(p.title)}</b><a class="btn sm" href="/preview/${esc(site.slug)}/${esc(p.slug)}.html" target="_blank">ดูตัวอย่าง</a><a class="btn sm primary" href="${p.edit_url}">ออกแบบ</a></div>`).join('')}`
+        : `<div class="hint">สร้างหน้ารายการ (การ์ด + ค้นหา + หมวดหมู่ + แบ่งหน้า) และหน้ารายละเอียดของทุกแถวอัตโนมัติ เช่น <code>products.html</code> → <code>product/latte.html</code></div>
+          <div class="row"><button class="btn primary sm" id="c-pages">${BW_ICON('pages')} สร้างหน้ารายการ + รายละเอียด</button><button class="btn sm" id="c-detail">เฉพาะหน้ารายละเอียด</button></div>`}
+      </div>
+      <div class="card pad"><h2>รับข้อมูลจากฟอร์ม</h2>
+        ${opts.forms ? `<div class="hint">เปิดอยู่ · ${opts.auto_approve ? 'แสดงบนเว็บทันที' : 'รออนุมัติก่อนแสดง'}${c.mode === 'live' ? ' · บันทึกลงตาราง MySQL โดยตรง' + (c.fields.some(f => f.name === 'approved') ? ' (ใช้คอลัมน์ approved)' : '') : ''}</div>
+          <div class="small">ในตัวออกแบบ: ลากบล็อก “ฟอร์ม ${esc(c.name)}” จากหมวดข้อมูล หรือเลือกฟอร์มใดก็ได้ › ตั้งค่า › “บันทึกลงชุดข้อมูล”</div>`
+        : `<div class="hint">ให้ผู้เข้าชมส่งรีวิว สมัครสมาชิก หรือลงชื่อ แล้วข้อมูลเข้าชุดนี้ (พร้อมระบบอนุมัติ)</div><button class="btn sm" id="c-forms">เปิดรับข้อมูลจากฟอร์ม</button>`}
+      </div>
     </div>
     <div class="card pad" style="margin-top:16px"><h2>วิธีใช้ในหน้าเว็บ</h2><div class="hint">วางในโค้ด HTML หรือใช้บล็อก/การตั้งค่า “วนซ้ำจากข้อมูล” ในตัวออกแบบ</div>
       <div class="log">&lt;div data-bw-repeat="${esc(c.slug)}" data-bw-limit="6"&gt;
@@ -260,12 +286,21 @@
           catch (e) { toast(e.message, 'err'); }
         });
       });
-      const sync = () => document.getElementById('c-remove').disabled = !tbody.querySelector('.c-row:checked');
+      tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+        const id = +b.closest('tr').dataset.id;
+        rowModal(c, rows.find(x => x._id === id));
+      });
+      const approve = async (value) => {
+        const ids = [...tbody.querySelectorAll('.c-row:checked')].map(x => +x.closest('tr').dataset.id);
+        try { await api(`/api/collections/${c.id}/rows/approve`, { ids, value }); toast(value ? `อนุมัติ ${ids.length} แถว` : `ซ่อน ${ids.length} แถว`, 'ok'); renderData(c.id); }
+        catch (e) { toast(e.message, 'err'); }
+      };
+      const ap = document.getElementById('c-approve');
+      if (ap) { ap.onclick = () => approve(true); document.getElementById('c-hide').onclick = () => approve(false); }
+      const sync = () => ['c-remove', 'c-approve', 'c-hide'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = !tbody.querySelector('.c-row:checked'); });
       tbody.querySelectorAll('.c-row').forEach(x => x.onchange = sync);
       document.getElementById('c-all').onchange = e => { tbody.querySelectorAll('.c-row').forEach(x => x.checked = e.target.checked); sync(); };
-      document.getElementById('c-add').onclick = async () => {
-        try { await api(`/api/collections/${c.id}/rows/save`, { data: {} }); openCollection(c.id); } catch (e) { toast(e.message, 'err'); }
-      };
+      document.getElementById('c-add').onclick = () => rowModal(c, null);
       document.getElementById('c-remove').onclick = async () => {
         const ids = [...tbody.querySelectorAll('.c-row:checked')].map(x => +x.closest('tr').dataset.id);
         if (!await confirmBox('ลบแถว', `ลบ ${ids.length} แถวที่เลือก?`, { ok: 'ลบ', danger: true })) return;
@@ -278,6 +313,18 @@
       try { const s = await api(`/api/collections/${c.id}/resync`, {}); toast(`ได้ ${s.rows} แถว`, 'ok'); renderData(c.id); } catch (e) { toast(e.message, 'err'); syncBtn.disabled = false; }
     };
     document.getElementById('c-settings').onclick = () => collectionSettings(c);
+    const mkPages = async (withList) => {
+      try {
+        const res = await api(`/api/collections/${c.id}/pages`, { with_list: withList });
+        if (await confirmBox('สร้างหน้าแล้ว', `${res.list ? `หน้ารายการ <code>${esc(res.list.filename)}</code> และ ` : ''}หน้ารายละเอียด <code>${esc(res.detail.slug)}/…html</code> พร้อมแล้ว — เปิดหน้ารายละเอียดในตัวออกแบบเลยไหม?`, { ok: 'เปิดตัวออกแบบ' }))
+          location.href = res.detail.edit_url;
+        else renderData(c.id);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    const pb = document.getElementById('c-pages');
+    if (pb) { pb.onclick = () => mkPages(true); document.getElementById('c-detail').onclick = () => mkPages(false); }
+    const fb = document.getElementById('c-forms');
+    if (fb) fb.onclick = () => collectionSettings(c, true);
     document.getElementById('c-del').onclick = async () => {
       if (!await confirmBox('ลบชุดข้อมูล', `ลบ “${esc(c.name)}” และข้อมูลทั้งหมดในชุดนี้? (ตารางใน MySQL ไม่ถูกแตะ)`, { ok: 'ลบ', danger: true })) return;
       await api(`/api/collections/${c.id}/delete`, {}); history.replaceState(null, '', location.pathname); renderData();
@@ -290,7 +337,8 @@
     return `<td contenteditable="plaintext-only" data-f="${esc(f.name)}" class="${f.type === 'number' ? 'num' : ''}">${esc(val)}</td>`;
   }
 
-  function collectionSettings(c) {
+  function collectionSettings(c, focusForms) {
+    const o = c.options || {};
     const row = f => `<div class="field-row"><input class="input mono" data-k="name" value="${esc(f.name)}" data-orig="${esc(f.name)}"><input class="input" data-k="label" value="${esc(f.label)}">
       <select class="input" data-k="type">${Object.entries(TYPES).map(([k, l]) => `<option value="${k}" ${k === f.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <button class="btn sm ghost icon" data-rm title="ลบฟิลด์">${BW_ICON('x')}</button></div>`;
@@ -300,6 +348,11 @@
       ${c.mode === 'live' ? `<div class="grid g3" style="gap:0 12px"><label class="field"><span>เรียงตามคอลัมน์</span><input class="input mono" name="live_order" value="${esc(c.live_order)}"></label>
         <label class="field"><span>ลำดับ</span><select class="input" name="live_desc"><option value="">น้อย → มาก</option><option value="1" ${c.live_desc ? 'selected' : ''}>มาก → น้อย</option></select></label>
         <label class="field"><span>ดึงสูงสุด (แถว)</span><input class="input mono" name="live_limit" type="number" value="${c.live_limit}"></label></div>` : ''}
+      <div class="sect-title">ตัวเลือก</div>
+      <label class="check"><input type="checkbox" data-opt="forms" ${o.forms || focusForms ? 'checked' : ''}>รับข้อมูลจากฟอร์มบนเว็บ <span class="muted small">(ฟอร์มที่ตั้ง “บันทึกลงชุดข้อมูล” เป็นชุดนี้)</span></label>
+      <label class="check"><input type="checkbox" data-opt="auto_approve" ${o.auto_approve ? 'checked' : ''}>แสดงบนเว็บทันทีโดยไม่ต้องอนุมัติ</label>
+      <label class="check"><input type="checkbox" data-opt="rss" ${o.rss ? 'checked' : ''}>รวมในฟีด RSS (<code>rss.xml</code>) <span class="muted small">(ต้องมีหน้ารายละเอียด)</span></label>
+      ${c.mode === 'live' ? '<div class="small muted">ชุดข้อมูลเชื่อมสด: ข้อมูลจากฟอร์มบันทึกลงตาราง MySQL โดยตรง — ถ้าตารางมีคอลัมน์ <code>approved</code> จะใช้เป็นสถานะอนุมัติ</div>' : ''}
       <div class="sect-title">ฟิลด์ <span class="small muted" style="text-transform:none;letter-spacing:0">— ชื่อ (ใช้ใน {{ }}) · ชื่อที่แสดง · ชนิด</span></div>
       <div id="f-rows">${c.fields.map(row).join('')}</div>
       ${c.mode === 'live' ? '' : `<button class="btn sm" id="f-add">${BW_ICON('plus')} เพิ่มฟิลด์</button>`}</div>
@@ -314,8 +367,75 @@
       d.fields = rows.map(r => ({ name: r.querySelector('[data-k=name]').value, label: r.querySelector('[data-k=label]').value, type: r.querySelector('[data-k=type]').value }));
       d.renames = rows.map(r => ({ from: r.querySelector('[data-k=name]').dataset.orig, to: r.querySelector('[data-k=name]').value })).filter(x => x.from && x.from !== x.to);
       if ('live_desc' in d) d.live_desc = d.live_desc === '1';
+      d.options = {}; m.el.querySelectorAll('[data-opt]').forEach(x => d.options[x.dataset.opt] = x.checked);
       try { await api(`/api/collections/${c.id}/update`, d); m.close(); toast('บันทึกแล้ว', 'ok'); renderData(c.id); }
       catch (e) { showFieldError(m.el, e); }
+    };
+  }
+
+  // Full editor for one row: inputs by field type, image picker, rich text for "html" fields.
+  const RTE_CMDS = [['bold', '<b>B</b>'], ['italic', '<i>I</i>'], ['h2', 'H2'], ['h3', 'H3'], ['ul', '• รายการ'], ['ol', '1. รายการ'],
+    ['quote', '“ ”'], ['link', 'ลิงก์'], ['img', 'รูป'], ['clear', 'ล้างรูปแบบ']];
+
+  function rowModal(c, row) {
+    const isNew = !row;
+    row = row || {};
+    const input = f => {
+      const v = row[f.name] == null ? '' : String(row[f.name]);
+      const n = `name="${esc(f.name)}"`;
+      if (f.type === 'html') return `<div class="rte" data-rte="${esc(f.name)}"><div class="rte-bar">
+          ${RTE_CMDS.map(([k, l]) => `<button type="button" class="btn sm ghost" data-cmd="${k}">${l}</button>`).join('')}</div>
+          <div class="rte-body" contenteditable="true">${v}</div></div>`;
+      if (f.type === 'longtext') return `<textarea class="input" rows="3" ${n}>${esc(v)}</textarea>`;
+      if (f.type === 'image') return `<div class="row" style="flex-wrap:nowrap">${v ? `<span class="thumb-sm" style="background-image:url('${encodeURI(v)}')"></span>` : ''}<input class="input" ${n} value="${esc(v)}" placeholder="/media/... หรือ https://..."><button type="button" class="btn sm" data-pick="${esc(f.name)}">เลือกรูป</button></div>`;
+      if (f.type === 'bool') return `<label class="check"><input type="checkbox" ${n} ${v && v !== '0' && v !== 'false' ? 'checked' : ''}>ใช่</label>`;
+      const t = { number: 'number', date: 'date', link: 'url' }[f.type] || 'text';
+      return `<input class="input ${f.type === 'number' ? 'mono' : ''}" type="${t}" ${n} value="${esc(v)}" ${t === 'number' ? 'step="any"' : ''}>`;
+    };
+    const m = modal(`<header><h2>${isNew ? 'เพิ่มแถว' : 'แก้ไขแถว'} · ${esc(c.name)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
+      <div class="body">${c.fields.map(f => `<div class="field"><span>${esc(f.label)} <small class="mono">${esc(f.name)}</small></span>${input(f)}</div>`).join('')}
+      ${!isNew && row._approved === false ? '<label class="check"><input type="checkbox" id="rm-approve" checked>อนุมัติให้แสดงบนเว็บ</label>' : ''}</div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
+    m.el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => pickAsset(u => m.el.querySelector(`[name="${b.dataset.pick}"]`).value = u));
+    m.el.querySelectorAll('.rte').forEach(box => {
+      const ed = box.querySelector('.rte-body');
+      box.querySelectorAll('[data-cmd]').forEach(b => b.onmousedown = e => {
+        e.preventDefault(); // keep the selection inside the editor
+        const k = b.dataset.cmd;
+        if (k === 'bold' || k === 'italic') document.execCommand(k);
+        else if (k === 'h2' || k === 'h3') document.execCommand('formatBlock', false, k);
+        else if (k === 'quote') document.execCommand('formatBlock', false, 'blockquote');
+        else if (k === 'ul') document.execCommand('insertUnorderedList');
+        else if (k === 'ol') document.execCommand('insertOrderedList');
+        else if (k === 'clear') { document.execCommand('removeFormat'); document.execCommand('formatBlock', false, 'p'); }
+        else if (k === 'link') { const u = prompt('ลิงก์ (https://...)'); if (u) document.execCommand('createLink', false, u); }
+        else if (k === 'img') {
+          const sel = window.getSelection(), range = sel.rangeCount && ed.contains(sel.anchorNode) ? sel.getRangeAt(0) : null;
+          pickAsset(u => {
+            ed.focus();
+            if (range) { sel.removeAllRanges(); sel.addRange(range); }
+            document.execCommand('insertImage', false, u);
+          });
+        }
+      });
+      ed.addEventListener('paste', e => { // pasted text stays clean (no fonts/colours from Word or web pages)
+        e.preventDefault();
+        document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+      });
+    });
+    m.el.querySelector('[data-save]').onclick = async () => {
+      const payload = {};
+      c.fields.forEach(f => {
+        if (f.type === 'html') { payload[f.name] = m.el.querySelector(`[data-rte="${f.name}"] .rte-body`).innerHTML.trim(); return; }
+        const el = m.el.querySelector(`[name="${f.name}"]`);
+        payload[f.name] = el.type === 'checkbox' ? (el.checked ? 1 : 0) : el.value;
+      });
+      try {
+        const res = await api(`/api/collections/${c.id}/rows/save`, { _id: row._id || null, data: payload });
+        const ap = m.el.querySelector('#rm-approve');
+        if (ap && ap.checked) await api(`/api/collections/${c.id}/rows/approve`, { ids: [res.row._id], value: true });
+        m.close(); toast('บันทึกแล้ว', 'ok'); renderData(c.id);
+      } catch (e) { toast(e.message, 'err'); }
     };
   }
 
@@ -451,10 +571,12 @@
         <div class="hint" style="margin:0">แก้ครั้งเดียว เปลี่ยนทุกหน้า · เมนูอัปเดตตามรายการหน้าอัตโนมัติ</div></div>
         <button class="btn sm" id="extract" title="ย้าย <header>/<footer> ของหน้าแรกมาเป็นส่วนร่วม และลบซ้ำออกจากทุกหน้า">แยกจากหน้าแรก</button></div>
         <div id="shared-rows"></div></div>
-      <div class="card"><table class="table"><thead><tr><th></th><th>หน้า</th><th>ไฟล์</th><th>สถานะ</th><th>เมนู</th><th>แก้ไขล่าสุด</th><th></th></tr></thead>
-      <tbody id="page-rows"></tbody></table></div>`;
+      <div class="card"><table class="table"><thead><tr><th></th><th>หน้า</th><th>ไฟล์</th><th>สถานะ</th><th>เมนู</th><th title="คะแนน SEO — คลิกเพื่อดูสิ่งที่ควรแก้">SEO</th><th>แก้ไขล่าสุด</th><th></th></tr></thead>
+      <tbody id="page-rows"></tbody></table></div>
+      <div class="card" style="margin-top:16px" id="seo-card"><div class="card-head"><div><h2>SEO ทั้งเว็บ</h2><div class="hint" style="margin:0">sitemap.xml · robots.txt · RSS สร้างให้อัตโนมัติ</div></div><span id="seo-total" class="seo-score">…</span></div><div id="seo-site" style="padding:6px 16px 14px"></div></div>`;
     drawPageRows();
     drawShared();
+    loadSeo();
     document.getElementById('extract').onclick = async () => {
       if (!await confirmBox('แยกส่วนหัว/ท้ายร่วม', 'นำ &lt;header&gt; และ &lt;footer&gt; ของหน้าแรกมาเป็นส่วนร่วม แล้วลบตัวซ้ำออกจากทุกหน้า (ทุกหน้าถูกเก็บเวอร์ชันไว้ก่อน ย้อนกลับได้)', { ok: 'แยกเลย' })) return;
       try { const r = await api(`/api/sites/${site.id}/shared/extract`, {}); toast(`แยกแล้ว ปรับ ${r.updated} หน้า`, 'ok'); setTimeout(() => location.reload(), 600); }
@@ -498,9 +620,10 @@
         <td class="handle" title="ลากเพื่อเรียงลำดับ">${BW_ICON('drag', 15)}</td>
         <td><div class="page-title">${p.is_home ? '<span class="badge" style="height:18px;margin-right:6px">หน้าแรก</span>' : ''}${p.parent ? '<span class="muted">↳ </span>' : ''}${esc(p.title)}
           <small>${p.parent && byId[p.parent] ? 'อยู่ใต้ ' + esc(byId[p.parent].title) + ' · ' : ''}${p.seo_description ? esc(p.seo_description.slice(0, 70)) : 'ยังไม่มีคำอธิบาย SEO'}</small></div></td>
-        <td class="mono small">${esc(p.filename)}</td>
+        <td class="mono small">${p.collection ? `${esc(p.slug)}/…html<div><span class="badge brand" title="สร้างหนึ่งหน้าต่อหนึ่งแถวของชุดข้อมูล">รายละเอียด: ${esc(p.collection_name)}</span></div>` : esc(p.filename)}</td>
         <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}</td>
-        <td>${p.show_in_nav ? esc(p.nav_label || p.title) : '<span class="muted">ซ่อน</span>'}</td>
+        <td>${p.show_in_nav && !p.collection ? esc(p.nav_label || p.title) : '<span class="muted">ซ่อน</span>'}</td>
+        <td><button class="seo-score sm" data-seo="${p.id}" title="ดูรายละเอียด SEO">…</button></td>
         <td class="muted small">${ago(p.updated_at)}</td>
         <td><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
           <a class="btn sm primary" href="${p.edit_url}">ออกแบบ</a>
@@ -533,6 +656,38 @@
         catch (err) { toast(err.message, 'err'); }
       });
     });
+  }
+
+  let SEO = null;
+  const seoClass = n => n >= 80 ? 'ok' : n >= 50 ? 'warn' : 'err';
+  const checkRow = c => `<div class="seo-check ${c.level}"><span class="seo-dot"></span><div><b>${esc(c.title)}</b>${c.tip ? `<div class="small muted">${esc(c.tip)}</div>` : ''}</div></div>`;
+  async function loadSeo() {
+    try { SEO = await api(`/api/sites/${site.id}/seo`); } catch (e) { return; }
+    const total = document.getElementById('seo-total');
+    if (!total) return;
+    total.textContent = SEO.score; total.className = 'seo-score ' + seoClass(SEO.score);
+    document.getElementById('seo-site').innerHTML = SEO.site.map(checkRow).join('') +
+      `<div class="row" style="margin-top:10px"><a class="btn sm" href="/preview/${esc(site.slug)}/sitemap.xml" target="_blank">sitemap.xml</a><a class="btn sm" href="/preview/${esc(site.slug)}/robots.txt" target="_blank">robots.txt</a></div>`;
+    SEO.pages.forEach(r => {
+      const b = document.querySelector(`[data-seo="${r.page}"]`);
+      if (!b) return;
+      b.textContent = r.score; b.className = 'seo-score sm ' + seoClass(r.score);
+      b.onclick = () => seoModal(r);
+    });
+  }
+  function seoModal(r) {
+    const p = D.pages.find(x => x.id === r.page);
+    const m = modal(`<header><h2>SEO · ${esc(r.title)}</h2><span class="seo-score ${seoClass(r.score)}">${r.score}</span></header>
+      <div class="body">${sharePreview(r.preview)}<div style="margin-top:14px">${r.checks.map(checkRow).join('')}</div></div>
+      <footer><button class="btn" data-close>ปิด</button><button class="btn primary" data-fix>แก้ไขชื่อเรื่อง & คำอธิบาย</button></footer>`, { wide: true });
+    m.el.querySelector('[data-fix]').onclick = () => { m.close(); pageModal(p); };
+  }
+  // How a link looks when shared on Facebook / LINE.
+  function sharePreview(pv) {
+    const host = (site.base_url || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') || (site.slug + '.example');
+    const img = pv.image && !pv.image.includes('{{') ? pv.image : '';
+    return `<div class="share-card">${img ? `<div class="share-img" style="background-image:url('${encodeURI(img)}')"></div>` : '<div class="share-img empty">ไม่มีรูปตอนแชร์</div>'}
+      <div class="share-meta"><div class="share-host">${esc(host.toUpperCase())}</div><div class="share-title">${esc(pv.title || '')}</div><div class="share-desc">${esc(pv.description || '')}</div></div></div>`;
   }
 
   function pageMenu(p, anchor) {
@@ -586,6 +741,11 @@
           <label class="check"><input type="checkbox" name="is_home" ${p.is_home ? 'checked disabled' : ''}>ตั้งเป็นหน้าแรก</label>
         </div>
         <label class="field"><span>ชื่อในเมนู <small>(เว้นว่าง = ใช้ชื่อหน้า)</small></span><input class="input" name="nav_label" value="${esc(p.nav_label)}" maxlength="100"></label>
+        ${(D.collections || []).length ? `<div class="grid g2" style="gap:0 16px">
+          <label class="field"><span>หน้ารายละเอียดของชุดข้อมูล <small>(หนึ่งหน้าต่อหนึ่งแถว)</small></span><select class="input" name="collection" ${p.is_home ? 'disabled' : ''}>
+            <option value="">— หน้าปกติ —</option>${D.collections.map(c => `<option value="${c.id}" ${c.id === p.collection ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+            <small>ลิงก์จะเป็น <code>${esc(p.slug || 'ชื่อหน้า')}/ชื่อแถว.html</code> · ใช้ <code>{{ฟิลด์}}</code> ในหน้าและในชื่อเรื่อง/คำอธิบายได้</small></label>
+          <label class="field" id="df-wrap"><span>ใช้ฟิลด์ไหนตั้งชื่อลิงก์</span><select class="input" name="detail_field"></select></label></div>` : ''}
         ${isNew ? `<div class="sect-title">รูปแบบเริ่มต้น</div><div class="grid g3" style="gap:10px" id="layouts">${layouts}</div>` : ''}
         <div class="sect-title">SEO & การแชร์</div>
         <label class="field"><span>ชื่อเรื่องบน Google <small>(เว้นว่าง = “ชื่อหน้า | ชื่อเว็บ”)</small></span><input class="input" name="seo_title" value="${esc(p.seo_title)}" maxlength="200"></label>
@@ -595,6 +755,7 @@
           <label class="field"><span>รูปตอนแชร์ (og:image)</span><div class="row" style="flex-wrap:nowrap"><input class="input" name="og_image" value="${esc(p.og_image)}" placeholder="/media/..."><button class="btn sm" type="button" data-pick="og_image">เลือก</button></div></label>
         </div>
         <label class="check"><input type="checkbox" name="noindex" ${p.noindex ? 'checked' : ''}>ไม่ให้เครื่องมือค้นหาเก็บหน้านี้ (noindex)</label>
+        <div class="sect-title">ตัวอย่างตอนแชร์ลง Facebook / LINE</div><div id="share-live"></div>
         <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">โค้ดเพิ่มเติม (ขั้นสูง)</summary><div style="margin-top:12px">
           <label class="field"><span>โค้ดใน &lt;head&gt;</span><textarea class="input code" name="head_code" placeholder="<meta ...> หรือ Google Analytics">${esc(p.head_code)}</textarea></label>
           <label class="field"><span>CSS เฉพาะหน้านี้</span><textarea class="input code" name="custom_css">${esc(p.custom_css)}</textarea></label>
@@ -610,6 +771,18 @@
     const desc = m.el.querySelector('[name=seo_description]'), cnt = m.el.querySelector('#desc-count');
     const upd = () => cnt.textContent = `${desc.value.length}/160 ตัวอักษรแนะนำ`;
     desc.addEventListener('input', upd); upd();
+    const live = () => {
+      const t = m.el.querySelector('[name=seo_title]').value || `${title.value || 'ชื่อหน้า'} | ${site.name}`;
+      m.el.querySelector('#share-live').innerHTML = sharePreview({ title: t, description: desc.value || site.description, image: m.el.querySelector('[name=og_image]').value });
+    };
+    ['seo_title', 'seo_description', 'og_image', 'title'].forEach(n => m.el.querySelector(`[name=${n}]`).addEventListener('input', live)); live();
+    const colSel = m.el.querySelector('[name=collection]'), dfSel = m.el.querySelector('[name=detail_field]');
+    const drawDf = () => {
+      const c = (D.collections || []).find(x => x.id === +colSel.value);
+      m.el.querySelector('#df-wrap').classList.toggle('hidden', !c);
+      if (c) dfSel.innerHTML = `<option value="">อัตโนมัติ (slug / ชื่อ)</option>` + c.fields.map(f => `<option value="${esc(f.name)}" ${f.name === p.detail_field ? 'selected' : ''}>${esc(f.label)} (${esc(f.name)})</option>`).join('');
+    };
+    if (colSel) { colSel.onchange = drawDf; drawDf(); }
     m.el.querySelectorAll('#layouts .opt').forEach(o => o.addEventListener('click', () => {
       m.el.querySelectorAll('#layouts .opt').forEach(x => x.classList.remove('sel')); o.classList.add('sel');
     }));
@@ -617,6 +790,7 @@
     m.el.querySelector('[data-save]').onclick = async () => {
       const d = formData(m.el);
       if (!p.is_home && !d.is_home) delete d.is_home;
+      if (colSel && colSel.disabled) { delete d.collection; delete d.detail_field; }
       try {
         const r = isNew ? await api(`/api/sites/${site.id}/pages/create`, d) : await api(`/api/pages/${p.id}/update`, d);
         if (isNew) {
@@ -816,6 +990,8 @@
         <label class="check"><input type="checkbox" name="use_base_styles" ${site.use_base_styles ? 'checked' : ''}>ใช้สไตล์พื้นฐาน & ฟอนต์ของธีม <span class="muted small">(ปิดไว้สำหรับเว็บที่นำเข้า)</span></label>
         <label class="field"><span>ที่ส่งฟอร์มเมื่อส่งออกเป็นไฟล์ <small>(ไม่บังคับ)</small></span><input class="input mono" name="form_endpoint" value="${esc(site.form_endpoint)}" placeholder="เช่น http://192.168.1.10:8090/${esc(site.slug)}/__form">
           <small>เว้นว่างไว้ = ฟอร์มส่งเข้า BuildWeb ตอนโฮสต์ และใช้ bw-form.php ตอนส่งออกไป XAMPP</small></label>
+        <label class="field"><span>ที่อยู่เว็บจริง <small>(ไม่บังคับ)</small></span><input class="input mono" name="base_url" value="${esc(site.base_url || '')}" placeholder="https://myshop.com/">
+          <small>ใช้สร้าง sitemap.xml, RSS และลิงก์ตอนแชร์ — ตั้งให้เองเมื่อเผยแพร่ด้วยปุ่มเดียวครั้งแรก</small></label>
       </div>
       <div class="card pad"><h2>ธีม</h2><div class="hint">สีและฟอนต์ที่ใช้ทั่วทั้งเว็บ — บล็อกสำเร็จรูปทุกอันจะเปลี่ยนตาม</div>
         <div class="row" style="margin-bottom:14px">${PALETTES.map(([n, p], i) => `<button class="btn sm" data-pal="${i}"><span style="display:inline-flex;gap:2px">${['primary', 'secondary', 'accent'].map(k => `<i style="width:12px;height:12px;border-radius:4px;background:${p[k]}"></i>`).join('')}</span>${n}</button>`).join('')}</div>
@@ -827,6 +1003,7 @@
           <label class="field"><span>ความกว้างเนื้อหาสูงสุด</span><select class="input" data-theme="max_width">${['960px', '1040px', '1140px', '1280px', '1440px'].map(v => `<option ${v === t.max_width ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         </div>
       </div>
+      <div class="card pad" style="grid-column:1/-1" id="contact-card"></div>
       <div class="card pad" style="grid-column:1/-1"><h2>โค้ดเพิ่มเติมทุกหน้า</h2><div class="hint">เช่น Google Analytics, Facebook Pixel, CSS/JS ของคุณเอง</div>
         <div class="grid g3"><label class="field"><span>โค้ดใน &lt;head&gt;</span><textarea class="input code" name="head_code">${esc(site.head_code)}</textarea></label>
         <label class="field"><span>CSS</span><textarea class="input code" name="custom_css">${esc(site.custom_css)}</textarea></label>
@@ -848,9 +1025,11 @@
       });
     });
     document.getElementById('pick-fav').onclick = () => pickAsset(u => root.querySelector('[name=favicon]').value = u);
+    const contact = contactEditor(document.getElementById('contact-card'), theme);
     document.getElementById('save-site').onclick = async () => {
       const d = formData(root);
       d.theme = theme;
+      d.contact = contact();
       try { const r = await api(`/api/sites/${site.id}/update`, d); Object.assign(site, r.site); toast('บันทึกแล้ว', 'ok'); }
       catch (e) { showFieldError(root, e); }
     };
@@ -861,6 +1040,213 @@
       if (!await confirmBox('ลบเว็บไซต์', `ลบ “${esc(site.name)}” พร้อมทุกหน้า ไฟล์ และข้อมูลฟอร์มถาวร — ย้อนกลับไม่ได้`, { ok: 'ลบถาวร', danger: true })) return;
       try { await api(`/api/sites/${site.id}/delete`, {}); location.href = '/'; } catch (e) { toast(e.message, 'err'); }
     };
+  }
+
+  // ---------------------------------------------------------------- statistics
+  let statDays = 30;
+  async function renderStats() {
+    root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    let r;
+    try { r = await api(`/api/sites/${site.id}/stats?days=${statDays}`); } catch (e) { root.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    const s = r.stats, t = s.total, num = n => Number(n).toLocaleString('th-TH');
+    const trend = t.trend == null ? '' : `<small class="${t.trend >= 0 ? 'up' : 'down'}">${t.trend >= 0 ? '▲' : '▼'} ${Math.abs(t.trend)}%</small>`;
+    root.innerHTML = `<div class="row between" style="margin-bottom:14px">
+        <div class="muted">นับจากเว็บที่โฮสต์ด้วยเครื่องนี้ (LAN · พอร์ตของเว็บ · Tailscale) — ไม่ใช้คุกกี้ ไม่ส่งข้อมูลออกไปไหน ไม่นับบอทและหน้าตัวอย่าง</div>
+        <div class="seg">${[7, 30, 90].map(d => `<button data-d="${d}" class="${d === statDays ? 'on' : ''}">${d} วัน</button>`).join('')}</div></div>
+      ${r.hosting ? '' : `<div class="alert warn" style="margin-bottom:14px">โฮสติ้งปิดอยู่ จึงยังไม่มีผู้เข้าชมใหม่ — <a href="/settings/">เปิดโฮสติ้ง</a> · เว็บที่เผยแพร่ไป GitHub/Netlify/FTP นับที่นี่ไม่ได้</div>`}
+      <div class="grid g4" style="margin-bottom:16px">
+        <div class="card stat"><span>การเข้าชม ${statDays} วัน</span><b>${num(t.views)} ${trend}</b></div>
+        <div class="card stat"><span>ผู้เข้าชม (ไม่ซ้ำต่อวัน)</span><b>${num(t.visitors)}</b></div>
+        <div class="card stat"><span>วันนี้</span><b>${num(t.today)}</b></div>
+        <div class="card stat"><span>เฉลี่ยต่อวัน</span><b>${num(Math.round(t.views / statDays))}</b></div></div>
+      <div class="card pad" style="margin-bottom:16px"><div class="row between"><h2>การเข้าชมรายวัน</h2>
+        <div class="chart-legend"><span><i class="lg-bar"></i>การเข้าชม</span><span><i class="lg-line"></i>ผู้เข้าชม</span></div></div>
+        <div class="chart" id="st-chart"></div>
+        <details class="small" style="margin-top:8px"><summary class="muted" style="cursor:pointer">ดูเป็นตาราง</summary>
+          <table class="table" style="margin-top:8px"><thead><tr><th>วันที่</th><th class="num">การเข้าชม</th><th class="num">ผู้เข้าชม</th></tr></thead>
+          <tbody>${s.days.slice().reverse().map(d => `<tr><td>${dayLabel(d.day, true)}</td><td class="num">${num(d.views)}</td><td class="num">${num(d.visitors)}</td></tr>`).join('')}</tbody></table></details></div>
+      <div class="grid g3">
+        ${topList('หน้าที่คนดูมากที่สุด', s.pages, k => k === '/' ? '/ (หน้าแรก)' : k)}
+        ${topList('มาจากที่ไหน', s.refs, k => k || 'เข้าตรง / ไม่ทราบ')}
+        ${topList('อุปกรณ์', s.devices, k => ({ mobile: 'มือถือ / แท็บเล็ต', desktop: 'คอมพิวเตอร์' }[k] || k))}</div>`;
+    root.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { statDays = +b.dataset.d; renderStats(); });
+    drawChart(document.getElementById('st-chart'), s.days);
+  }
+  function dayLabel(iso, long) {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('th-TH', long ? { day: 'numeric', month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' });
+  }
+  function topList(title, items, label) {
+    const max = Math.max(1, ...items.map(x => x.count));
+    return `<div class="card pad"><h2 style="margin-bottom:10px">${title}</h2>${items.length ? items.map(x => `<div class="top-row">
+        <div class="row between"><span class="top-k" title="${esc(label(x.key))}">${esc(label(x.key))}</span><b class="mono">${Number(x.count).toLocaleString('th-TH')}</b></div>
+        <div class="top-bar"><i style="width:${Math.max(2, x.count / max * 100)}%"></i></div></div>`).join('') : '<div class="muted small">ยังไม่มีข้อมูล</div>'}</div>`;
+  }
+  // Bars = views, line = visitors (same unit, one axis). Hover shows the day's numbers.
+  function drawChart(box, days) {
+    const W = Math.max(320, box.clientWidth), H = 220, pad = { l: 36, r: 8, t: 10, b: 24 };
+    const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    const max = Math.max(4, ...days.map(d => d.views));
+    const step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step;
+    const y = v => pad.t + ih - v / nice * ih, bw = iw / days.length, gap = Math.min(2, bw * .25);
+    const ticks = [0, .25, .5, .75, 1].map(f => Math.round(nice * f));
+    const every = Math.ceil(days.length / 8);
+    const line = days.map((d, i) => `${i ? 'L' : 'M'}${(pad.l + i * bw + bw / 2).toFixed(1)},${y(d.visitors).toFixed(1)}`).join('');
+    box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟการเข้าชมรายวัน">
+      ${[...new Set(ticks)].map(v => `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${v.toLocaleString('th-TH')}</text>`).join('')}
+      ${days.map((d, i) => { const h = ih - (y(d.views) - pad.t); const x = pad.l + i * bw + gap / 2, w = Math.max(1, bw - gap);
+        return d.views ? `<path class="bar" d="M${x},${pad.t + ih}V${y(d.views) + Math.min(4, h)}q0,-${Math.min(4, h)} ${Math.min(4, w / 2)},-${Math.min(4, h)}H${x + w - Math.min(4, w / 2)}q${Math.min(4, w / 2)},0 ${Math.min(4, w / 2)},${Math.min(4, h)}V${pad.t + ih}z"/>` : ''; }).join('')}
+      <path class="vline" d="${line}"/>
+      ${days.map((d, i) => i % every === 0 || (i === days.length - 1 && i % every >= every / 2) ? `<text class="ax" x="${pad.l + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${dayLabel(d.day)}</text>` : '').join('')}
+      <line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ih}" style="display:none"/>
+      ${days.map((d, i) => `<rect class="hit" data-i="${i}" x="${pad.l + i * bw}" y="${pad.t}" width="${bw}" height="${ih}"/>`).join('')}
+    </svg><div class="chart-tip" hidden></div>`;
+    const tip = box.querySelector('.chart-tip'), cross = box.querySelector('.cross');
+    box.querySelectorAll('.hit').forEach(r => {
+      r.addEventListener('mouseenter', () => {
+        const d = days[+r.dataset.i], cx = +r.getAttribute('x') + bw / 2;
+        cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.style.display = '';
+        tip.innerHTML = `<b>${dayLabel(d.day, true)}</b><div><i class="lg-bar"></i>การเข้าชม <b>${d.views.toLocaleString('th-TH')}</b></div><div><i class="lg-line"></i>ผู้เข้าชม <b>${d.visitors.toLocaleString('th-TH')}</b></div>`;
+        tip.hidden = false;
+        tip.style.left = Math.min(W - 170, Math.max(0, cx + 12)) + 'px';
+      });
+    });
+    box.querySelector('svg').addEventListener('mouseleave', () => { tip.hidden = true; cross.style.display = 'none'; });
+  }
+
+  // ---------------------------------------------------------------- floating contact buttons
+  const CHANNELS = [
+    ['phone', 'โทร', 'เบอร์โทร เช่น 081-234-5678', ''],
+    ['line', 'LINE', '@ร้านของคุณ (OA) หรือ LINE ID หรือลิงก์', '#06c755'],
+    ['messenger', 'Messenger', 'ชื่อเพจ เช่น mycafe หรือ m.me/...', 'linear-gradient(45deg,#0a7cff,#a033ff 60%,#ff5c87)'],
+    ['whatsapp', 'WhatsApp', 'เบอร์ เช่น 0812345678', '#25d366'],
+    ['facebook', 'Facebook', 'ชื่อเพจ หรือลิงก์', '#1877f2'],
+    ['email', 'อีเมล', 'hello@example.com', '#f97316'],
+    ['map', 'แผนที่', 'ชื่อร้าน/ที่อยู่ หรือลิงก์ Google Maps', '#ea4335'],
+  ];
+  function contactEditor(box, theme) {
+    const c = { ...site.contact };
+    box.innerHTML = `<div class="row between"><div><h2>ปุ่มติดต่อลอย</h2><div class="hint" style="margin:0">ปุ่มโทร / LINE / Messenger / WhatsApp มุมจอทุกหน้า แบบที่ร้านค้านิยม</div></div>
+        <label class="switch" title="เปิด/ปิด"><input type="checkbox" data-ct="enabled" ${c.enabled ? 'checked' : ''}><span></span></label></div>
+      <div class="contact-layout" style="margin-top:14px"><div>
+        <div class="grid g2" style="gap:0 14px">${CHANNELS.map(([k, l, ph]) => `<label class="field"><span>${l}</span><input class="input" data-ct="${k}" value="${esc(c[k] || '')}" placeholder="${esc(ph)}"></label>`).join('')}</div>
+        <div class="grid g3" style="gap:0 14px">
+          <label class="field"><span>รูปแบบ</span><select class="input" data-ct="style"><option value="stack">ปุ่มเรียงกัน</option><option value="expand">ปุ่มเดียว กดแล้วกาง</option><option value="bar">แถบล่างบนมือถือ</option></select></label>
+          <label class="field"><span>ตำแหน่ง</span><select class="input" data-ct="position"><option value="right">มุมขวาล่าง</option><option value="left">มุมซ้ายล่าง</option></select></label>
+          <label class="field"><span>ข้อความปุ่มหลัก</span><input class="input" data-ct="label" value="${esc(c.label || 'ติดต่อเรา')}"></label></div>
+        <div class="row" style="gap:20px"><label class="check"><input type="checkbox" data-ct="labels" ${c.labels ? 'checked' : ''}>แสดงชื่อเมื่อชี้</label>
+          <label class="check"><input type="checkbox" data-ct="pulse" ${c.pulse ? 'checked' : ''}>เอฟเฟกต์กระพริบเบาๆ</label></div>
+      </div><div><div class="small muted" style="margin-bottom:6px">ตัวอย่าง</div><div class="fab-preview" id="fab-preview"></div></div></div>`;
+    box.querySelector('[data-ct=style]').value = c.style || 'stack';
+    box.querySelector('[data-ct=position]').value = c.position || 'right';
+    const read = () => {
+      const out = { ...c };
+      box.querySelectorAll('[data-ct]').forEach(el => out[el.dataset.ct] = el.type === 'checkbox' ? el.checked : el.value);
+      return out;
+    };
+    const draw = () => {
+      const v = read(), on = CHANNELS.filter(([k]) => (v[k] || '').trim());
+      const pv = document.getElementById('fab-preview');
+      const mark = { phone: BW_ICON('phone', 15), email: BW_ICON('mail', 15), map: BW_ICON('pin', 15), line: 'LINE', messenger: 'M', whatsapp: 'W', facebook: 'f' };
+      const btn = ([k, l, , col]) => `<span class="pv-btn" style="background:${col || theme.primary};font-size:${k === 'line' ? 8 : 12}px" title="${l}">${mark[k]}</span>`;
+      let inner = '';
+      if (!v.enabled) inner = '<div class="pv-off">ปิดอยู่</div>';
+      else if (!on.length) inner = '<div class="pv-off">ใส่ช่องทางติดต่ออย่างน้อยหนึ่งช่อง</div>';
+      else if (v.style === 'bar') inner = `<div class="pv-bar">${on.map(ch => `<span style="background:${ch[3] || theme.primary}">${ch[1]}</span>`).join('')}</div>`;
+      else if (v.style === 'expand') inner = `<div class="pv-stack ${v.position}">${on.map(btn).join('')}<span class="pv-btn main" style="background:${theme.primary}">${BW_ICON('chat', 16)}</span></div>`;
+      else inner = `<div class="pv-stack ${v.position}">${on.map(btn).join('')}</div>`;
+      pv.innerHTML = `<div class="pv-page"><i></i><i></i><i></i></div>${inner}`;
+    };
+    box.querySelectorAll('[data-ct]').forEach(el => el.addEventListener('input', draw));
+    box.querySelectorAll('select[data-ct],input[type=checkbox][data-ct]').forEach(el => el.addEventListener('change', draw));
+    draw();
+    return read;
+  }
+
+  // ---------------------------------------------------------------- one-click publish
+  const PUB_TARGETS = [
+    ['github', 'GitHub Pages', 'ฟรี · ได้ลิงก์ ชื่อ.github.io · ใช้กับ Cloudflare Pages ได้', 'github'],
+    ['netlify', 'Netlify', 'ฟรี · ได้ลิงก์ ชื่อ.netlify.app · ผูกโดเมนเองได้', 'cloud'],
+    ['ftp', 'FTP / โฮสติ้งที่เช่า', 'cPanel, Plesk, DirectAdmin หรือโฮสต์ใดก็ได้', 'server'],
+  ];
+  let pubSel = null;
+  async function drawPublish() {
+    const box = document.getElementById('pub-card');
+    let P;
+    try { P = await api(`/api/sites/${site.id}/publish`); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    try { pubSel = pubSel || localStorage.getItem('bw-pub-' + site.id); } catch (e) { }
+    pubSel = pubSel || (PUB_TARGETS.find(([k]) => (P.publish[k] || {}).last) || PUB_TARGETS[0])[0];
+    box.innerHTML = `<div class="row between"><div><h2>เผยแพร่ขึ้นอินเทอร์เน็ตด้วยปุ่มเดียว</h2>
+        <div class="hint" style="margin:0">อัปโหลดเว็บไปโฮสต์ฟรีหรือโฮสต์ที่เช่าไว้ — เว็บออนไลน์ตลอดโดยไม่ต้องเปิดเครื่องนี้ทิ้งไว้</div></div>
+        ${P.base_url ? `<a class="btn sm" href="${esc(P.base_url)}" target="_blank">${BW_ICON('external')} ${esc(P.base_url)}</a>` : ''}</div>
+      <div class="pub-tiles">${PUB_TARGETS.map(([k, l, d, ic]) => { const last = (P.publish[k] || {}).last;
+        return `<button class="pub-tile ${k === pubSel ? 'sel' : ''}" data-t="${k}">${BW_ICON(ic, 20)}<div><b>${l}</b><span>${d}</span>
+          ${last ? `<span class="badge ok" style="margin-top:6px">เผยแพร่ ${ago(last.at)}</span>` : ''}</div></button>`; }).join('')}</div>
+      <div id="pub-form"></div><div id="pub-log"></div>`;
+    box.querySelectorAll('.pub-tile').forEach(b => b.onclick = () => {
+      pubSel = b.dataset.t; try { localStorage.setItem('bw-pub-' + site.id, pubSel); } catch (e) { }
+      box.querySelectorAll('.pub-tile').forEach(x => x.classList.toggle('sel', x === b)); drawPubForm(P);
+    });
+    drawPubForm(P);
+  }
+  function drawPubForm(P) {
+    const t = pubSel, cfg = P.publish[t] || {}, f = document.getElementById('pub-form');
+    const tokenField = (name, link, hint) => `<label class="field"><span>${name} token ${P.tokens[t] ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span>
+      <input class="input mono" type="password" name="${t}_token" placeholder="${P.tokens[t] ? 'เว้นว่าง = ใช้ token เดิม' : 'วาง token ที่นี่'}" autocomplete="off">
+      <small>${hint} — <a href="${link}" target="_blank">สร้าง token</a> · เก็บไว้ในเครื่องนี้เท่านั้น</small></label>`;
+    let html = '';
+    if (t === 'github') html = `${tokenField('GitHub', 'https://github.com/settings/tokens/new?scopes=repo&description=BuildWeb', 'ใช้ classic token สิทธิ์ <code>repo</code>')}
+      <div class="grid g3" style="gap:0 14px"><label class="field"><span>Repo</span><input class="input mono" name="repo" value="${esc(cfg.repo || site.slug)}" placeholder="ชื่อ หรือ เจ้าของ/ชื่อ"><small>ยังไม่มี = สร้างให้ (repo สาธารณะ)</small></label>
+        <label class="field"><span>Branch</span><input class="input mono" name="branch" value="${esc(cfg.branch || 'gh-pages')}"><small>ไฟล์ใน branch นี้ถูกแทนที่ทั้งหมด</small></label>
+        <label class="field"><span>โดเมนของคุณ <small>(ไม่บังคับ)</small></span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://www.myshop.com/"></label></div>
+      <label class="check"><input type="checkbox" name="pages" ${cfg.pages === false ? '' : 'checked'}>เปิด GitHub Pages ให้อัตโนมัติ</label>
+      <div class="small muted">ใช้ Cloudflare Pages / Vercel: เชื่อม repo นี้ในหน้าเว็บของบริการนั้นครั้งเดียว แล้วทุกครั้งที่กดเผยแพร่ เว็บจะอัปเดตเอง</div>`;
+    if (t === 'netlify') html = `${tokenField('Netlify', 'https://app.netlify.com/user/applications#personal-access-tokens', 'Personal access token')}
+      <div class="grid g2" style="gap:0 14px"><label class="field"><span>ชื่อเว็บบน Netlify</span><input class="input mono" name="name" value="${esc(cfg.name || site.slug)}" ${cfg.site_id ? 'disabled' : ''}><small>${cfg.site_id ? 'ผูกกับเว็บ Netlify แล้ว' : 'ได้ลิงก์ <code>ชื่อ.netlify.app</code> (ถ้าชื่อซ้ำจะสุ่มให้)'}</small></label>
+        <label class="field"><span>โดเมนของคุณ <small>(ไม่บังคับ)</small></span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://www.myshop.com/"></label></div>`;
+    if (t === 'ftp') html = `<div class="grid g3" style="gap:0 14px"><label class="field"><span>Host</span><input class="input mono" name="host" value="${esc(cfg.host || '')}" placeholder="ftp.myshop.com"></label>
+        <label class="field"><span>Port</span><input class="input mono" name="port" type="number" value="${esc(cfg.port || 21)}"></label>
+        <label class="field"><span>โฟลเดอร์ปลายทาง</span><input class="input mono" name="path" value="${esc(cfg.path ?? 'public_html')}"></label>
+        <label class="field"><span>ชื่อผู้ใช้</span><input class="input mono" name="user" value="${esc(cfg.user || '')}"></label>
+        <label class="field"><span>รหัสผ่าน ${cfg.password_set ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span><input class="input mono" type="password" name="password" placeholder="${cfg.password_set ? 'เว้นว่าง = ใช้รหัสเดิม' : ''}" autocomplete="off"></label>
+        <label class="field"><span>ที่อยู่เว็บ</span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://www.myshop.com/"></label></div>
+      <label class="check"><input type="checkbox" name="tls" ${cfg.tls ? 'checked' : ''}>ใช้ FTPS (เข้ารหัส) — แนะนำถ้าโฮสต์รองรับ</label>`;
+    const last = cfg.last;
+    f.innerHTML = `<div class="pub-form">${html}
+      ${site.form_endpoint ? '' : '<div class="alert info" style="margin-top:10px">ฟอร์มบนเว็บที่เผยแพร่จะส่งข้อมูลได้เมื่อตั้ง “ที่ส่งฟอร์ม” ในแท็บตั้งค่าเว็บ (เช่นลิงก์ Tailscale Funnel ของเครื่องนี้)</div>'}
+      <div class="row" style="margin-top:12px"><button class="btn primary" id="pub-go">${BW_ICON('cloud')} เผยแพร่เลย</button><button class="btn" id="pub-save">บันทึกการตั้งค่า</button>
+        ${t === 'ftp' ? '<button class="btn" id="pub-test">ทดสอบการเชื่อมต่อ</button>' : ''}
+        ${last ? `<span class="small muted" style="margin-left:auto">ล่าสุด ${when(last.at)} · ${last.files} ไฟล์ ${last.url ? `· <a href="${esc(last.url)}" target="_blank">${esc(last.url)}</a>` : ''}</span>` : ''}</div></div>`;
+    const collect = () => { const d = formData(f); d.target = t; return d; };
+    const save = async () => { const r = await api(`/api/sites/${site.id}/publish`, collect()); Object.assign(P, r); return r; };
+    document.getElementById('pub-save').onclick = async () => { try { await save(); toast('บันทึกแล้ว', 'ok'); drawPublish(); } catch (e) { showFieldError(f, e); } };
+    const test = document.getElementById('pub-test');
+    if (test) test.onclick = async () => { try { await save(); const r = await api(`/api/sites/${site.id}/publish/test-ftp`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    document.getElementById('pub-go').onclick = async (e) => {
+      const btn = e.currentTarget; btn.disabled = true;
+      try { await save(); const r = await api(`/api/sites/${site.id}/publish/${t}`, {}); watchJob(r.job); }
+      catch (err) { showFieldError(f, err); btn.disabled = false; }
+    };
+  }
+  function watchJob(job) {
+    const out = document.getElementById('pub-log');
+    const draw = j => {
+      out.innerHTML = `<div class="log" style="margin-top:14px;max-height:220px;overflow:auto">${j.log.map(esc).join('\n')}</div>
+        ${j.state === 'done' ? `<div class="alert ok" style="margin-top:10px"><div>${BW_ICON('check')} เผยแพร่แล้ว${j.url ? ` — <a href="${esc(j.url)}" target="_blank">${esc(j.url)}</a><div class="small muted">ครั้งแรกอาจใช้เวลา 1–2 นาทีก่อนเปิดได้</div>` : ''}</div></div>` : ''}
+        ${j.state === 'error' ? `<div class="alert err" style="margin-top:10px">${esc(j.error)}</div>` : ''}`;
+      const lg = out.querySelector('.log'); lg.scrollTop = lg.scrollHeight;
+    };
+    draw(job);
+    const timer = setInterval(async () => {
+      try {
+        const r = await api(`/api/publish/jobs/${job.id}`);
+        draw(r.job);
+        if (r.job.state !== 'running') {
+          clearInterval(timer);
+          const go = document.getElementById('pub-go'); if (go) go.disabled = false;
+          if (r.job.state === 'done') { toast('เผยแพร่เรียบร้อย', 'ok'); const keep = out.innerHTML; await drawPublish(); document.getElementById('pub-log').innerHTML = keep; }
+        }
+      } catch (e) { clearInterval(timer); toast(e.message, 'err'); }
+    }, 1000);
   }
 
   // ---------------------------------------------------------------- export
@@ -877,7 +1263,7 @@
     const h = D.hosting;
     const target = ex.last_target || 'downloads';
     const opt = (val, title, desc, disabled) => `<label class="opt ${val === target ? 'sel' : ''}" ${disabled ? 'style="opacity:.5"' : ''}><input type="radio" name="target" value="${val}" ${val === target ? 'checked' : ''} ${disabled ? 'disabled' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`;
-    root.innerHTML = `<div class="grid g2">
+    root.innerHTML = `<div class="card pad" id="pub-card" style="margin-bottom:16px"><div class="muted">กำลังโหลด…</div></div><div class="grid g2">
       <div class="card pad"><h2>ส่งออกเป็นไฟล์ HTML / CSS / JS</h2><div class="hint">ได้โฟลเดอร์เว็บที่ใช้งานได้ทันที เปิดจากเครื่อง อัปขึ้นโฮสต์ใดก็ได้</div>
         ${opt('downloads', 'โฟลเดอร์ดาวน์โหลด', '~/Downloads/BuildWeb/' + esc(site.slug))}
         ${opt('xampp', 'XAMPP htdocs', D.xampp.htdocs ? `${esc(D.xampp.htdocs)}/${esc(site.slug)} → เปิดที่ http://localhost/${esc(site.slug)}/` : 'ไม่พบ XAMPP ในเครื่อง', !D.xampp.htdocs)}
@@ -900,6 +1286,7 @@
         <div class="row"><code style="flex:1">${location.origin}/preview/${esc(site.slug)}/</code><a class="btn sm" href="/preview/${esc(site.slug)}/" target="_blank">เปิด</a></div>
         <div class="muted small" style="margin-top:6px">หน้าตัวอย่างแสดงหน้าฉบับร่างด้วย และเปิดได้เฉพาะเครื่องนี้</div>
       </div></div>`;
+    drawPublish();
     const custom = root.querySelector('[name=custom_path]');
     root.querySelectorAll('[name=target]').forEach(r => r.addEventListener('change', () => {
       root.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o.querySelector('input').checked));

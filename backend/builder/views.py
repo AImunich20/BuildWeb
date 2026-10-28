@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from buildweb import config
 
-from . import dbtools, render as renderer, sections, services
+from . import dbtools, generate, render as renderer, sections, services, stats
 from .render import fonts_url
 from .api import page_json, site_json
 from .hosting import server as hosting
@@ -24,14 +24,17 @@ def dashboard(request):
     cards = []
     for s in sites:
         home = s.home_page()
+        spark = stats.sparkline(s)
         cards.append({"site": s, "home": home, "pages": s.pages.count(),
-                      "unread": s.submissions.filter(is_read=False).count()})
+                      "unread": s.submissions.filter(is_read=False).count(),
+                      "views": sum(spark[-7:]), "spark": spark_svg(spark)})
     return render(request, "builder/dashboard.html", {
         "cards": cards,
         "templates": sections.TEMPLATES,
         "stats": {
             "sites": sites.count(), "pages": Page.objects.count(),
             "unread": FormSubmission.objects.filter(is_read=False).count(),
+            "views": sum(c["views"] for c in cards),
         },
         "hosting": hosting.status(),
         "site_choices": [{"id": s.id, "name": s.name} for s in sites],
@@ -39,9 +42,21 @@ def dashboard(request):
     })
 
 
+def spark_svg(values, w=120, h=28):
+    """Tiny inline line chart of views per day for a dashboard card."""
+    if not any(values):
+        return ""
+    top = max(values)
+    step = w / max(1, len(values) - 1)
+    pts = " ".join(f"{i * step:.1f},{h - 2 - (v / top) * (h - 4):.1f}" for i, v in enumerate(values))
+    return (f'<svg class="spark" viewBox="0 0 {w} {h}" width="{w}" height="{h}" aria-hidden="true">'
+            f'<polyline points="{pts}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" '
+            f'stroke-linecap="round"/></svg>')
+
+
 def site_manage(request, site_id, tab="pages"):
     site = get_object_or_404(Site, pk=site_id)
-    if tab not in ("pages", "data", "files", "forms", "settings", "export"):
+    if tab not in ("pages", "data", "files", "forms", "stats", "settings", "export"):
         tab = "pages"
     data = {
         "site": site_json(site),
@@ -50,6 +65,7 @@ def site_manage(request, site_id, tab="pages"):
         "hosting": hosting.status(),
         "xampp": dbtools.xampp_info(),
         "export": config.load()["export"],
+        "collections": [{"id": c.id, "name": c.name, "slug": c.slug, "fields": c.fields} for c in site.collections.all()],
     }
     return render(request, "builder/site.html", {
         "site": site, "tab": tab, "data_json": dump(data),
@@ -84,7 +100,9 @@ def editor_page_data(site):
         "preview_base": f"/preview/{site.slug}/",
         "fonts_url": fonts_url(site),
         "layouts": sections.PAGE_LAYOUTS,
-        "collections": [{"id": c.id, "slug": c.slug, "name": c.name, "fields": c.fields, "mode": c.mode}
+        "collections": [{"id": c.id, "slug": c.slug, "name": c.name, "fields": c.fields, "mode": c.mode,
+                         "forms": c.opt("forms"), "form_html": generate.form_html(c, f"ส่ง{c.name}"),
+                         "has_detail": c.detail_pages.exists()}
                         for c in site.collections.all()],
         "sections": [{"id": s["id"], "label": s["label"], "category": s["category"], "icon": s["icon"],
                       "content": sections.block_content(s)} for s in sections.SECTIONS],

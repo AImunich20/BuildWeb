@@ -5,7 +5,7 @@ import re
 from django.db import transaction
 
 from . import sections
-from .models import Page, PageRevision, SharedSection, Site, slugify_th
+from .models import Page, PageRevision, Record, SharedSection, Site, slugify_th
 
 RESERVED_SLUGS = {"index", "css", "js", "assets", "__form", "static", "media", "api"}
 NAV_RE = re.compile(r'<nav class="bw-nav-links">.*?</nav>', re.S)
@@ -242,11 +242,24 @@ def duplicate_site(site):
     copy.pk = None
     copy.name = f"{site.name} (สำเนา)"
     copy.slug = unique_site_slug(f"{site.slug}-copy")
+    copy.host_port = None  # unique, and the copy should not take over the original's address
+    copy.base_url, copy.publish = "", {}
     copy.save()
+    col_map = {}
+    for col in site.collections.all():
+        records = list(col.records.all())
+        old_id = col.pk
+        col.pk = None
+        col.site = copy
+        col.save()
+        col_map[old_id] = col
+        Record.objects.bulk_create([Record(collection=col, data=r.data, position=r.position, approved=r.approved)
+                                    for r in records], batch_size=500)
     for p in pages:
         p.pk = None
         p.site = copy
         p.parent = None
+        p.collection = col_map.get(p.collection_id)
         p.save()
     for sec in SharedSection.objects.filter(site=site):
         sec.pk = None

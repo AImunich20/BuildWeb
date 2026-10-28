@@ -8,8 +8,8 @@ from pathlib import Path
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 
-from . import exporter, render, sections, services
-from .models import Asset, Collection, FormSubmission, Page, PageRevision, Site
+from . import data, exporter, render, sections, services
+from .models import Asset, Collection, FormSubmission, Page, PageRevision, Record, Site
 
 TMP_MEDIA = Path(tempfile.mkdtemp(prefix="bw-media-"))
 
@@ -592,3 +592,238 @@ class NavbarAnimTests(TestCase):
         self.assertIn("[data-bw-anim]", files["css/site.css"])
         self.assertIn("IntersectionObserver", files["js/site.js"])
         self.assertIn("data-bw-nav", files["js/site.js"])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class V014Tests(TestCase):
+    """Detail pages, forms → collections, search/paging, blog, SEO files, contact buttons, stats, publishing."""
+
+    def setUp(self):
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("ร้านกาแฟ", "cafe")
+        self.col = Collection.objects.create(site=self.site, name="สินค้า", slug="products", fields=[
+            {"name": "name", "label": "ชื่อ", "type": "text"}, {"name": "price", "label": "ราคา", "type": "number"},
+            {"name": "category", "label": "หมวด", "type": "text"}, {"name": "detail", "label": "รายละเอียด", "type": "longtext"},
+            {"name": "image", "label": "รูป", "type": "image"}])
+        for i, (n, p, cat) in enumerate([("Latte", 1250, "coffee"), ("Mocha", 65, "coffee"), ("ชาไทย", 50, "tea")]):
+            Record.objects.create(collection=self.col, position=i, data={"name": n, "price": p, "category": cat,
+                                                                          "detail": f"รายละเอียด {n} " * 5, "image": ""})
+
+    def post(self, url, data=None):
+        return self.c.post(url, json.dumps(data or {}), content_type="application/json")
+
+    def test_detail_pages_and_links(self):
+        from . import generate
+
+        lst, detail = generate.create_pages_for(self.col, "เมนู")
+        self.assertEqual((lst.slug, detail.slug), ("products", "product"))
+        files, _ = render.build_files(self.site)
+        self.assertIn("product/latte.html", files)
+        self.assertIn("product/ชาไทย.html", files)
+        self.assertNotIn("product.html", files)  # the template itself is not a page of the live site
+        page = files["product/latte.html"]
+        self.assertIn('<base href="../">', page)
+        self.assertIn("<title>Latte | ร้านกาแฟ</title>", page)
+        self.assertIn("1,250 บาท", page)
+        self.assertIn('href="product/mocha.html"', page)  # next
+        self.assertNotIn("bw-prev", page)  # first row: no "previous" link (data-bw-if)
+        self.assertIn('href="product/latte.html"', files["products.html"])
+        self.assertNotIn(">สินค้า (หน้ารายละเอียด)<", files["index.html"])  # not in the menu
+        # hosted / preview
+        r = self.c.get(f"/preview/{self.site.slug}/product/%E0%B8%8A%E0%B8%B2%E0%B9%84%E0%B8%97%E0%B8%A2.html")
+        self.assertContains(r, "<h1>ชาไทย</h1>")
+        self.assertEqual(self.c.get(f"/preview/{self.site.slug}/product/nope.html").status_code, 404)
+        self.assertContains(self.c.get(f"/preview/{self.site.slug}/product.html"), "Latte")  # designer sees row 1
+
+    def test_search_facet_paging_marks_and_filters(self):
+        html = ('<div data-bw-repeat="products" data-bw-search="ค้นหา" data-bw-facet="category" data-bw-paginate="2">'
+                '<div class="card"><b>{{name}}</b> {{price|number}} <i data-bw-if="!image">no image</i></div></div>')
+        out = data.render_html(html, self.site)
+        self.assertEqual(out.count("data-bw-item"), 3)
+        self.assertIn('data-bw-c="tea"', out)
+        self.assertIn("1,250", out)
+        self.assertEqual(out.count("no image"), 3)
+        self.assertIn("bw-pager", render.site_js(self.site) + render.site_css(self.site))
+        multi = data.render_html('<ul data-bw-repeat="products" data-bw-search><li>{{name}}</li><li>x</li></ul>', self.site)
+        self.assertIn('<div style="display:contents" data-bw-item', multi)
+        self.assertEqual(data.apply_filter("2026-10-28", "date", ""), "28 ต.ค. 2569")
+        self.assertEqual(data.apply_filter("<p>abc def ghi</p>", "truncate", "7"), "abc def…")
+
+    def test_form_into_collection_with_approval(self):
+        rev = Collection.objects.create(site=self.site, name="รีวิว", slug="reviews", fields=[
+            {"name": "name", "label": "ชื่อ", "type": "text"}, {"name": "comment", "label": "ความเห็น", "type": "html"},
+            {"name": "date", "label": "วันที่", "type": "date"}])
+        url = f"/preview/{self.site.slug}/__form"
+        r = self.c.post(url, {"_collection": "reviews", "name": "A", "comment": "<script>x</script>"})
+        self.assertEqual(r.status_code, 400)  # forms not enabled for this collection
+        rev.options = {"forms": True}
+        rev.save()
+        r = self.c.post(url, {"_collection": "reviews", "_form": "review", "name": "A", "comment": "<script>x</script>"})
+        self.assertEqual(r.json(), {"ok": True, "pending": True})
+        rec = rev.records.get()
+        self.assertFalse(rec.approved)
+        self.assertEqual(rec.data["comment"], "&lt;script&gt;x&lt;/script&gt;")
+        self.assertTrue(rec.data["date"])
+        self.assertEqual(data.render_html('<p data-bw-repeat="reviews">{{name}}</p>', self.site).count("A"), 0)
+        self.post(f"/api/collections/{rev.id}/rows/approve", {"ids": [rec.id], "value": True})
+        self.assertIn(">A</p>", data.render_html('<p data-bw-repeat="reviews">{{name}}</p>', self.site))
+        self.assertEqual(FormSubmission.objects.filter(site=self.site).count(), 1)
+        # honeypot: accepted silently, nothing stored
+        self.c.post(url, {"_collection": "reviews", "name": "bot", "_hp": "x"})
+        self.assertEqual(rev.records.count(), 1)
+
+    def test_blog_rss_sitemap_robots(self):
+        from . import generate
+
+        col, lst, detail = generate.create_blog(self.site)
+        r = self.c.get(f"/preview/{self.site.slug}/rss.xml")
+        self.assertContains(r, "<item><title>ยินดีต้อนรับสู่บล็อกของเรา</title>")
+        self.assertContains(r, f"http://testserver/preview/{self.site.slug}/post/welcome.html")
+        sm = self.c.get(f"/preview/{self.site.slug}/sitemap.xml").content.decode()
+        self.assertIn("post/writing-tips.html", sm)
+        self.assertIn("<loc>http://testserver/preview/", sm)
+        self.assertIn("Sitemap:", self.c.get(f"/preview/{self.site.slug}/robots.txt").content.decode())
+        post = self.c.get(f"/preview/{self.site.slug}/post/welcome.html").content.decode()
+        self.assertIn("<h2>เขียนบทความใหม่</h2>", post)  # html field rendered raw
+        self.assertIn('type="application/rss+xml"', post)
+        self.site.base_url = "https://shop.example/"
+        self.site.save()
+        files, _ = render.build_files(self.site)
+        self.assertIn("https://shop.example/post/welcome.html", files["sitemap.xml"])
+        self.assertIn('<link rel="canonical" href="https://shop.example/post/welcome.html">', files["post/welcome.html"])
+
+    def test_seo_report(self):
+        r = self.c.get(f"/api/sites/{self.site.id}/seo").json()
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(r["pages"]), self.site.pages.count())
+        for p in r["pages"]:
+            self.assertTrue(0 <= p["score"] <= 100)
+            self.assertTrue(p["checks"])
+
+    def test_contact_buttons(self):
+        self.post(f"/api/sites/{self.site.id}/update", {"contact": {"enabled": True, "phone": "081-234-5678", "line": "@mycafe",
+                                                                     "whatsapp": "0812345678", "style": "bar"}})
+        self.site.refresh_from_db()
+        out = render.render_page(self.site.home_page())
+        self.assertIn('href="tel:0812345678"', out)
+        self.assertIn("https://line.me/R/ti/p/%40mycafe", out)
+        self.assertIn("https://wa.me/66812345678", out)
+        self.assertIn("bw-fab bar", out)
+
+    def test_stats_count_public_hits_only(self):
+        from . import stats
+
+        ua = {"HTTP_USER_AGENT": "Mozilla/5.0 (iPhone) Safari"}
+        pub = {"buildweb.public": True, **ua}
+        self.c.get(f"/{self.site.slug}/", **pub)
+        self.c.get(f"/{self.site.slug}/about.html", **pub)
+        self.c.get(f"/{self.site.slug}/about.html", **{"buildweb.public": True, "HTTP_USER_AGENT": "Googlebot/2.1"})
+        self.c.get(f"/preview/{self.site.slug}/", **ua)  # preview: not counted
+        s = stats.summary(self.site, 7)
+        self.assertEqual(s["total"]["views"], 2)
+        self.assertEqual(s["total"]["visitors"], 1)
+        self.assertEqual(s["devices"][0]["key"], "mobile")
+        self.assertIn("/about.html", [p["key"] for p in s["pages"]])
+        self.assertTrue(self.c.get("/").status_code == 200)  # dashboard with sparkline
+
+    def test_publish_github_and_netlify_mocked(self):
+        from unittest import mock
+
+        from . import publish
+
+        calls = []
+
+        def fake(method, url, token, data=None, raw=None, content_type=None, timeout=60):
+            calls.append((method, url.replace(publish.GITHUB_API, "").replace(publish.NETLIFY_API, "")))
+            u = calls[-1][1]
+            if u == "/user":
+                return 200, {"login": "me"}
+            if u == "/repos/me/shop":
+                return 404, {}
+            if u == "/user/repos":
+                return 201, {"size": 0}
+            if "/git/ref/heads/" in u:
+                return 404, {}
+            if u.endswith("/git/blobs"):
+                return 201, {"sha": publish.git_blob_sha(base64.b64decode(data["content"]))}
+            if u.endswith("/git/trees"):
+                return 201, {"sha": "tree1"}
+            if u.endswith("/git/commits"):
+                return 201, {"sha": "c1"}
+            if u.endswith("/git/refs"):
+                return 201, {}
+            if u.endswith("/pages") and method == "GET":
+                return 404, {}
+            if u.endswith("/pages"):
+                return 201, {"html_url": "https://me.github.io/shop/"}
+            if u == "/sites" and method == "POST":
+                return 201, {"id": "n1", "name": "shop", "ssl_url": "https://shop.netlify.app"}
+            if u == "/sites/n1/deploys":
+                self.assertEqual(content_type, "application/zip")
+                return 200, {"id": "d1", "state": "ready", "ssl_url": "https://shop.netlify.app"}
+            return 200, {}
+
+        import base64
+
+        publish.config.update("publish", {"github_token": "t", "netlify_token": "n"})
+        self.post(f"/api/sites/{self.site.id}/publish", {"target": "github", "repo": "shop"})
+        self.site.refresh_from_db()
+        with mock.patch.object(publish, "http", side_effect=fake), mock.patch.object(publish.time, "sleep"):
+            res = publish.run(self.site, "github")
+            self.assertEqual(res["url"], "https://me.github.io/shop/")
+            self.site.refresh_from_db()
+            self.assertEqual(self.site.base_url, "https://me.github.io/shop/")
+            self.assertIn(("POST", "/repos/me/shop/pages"), calls)
+            res = publish.run(self.site, "netlify")
+            self.assertEqual(res["site_id"], "n1")
+        self.site.refresh_from_db()
+        self.assertEqual(self.site.publish["netlify"]["site_id"], "n1")
+        self.assertTrue(self.site.publish["github"]["last"]["ok"])
+        r = self.c.get(f"/api/sites/{self.site.id}/publish").json()
+        self.assertEqual(r["tokens"], {"github": True, "netlify": True})
+        self.assertNotIn("t", json.dumps(r["publish"].get("github", {}).get("token", "")))
+
+    def test_publish_ftp_mocked(self):
+        from unittest import mock
+
+        from . import publish
+
+        stored = {}
+
+        class FakeFTP:
+            def __init__(self, timeout=None):
+                pass
+
+            def connect(self, host, port):
+                self.host = host
+
+            def login(self, user, pw):
+                pass
+
+            def mkd(self, path):
+                pass
+
+            def storbinary(self, cmd, f):
+                stored[cmd[5:]] = f.read()
+
+            def quit(self):
+                pass
+
+        self.site.publish = {"ftp": {"host": "ftp.example", "user": "u", "password": "p", "path": "public_html"}}
+        self.site.save()
+        with mock.patch.object(publish, "FTP", FakeFTP):
+            res = publish.run(self.site, "ftp")
+        self.assertIn("/public_html/index.html", stored)
+        self.assertEqual(res["files"], len(stored))
+        self.assertNotIn("password", self.c.get(f"/api/sites/{self.site.id}/publish").json()["publish"]["ftp"])
+
+    def test_duplicate_site_copies_collections_and_detail_pages(self):
+        from . import generate
+
+        generate.create_pages_for(self.col)
+        copy = services.duplicate_site(self.site)
+        self.assertEqual(copy.collections.count(), 1)
+        detail = copy.pages.get(collection__isnull=False)
+        self.assertEqual(detail.collection.site_id, copy.id)
+        self.assertEqual(detail.collection.records.count(), 3)

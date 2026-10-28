@@ -11,7 +11,7 @@
 
 <div class="grid g4" style="margin-bottom:24px">
   <div class="card stat"><span>เว็บไซต์</span><b>{{ stats.sites }}</b></div>
-  <div class="card stat"><span>หน้าทั้งหมด</span><b>{{ stats.pages }}</b></div>
+  <div class="card stat"><span>การเข้าชม 7 วัน <small class="muted">· {{ stats.pages }} หน้า</small></span><b>{{ stats.views }}</b></div>
   <div class="card stat"><span>ข้อความฟอร์มที่ยังไม่อ่าน</span><b>{{ stats.unread }}</b></div>
   <div class="card stat"><span>โฮสติ้ง</span>
     {% if hosting.running %}<div style="margin:4px 0 8px"><span class="badge ok"><span class="dot"></span>ออนไลน์</span></div><a class="mono small" href="/settings/" style="word-break:break-all">{{ hosting.base }}</a>
@@ -30,6 +30,7 @@
       <div class="row between"><h3 title="{{ c.site.name }}">{{ c.site.name }}</h3>
         {% if c.site.published %}<span class="badge ok"><span class="dot"></span>เผยแพร่</span>{% else %}<span class="badge">ปิด</span>{% endif %}</div>
       <div class="muted small"><span class="mono">/{{ c.site.slug }}</span> · {{ c.pages }} หน้า · <span data-ago="{{ c.site.updated_at.isoformat }}"></span>{% if c.unread %} · <span class="badge brand">{{ c.unread }} ใหม่</span>{% endif %}</div>
+      {% if c.spark %}<a class="small muted row" href="/sites/{{ c.site.id }}/stats/" style="gap:8px;margin-top:6px" title="การเข้าชม 14 วันล่าสุด">{{ c.spark|safe }}<span>{{ c.views }} ครั้ง / 7 วัน</span></a>{% endif %}
       <div class="acts">
         <a class="btn primary sm" href="/sites/{{ c.site.id }}/edit/">ออกแบบ</a>
         <a class="btn sm" href="/sites/{{ c.site.id }}/">จัดการ</a>
