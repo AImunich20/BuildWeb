@@ -145,9 +145,9 @@ def site_js(site):
     from .anim import ANIM_JS
     from .navbar import NAV_JS
 
-    from .widgets import DATA_JS
+    from .widgets import DATA_JS, SDK_JS
 
-    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1)
+    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS
     shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
     return core + "\n" + shared + "\n" + (site.custom_js or "")
 

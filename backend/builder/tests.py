@@ -827,3 +827,124 @@ class V014Tests(TestCase):
         detail = copy.pages.get(collection__isnull=False)
         self.assertEqual(detail.collection.site_id, copy.id)
         self.assertEqual(detail.collection.records.count(), 3)
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class RestApiTests(TestCase):
+    """v0.2: schema validation, relations, REST API, keys, rules, CORS, rate limit, OpenAPI, logs."""
+
+    def setUp(self):
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("API Shop", "blank")
+        self.site.api = {"enabled": True}
+        self.site.save()
+        self.authors = Collection.objects.create(site=self.site, name="ผู้เขียน", slug="authors", fields=[
+            {"name": "name", "label": "ชื่อ", "type": "text", "required": True},
+            {"name": "email", "label": "อีเมล", "type": "email", "unique": True, "hidden": True}])
+        self.a1 = Record.objects.create(collection=self.authors, data={"name": "Ann", "email": "ann@x.io"})
+        self.posts = Collection.objects.create(site=self.site, name="โพสต์", slug="posts", fields=[
+            {"name": "title", "label": "หัวข้อ", "type": "text", "required": True, "max": 40},
+            {"name": "price", "label": "ราคา", "type": "number", "min": 0},
+            {"name": "status", "label": "สถานะ", "type": "select", "options": ["draft", "live"], "default": "draft"},
+            {"name": "author", "label": "ผู้เขียน", "type": "relation", "relation": "authors"}])
+        for i in range(25):
+            Record.objects.create(collection=self.posts, position=i, data={"title": f"Post {i}", "price": i * 10,
+                                                                           "status": "live", "author": self.a1.id})
+        self.base = f"/{self.site.slug}/api/v1"
+        self.pub = {"buildweb.public": True}
+
+    def get(self, url, **kw):
+        return self.c.get(url, **{**self.pub, **kw})
+
+    def send(self, method, url, data=None, **kw):
+        return getattr(self.c, method)(url, json.dumps(data or {}), content_type="application/json", **{**self.pub, **kw})
+
+    def test_list_paging_sort_filter_expand(self):
+        r = self.get(f"{self.base}/posts?per_page=10&page=2&sort=-price").json()
+        self.assertEqual((r["total"], r["total_pages"], len(r["items"])), (25, 3, 10))
+        self.assertEqual(r["items"][0]["price"], 140)
+        r = self.get(f"{self.base}/posts?filter=price>=200&expand=author").json()
+        self.assertEqual(r["total"], 5)
+        self.assertEqual(r["items"][0]["author"]["name"], "Ann")
+        self.assertNotIn("email", r["items"][0]["author"])  # hidden field never leaves through the API
+        self.assertEqual(self.get(f"{self.base}/posts?q=post 7").json()["total"], 1)
+        one = self.get(f"{self.base}/posts/{r['items'][0]['_id']}?fields=title").json()
+        self.assertEqual(set(one) - {"_id", "_created", "_updated"}, {"title"})
+        self.assertEqual(self.get(f"{self.base}/posts/999999").status_code, 404)
+
+    def test_keys_rules_and_validation(self):
+        from . import restapi
+
+        self.assertEqual(self.send("post", f"{self.base}/posts", {"title": "x"}).status_code, 401)  # create needs a key
+        ro, ro_plain = restapi.create_key(self.site, "read only")
+        rw, rw_plain = restapi.create_key(self.site, "writer", write=True, collections=["posts"])
+        self.assertEqual(self.send("post", f"{self.base}/posts", {"title": "x"}, HTTP_X_API_KEY=ro_plain).status_code, 403)
+        self.assertEqual(self.get(f"{self.base}/posts", HTTP_X_API_KEY="bw_wrong").status_code, 401)
+        bad = self.send("post", f"{self.base}/posts", {"title": "x" * 50, "price": -1, "status": "zzz", "author": 999},
+                        HTTP_AUTHORIZATION=f"Bearer {rw_plain}")
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(set(bad.json()["error"]["fields"]), {"title", "price", "status", "author"})
+        new = self.send("post", f"{self.base}/posts", {"title": "Hello", "price": "1,250"}, HTTP_X_API_KEY=rw_plain)
+        self.assertEqual(new.status_code, 201)
+        body = new.json()
+        self.assertEqual((body["price"], body["status"]), (1250, "draft"))  # coerced + default
+        rid = body["_id"]
+        p = self.send("patch", f"{self.base}/posts/{rid}", {"price": 99}, HTTP_X_API_KEY=rw_plain).json()
+        self.assertEqual((p["title"], p["price"]), ("Hello", 99))
+        self.assertEqual(self.send("put", f"{self.base}/posts/{rid}", {"price": 1}, HTTP_X_API_KEY=rw_plain).status_code, 422)
+        self.assertEqual(self.send("delete", f"{self.base}/posts/{rid}", HTTP_X_API_KEY=rw_plain).status_code, 204)
+        # the writer key is limited to "posts"
+        self.assertEqual(self.send("post", f"{self.base}/authors", {"name": "B"}, HTTP_X_API_KEY=rw_plain).status_code, 403)
+        # unique
+        Collection.objects.filter(pk=self.authors.pk).update(options={"api": {"create": "public"}})
+        dup = self.send("post", f"{self.base}/authors", {"name": "C", "email": "ANN@x.io"})
+        self.assertEqual(dup.json()["error"]["fields"], {"email": "ค่านี้มีอยู่แล้ว (ต้องไม่ซ้ำ)"})
+        # rules: off
+        Collection.objects.filter(pk=self.posts.pk).update(options={"api": {"list": "off"}})
+        self.assertEqual(self.get(f"{self.base}/posts").status_code, 403)
+        ro.revoked = True
+        ro.save()
+        self.assertEqual(self.get(f"{self.base}/authors", HTTP_X_API_KEY=ro_plain).status_code, 401)
+
+    def test_disabled_cors_rate_openapi_logs_owner(self):
+        r = self.c.options(f"{self.base}/posts", HTTP_ORIGIN="https://app.example", **self.pub)
+        self.assertEqual(r["Access-Control-Allow-Origin"], "*")
+        spec = self.get(f"{self.base}/openapi.json").json()
+        self.assertIn("/posts/{id}", spec["paths"])
+        self.assertEqual(spec["paths"]["/posts"]["post"]["security"], [{"ApiKey": []}, {"Bearer": []}])
+        self.assertNotIn("email", spec["components"]["schemas"]["Authors"]["properties"])
+        self.site.api = {"enabled": True, "rate": 3, "cors": "https://ok.example"}
+        self.site.save()
+        codes = [self.get(f"{self.base}/posts", HTTP_ORIGIN="https://ok.example", REMOTE_ADDR="10.0.0.7").status_code
+                 for _ in range(4)]
+        self.assertEqual(codes, [200, 200, 200, 429])
+        r = self.get(f"{self.base}/", HTTP_ORIGIN="https://evil.example", REMOTE_ADDR="10.0.0.9")
+        self.assertNotIn("Access-Control-Allow-Origin", r)
+        self.site.api = {"enabled": False}
+        self.site.save()
+        self.assertEqual(self.get(f"{self.base}/posts", REMOTE_ADDR="10.0.0.8").status_code, 404)
+        # the owner (in-app preview) still has full access, hidden fields included
+        own = self.c.get(f"/preview/{self.site.slug}/api/v1/authors").json()
+        self.assertEqual(own["items"][0]["email"], "ann@x.io")
+        logs = self.c.get(f"/api/sites/{self.site.id}/restapi/logs").json()["logs"]
+        self.assertTrue(any(x["status"] == 429 for x in logs))
+
+    def test_admin_keys_rules_and_row_validation(self):
+        r = self.c.post(f"/api/sites/{self.site.id}/restapi/keys", json.dumps({"name": "app", "write": True}),
+                        content_type="application/json").json()
+        self.assertTrue(r["plain"].startswith("bw_"))
+        self.assertNotIn(r["plain"], json.dumps(self.c.get(f"/api/sites/{self.site.id}/restapi").json()))
+        self.c.post(f"/api/sites/{self.site.id}/restapi", json.dumps({"rules": {"posts": {"delete": "off"}}}),
+                    content_type="application/json")
+        self.posts.refresh_from_db()
+        self.assertEqual(self.posts.options["api"]["delete"], "off")
+        bad = self.c.post(f"/api/collections/{self.posts.id}/rows/save", json.dumps({"data": {"price": "abc"}}),
+                          content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("ราคา", bad.json()["error"])
+
+    def test_relation_placeholders_and_sdk(self):
+        out = data.render_html('<p data-bw-repeat="posts" data-bw-limit="1">{{title}} by {{author.name}} #{{_id}}</p>', self.site)
+        self.assertIn("Post 0 by Ann #", out)
+        self.assertIn("window.bw", render.site_js(self.site))

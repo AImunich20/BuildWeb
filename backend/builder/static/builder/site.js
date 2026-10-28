@@ -5,7 +5,7 @@
   const site = D.site;
   const { api, toast, esc, modal, confirmBox, formData, showFieldError, bytes, ago, when } = BW;
 
-  const tabs = { data: renderData, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
+  const tabs = { data: renderData, api: renderApi, pages: renderPages, files: renderFiles, forms: renderForms, stats: renderStats, settings: renderSettings, export: renderExport };
 
 
 
@@ -192,7 +192,8 @@
   }
 
   // ---------------------------------------------------------------- data (collections)
-  const TYPES = { text: 'ข้อความ', longtext: 'ข้อความยาว', number: 'ตัวเลข', image: 'รูป', link: 'ลิงก์', date: 'วันที่', bool: 'ใช่/ไม่', html: 'HTML' };
+  const TYPES = { text: 'ข้อความ', longtext: 'ข้อความยาว', html: 'HTML', number: 'ตัวเลข', bool: 'ใช่/ไม่', date: 'วันที่', datetime: 'วันเวลา',
+    email: 'อีเมล', link: 'ลิงก์', image: 'รูป', select: 'ตัวเลือก', relation: 'เชื่อมชุดข้อมูล', json: 'JSON' };
   let DATA = { collections: [], connections: [] };
 
   async function renderData(selectId) {
@@ -332,16 +333,33 @@
   }
 
   function cell(f, v, editable) {
-    const val = v == null ? '' : String(v);
+    const val = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
     if (!editable) return `<td>${f.type === 'image' && val ? `<span class="thumb-sm" style="background-image:url('${encodeURI(val)}')"></span>` : ''}${esc(val.slice(0, 200))}</td>`;
     return `<td contenteditable="plaintext-only" data-f="${esc(f.name)}" class="${f.type === 'number' ? 'num' : ''}">${esc(val)}</td>`;
   }
 
   function collectionSettings(c, focusForms) {
     const o = c.options || {};
-    const row = f => `<div class="field-row"><input class="input mono" data-k="name" value="${esc(f.name)}" data-orig="${esc(f.name)}"><input class="input" data-k="label" value="${esc(f.label)}">
+    const others = (D.collections || []).filter(x => x.id !== c.id);
+    const flags = f => [f.required && 'จำเป็น', f.unique && 'ไม่ซ้ำ', f.hidden && 'ซ่อนจาก API'].filter(Boolean).join(' · ');
+    const row = f => `<div class="field-wrap"><div class="field-row"><input class="input mono" data-k="name" value="${esc(f.name)}" data-orig="${esc(f.name)}"><input class="input" data-k="label" value="${esc(f.label)}">
       <select class="input" data-k="type">${Object.entries(TYPES).map(([k, l]) => `<option value="${k}" ${k === f.type ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <button class="btn sm ghost icon" data-rm title="ลบฟิลด์">${BW_ICON('x')}</button></div>`;
+      <button class="btn sm ghost icon" data-adv title="กฎของฟิลด์ (จำเป็น, ไม่ซ้ำ, ช่วงค่า...)">${BW_ICON('settings')}</button>
+      <button class="btn sm ghost icon" data-rm title="ลบฟิลด์">${BW_ICON('x')}</button></div>
+      <div class="small muted adv-sum" style="margin:-4px 0 6px 2px">${flags(f)}</div>
+      <div class="field-adv hidden">
+        <div class="row" style="gap:16px"><label class="check"><input type="checkbox" data-o="required" ${f.required ? 'checked' : ''}>จำเป็นต้องกรอก</label>
+          <label class="check"><input type="checkbox" data-o="unique" ${f.unique ? 'checked' : ''}>ห้ามซ้ำ</label>
+          <label class="check"><input type="checkbox" data-o="hidden" ${f.hidden ? 'checked' : ''}>ซ่อนจาก API สาธารณะ</label></div>
+        <div class="grid g4" style="gap:0 10px"><label class="field"><span>ค่าเริ่มต้น</span><input class="input" data-o="default" value="${esc(f.default ?? '')}"></label>
+          <label class="field"><span>ต่ำสุด <small>(ค่า/ความยาว)</small></span><input class="input mono" data-o="min" value="${esc(f.min ?? '')}"></label>
+          <label class="field"><span>สูงสุด</span><input class="input mono" data-o="max" value="${esc(f.max ?? '')}"></label>
+          <label class="field"><span>รูปแบบ (regex)</span><input class="input mono" data-o="pattern" value="${esc(f.pattern || '')}" placeholder="^0[0-9]{9}$"></label></div>
+        <label class="field opt-select"><span>ตัวเลือก <small>(คั่นด้วย , สำหรับชนิด “ตัวเลือก”)</small></span><input class="input" data-o="options" value="${esc((f.options || []).join(', '))}"></label>
+        <div class="grid g2 opt-relation" style="gap:0 10px"><label class="field"><span>เชื่อมไปที่ชุดข้อมูล</span><select class="input" data-o="relation"><option value="">— เลือก —</option>
+          ${others.map(x => `<option value="${esc(x.slug)}" ${x.slug === f.relation ? 'selected' : ''}>${esc(x.name)} (${esc(x.slug)})</option>`).join('')}</select></label>
+          <label class="check" style="margin-top:26px"><input type="checkbox" data-o="multiple" ${f.multiple ? 'checked' : ''}>เลือกได้หลายแถว</label></div>
+      </div></div>`;
     const m = modal(`<header><h2>ตั้งค่าชุดข้อมูล</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
       <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(c.name)}"></label>
       <label class="field"><span>ชื่อที่ใช้อ้างอิง <small>(ใน data-bw-repeat)</small></span><input class="input mono" name="slug" value="${esc(c.slug)}"></label></div>
@@ -357,14 +375,28 @@
       <div id="f-rows">${c.fields.map(row).join('')}</div>
       ${c.mode === 'live' ? '' : `<button class="btn sm" id="f-add">${BW_ICON('plus')} เพิ่มฟิลด์</button>`}</div>
       <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
-    const bindRm = () => m.el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => b.closest('.field-row').remove());
+    const bindRm = () => {
+      m.el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => b.closest('.field-wrap').remove());
+      m.el.querySelectorAll('.field-wrap').forEach(w => {
+        const sync = () => { const t = w.querySelector('[data-k=type]').value; w.querySelector('.opt-select').classList.toggle('hidden', t !== 'select'); w.querySelector('.opt-relation').classList.toggle('hidden', t !== 'relation'); };
+        w.querySelector('[data-k=type]').onchange = () => { sync(); if (['select', 'relation'].includes(w.querySelector('[data-k=type]').value)) w.querySelector('.field-adv').classList.remove('hidden'); };
+        w.querySelector('[data-adv]').onclick = () => w.querySelector('.field-adv').classList.toggle('hidden');
+        sync();
+      });
+    };
     bindRm();
     const add = m.el.querySelector('#f-add');
     if (add) add.onclick = () => { m.el.querySelector('#f-rows').insertAdjacentHTML('beforeend', row({ name: 'field', label: 'ฟิลด์ใหม่', type: 'text' })); bindRm(); };
     m.el.querySelector('[data-save]').onclick = async () => {
       const d = formData(m.el);
-      const rows = [...m.el.querySelectorAll('.field-row')];
-      d.fields = rows.map(r => ({ name: r.querySelector('[data-k=name]').value, label: r.querySelector('[data-k=label]').value, type: r.querySelector('[data-k=type]').value }));
+      const rows = [...m.el.querySelectorAll('.field-wrap')];
+      d.fields = rows.map(r => {
+        const f = { name: r.querySelector('[data-k=name]').value, label: r.querySelector('[data-k=label]').value, type: r.querySelector('[data-k=type]').value };
+        r.querySelectorAll('[data-o]').forEach(x => { const v = x.type === 'checkbox' ? x.checked : x.value.trim(); if (v !== '' && v !== false) f[x.dataset.o] = v; });
+        const old = c.fields.find(x => x.name === r.querySelector('[data-k=name]').dataset.orig);
+        if (old && old.source) f.source = old.source;
+        return f;
+      });
       d.renames = rows.map(r => ({ from: r.querySelector('[data-k=name]').dataset.orig, to: r.querySelector('[data-k=name]').value })).filter(x => x.from && x.from !== x.to);
       if ('live_desc' in d) d.live_desc = d.live_desc === '1';
       d.options = {}; m.el.querySelectorAll('[data-opt]').forEach(x => d.options[x.dataset.opt] = x.checked);
@@ -381,8 +413,14 @@
     const isNew = !row;
     row = row || {};
     const input = f => {
-      const v = row[f.name] == null ? '' : String(row[f.name]);
-      const n = `name="${esc(f.name)}"`;
+      const raw = row[f.name] ?? f.default ?? '';
+      const v = typeof raw === 'object' ? (f.type === 'json' ? JSON.stringify(raw, null, 2) : raw.join(', ')) : String(raw);
+      const n = `name="${esc(f.name)}" ${f.required ? 'required' : ''}`;
+      if (f.type === 'select') return `<select class="input" ${n}><option value=""></option>${(f.options || []).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      if (f.type === 'json') return `<textarea class="input code" rows="4" ${n}>${esc(v)}</textarea>`;
+      if (f.type === 'relation') return `<input class="input mono" ${n} value="${esc(v)}" placeholder="_id ของ ${esc(f.relation || '')}${f.multiple ? ' (หลายค่าคั่นด้วย ,)' : ''}">`;
+      if (f.type === 'datetime') return `<input class="input" type="datetime-local" step="1" ${n} value="${esc(v.slice(0, 19))}">`;
+      if (f.type === 'email') return `<input class="input" type="email" ${n} value="${esc(v)}">`;
       if (f.type === 'html') return `<div class="rte" data-rte="${esc(f.name)}"><div class="rte-bar">
           ${RTE_CMDS.map(([k, l]) => `<button type="button" class="btn sm ghost" data-cmd="${k}">${l}</button>`).join('')}</div>
           <div class="rte-body" contenteditable="true">${v}</div></div>`;
@@ -392,8 +430,8 @@
       const t = { number: 'number', date: 'date', link: 'url' }[f.type] || 'text';
       return `<input class="input ${f.type === 'number' ? 'mono' : ''}" type="${t}" ${n} value="${esc(v)}" ${t === 'number' ? 'step="any"' : ''}>`;
     };
-    const m = modal(`<header><h2>${isNew ? 'เพิ่มแถว' : 'แก้ไขแถว'} · ${esc(c.name)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
-      <div class="body">${c.fields.map(f => `<div class="field"><span>${esc(f.label)} <small class="mono">${esc(f.name)}</small></span>${input(f)}</div>`).join('')}
+    const m = modal(`<header><h2>${isNew ? 'เพิ่มแถว' : 'แก้ไขแถว'} · ${esc(c.name)}${row._id ? ` <code>_id ${row._id}</code>` : ''}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
+      <div class="body">${c.fields.map(f => `<div class="field" data-field="${esc(f.name)}"><span>${esc(f.label)}${f.required ? ' <b style="color:var(--err)">*</b>' : ''} <small class="mono">${esc(f.name)}</small></span>${input(f)}<small class="field-err"></small></div>`).join('')}
       ${!isNew && row._approved === false ? '<label class="check"><input type="checkbox" id="rm-approve" checked>อนุมัติให้แสดงบนเว็บ</label>' : ''}</div>
       <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`, { wide: true });
     m.el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => pickAsset(u => m.el.querySelector(`[name="${b.dataset.pick}"]`).value = u));
@@ -435,7 +473,17 @@
         const ap = m.el.querySelector('#rm-approve');
         if (ap && ap.checked) await api(`/api/collections/${c.id}/rows/approve`, { ids: [res.row._id], value: true });
         m.close(); toast('บันทึกแล้ว', 'ok'); renderData(c.id);
-      } catch (e) { toast(e.message, 'err'); }
+      } catch (e) {
+        toast(e.message, 'err');
+        // "ราคา: ต้องเป็นตัวเลข · ชื่อ: จำเป็นต้องกรอก" → show next to each field
+        m.el.querySelectorAll('.field-err').forEach(x => x.textContent = '');
+        e.message.split(' · ').forEach(part => {
+          const [label, ...msg] = part.split(': ');
+          const f = c.fields.find(x => (x.label || x.name) === label);
+          const box = f && m.el.querySelector(`[data-field="${f.name}"] .field-err`);
+          if (box) box.textContent = msg.join(': ');
+        });
+      }
     };
   }
 
@@ -1040,6 +1088,174 @@
       if (!await confirmBox('ลบเว็บไซต์', `ลบ “${esc(site.name)}” พร้อมทุกหน้า ไฟล์ และข้อมูลฟอร์มถาวร — ย้อนกลับไม่ได้`, { ok: 'ลบถาวร', danger: true })) return;
       try { await api(`/api/sites/${site.id}/delete`, {}); location.href = '/'; } catch (e) { toast(e.message, 'err'); }
     };
+  }
+
+  // ---------------------------------------------------------------- REST API
+  const RULE_OPTS = [['public', 'ทุกคน'], ['key', 'ต้องมี key'], ['off', 'ปิด']];
+  const ACTIONS = [['list', 'ดูรายการ'], ['view', 'ดูทีละแถว'], ['create', 'เพิ่ม'], ['update', 'แก้ไข'], ['delete', 'ลบ']];
+  let API = null;
+  async function renderApi() {
+    root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    API = await api(`/api/sites/${site.id}/restapi`);
+    const st = API.settings;
+    const hostBase = (D.hosting.running ? siteUrls(D.hosting) : [])[0];
+    const base = (site.base_url || hostBase || `${location.origin}/preview/${site.slug}/`).replace(/\/?$/, '/') + 'api/v1';
+    root.innerHTML = `<div class="card pad" style="margin-bottom:16px"><div class="row between">
+        <div><h2>REST API ของเว็บนี้</h2><div class="hint" style="margin:0">ให้แอปมือถือ, หน้าเว็บอื่น, n8n/Zapier หรือโค้ดของคุณอ่าน-เขียนชุดข้อมูลได้ · ตรวจข้อมูลตามกฎของฟิลด์ทุกครั้ง</div></div>
+        <label class="switch" title="เปิด/ปิด API สำหรับคนภายนอก"><input type="checkbox" id="api-on" ${st.enabled ? 'checked' : ''}><span></span></label></div>
+        <div class="row" style="margin-top:12px;flex-wrap:nowrap"><code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(base)}</code>
+          <button class="btn sm" id="api-copy">${BW_ICON('copy')} คัดลอก</button>
+          <a class="btn sm" href="/preview/${esc(site.slug)}/api/v1/openapi.json" target="_blank" download="${esc(site.slug)}-openapi.json">openapi.json</a></div>
+        ${st.enabled ? '' : '<div class="alert warn" style="margin-top:10px">API ปิดอยู่ — คนภายนอกเรียกไม่ได้ (คุณยังทดลองในแอปได้)</div>'}
+        ${D.hosting.running || site.base_url ? '' : '<div class="small muted" style="margin-top:8px">API ทำงานบนเซิร์ฟเวอร์โฮสติ้งของเครื่องนี้ — <a href="/settings/">เปิดโฮสติ้ง</a> เพื่อให้เครื่องอื่นเรียกได้ · เว็บที่เผยแพร่ไป GitHub/Netlify/FTP เป็นไฟล์อย่างเดียว ไม่มี API</div>'}
+      </div>
+      <div class="grid" style="grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:start" id="api-grid">
+        <div class="card"><div class="card-head"><div><h2>สิทธิ์ต่อชุดข้อมูล</h2><div class="hint" style="margin:0">ใครทำอะไรได้บ้าง · ฟิลด์ที่ตั้ง “ซ่อนจาก API” จะไม่ถูกส่งออก</div></div></div>
+          ${API.collections.length ? `<div class="data-table-wrap"><table class="table"><thead><tr><th>ชุดข้อมูล</th>${ACTIONS.map(([, l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+            ${API.collections.map(c => `<tr data-slug="${esc(c.slug)}"><td><b>${esc(c.name)}</b><div class="small muted mono">/${esc(c.slug)}${c.hidden.length ? ` · ซ่อน ${c.hidden.length} ฟิลด์` : ''}</div></td>
+              ${ACTIONS.map(([a]) => `<td><select class="input sm rule-${c.rules[a]}" data-a="${a}">${RULE_OPTS.map(([v, l]) => `<option value="${v}" ${c.rules[a] === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}
+            </tbody></table></div>` : `<div class="empty-state">ยังไม่มีชุดข้อมูล — <a href="/sites/${site.id}/data/">สร้างที่แท็บข้อมูล</a></div>`}
+        </div>
+        <div class="card"><div class="card-head"><div><h2>API keys</h2><div class="hint" style="margin:0">สำหรับโปรแกรมที่ต้องเขียนข้อมูลหรืออ่านชุดที่ล็อกไว้</div></div><button class="btn sm primary" id="key-new">${BW_ICON('plus')} สร้าง key</button></div>
+          <div id="key-list">${API.keys.length ? API.keys.map(k => `<div class="list-row" data-id="${k.id}" style="${k.revoked ? 'opacity:.5' : ''}">
+              <div style="flex:1"><b>${esc(k.name)}</b> ${k.revoked ? '<span class="badge err">ยกเลิกแล้ว</span>' : k.write ? '<span class="badge warn">อ่าน+เขียน</span>' : '<span class="badge">อ่านอย่างเดียว</span>'}
+                <div class="small muted"><code>${esc(k.prefix)}…</code> · ${k.collections.length ? esc(k.collections.join(', ')) : 'ทุกชุดข้อมูล'} · ${k.last_used ? 'ใช้ล่าสุด ' + ago(k.last_used) : 'ยังไม่เคยใช้'}</div></div>
+              ${k.revoked ? `<button class="btn sm ghost icon" data-del title="ลบ">${BW_ICON('trash')}</button>` : '<button class="btn sm danger" data-revoke>ยกเลิก</button>'}</div>`).join('')
+            : '<div class="empty-state">ยังไม่มี key</div>'}</div>
+          <div style="padding:14px 16px;border-top:1px solid var(--line)"><div class="sect-title" style="margin-top:0">ความปลอดภัย</div>
+            <div class="grid g2" style="gap:0 12px"><label class="field"><span>โดเมนที่เรียกจากเบราว์เซอร์ได้ (CORS)</span><input class="input mono" id="api-cors" value="${esc(st.cors)}" placeholder="* หรือ https://app.com, https://admin.app.com"></label>
+            <label class="field"><span>จำกัดครั้ง/นาที ต่อ IP <small>(key ได้ 5 เท่า · 0 = ไม่จำกัด)</small></span><input class="input mono" id="api-rate" type="number" min="0" value="${st.rate}"></label></div>
+            <div class="row between"><label class="check"><input type="checkbox" id="api-log" ${st.log ? 'checked' : ''}>บันทึกการเรียก (30 วัน)</label><button class="btn sm" id="api-save">บันทึก</button></div></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>ทดลองเรียก API</h2><div class="hint" style="margin:0">ส่งคำขอจริงจากในแอป แล้วดูผลลัพธ์ · มีโค้ดตัวอย่างให้คัดลอก</div></div>
+          <div class="seg" id="pg-as"><button data-v="public" class="on">แบบผู้เข้าชม</button><button data-v="owner">แบบเจ้าของเว็บ</button></div></div>
+        <div class="pad" style="padding:16px">
+          <div class="row" style="flex-wrap:nowrap;gap:8px"><select class="input mono" id="pg-method" style="width:110px">${['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].map(m => `<option>${m}</option>`).join('')}</select>
+            <div class="input-group" style="flex:1"><span class="prefix mono">/api/v1/</span><input class="input mono" id="pg-path" value="${esc((API.collections[0] || { slug: '' }).slug)}?per_page=5"></div>
+            <button class="btn primary" id="pg-send">ส่ง</button></div>
+          <div class="grid g2" style="gap:12px;margin-top:12px">
+            <div><label class="field"><span>API key <small>(ไม่บังคับ)</small></span><input class="input mono" id="pg-key" placeholder="bw_…"></label>
+              <label class="field"><span>Body (JSON) <small>สำหรับ POST / PATCH / PUT</small></span><textarea class="input code" id="pg-body" rows="7">{\n  \n}</textarea></label>
+              <div class="seg" id="pg-lang">${['curl', 'fetch', 'PHP', 'Python'].map((l, i) => `<button data-v="${l}" class="${i ? '' : 'on'}">${l}</button>`).join('')}</div>
+              <div class="log" id="pg-code" style="margin-top:8px;white-space:pre-wrap;word-break:break-all"></div></div>
+            <div><div class="row between"><b>ผลลัพธ์</b><span class="small muted" id="pg-meta"></span></div><div class="log" id="pg-out" style="min-height:260px;max-height:460px;overflow:auto;margin-top:6px">กด “ส่ง” เพื่อทดลอง</div></div>
+          </div></div></div>
+      <div class="grid g2" style="margin-top:16px;align-items:start">
+        <div class="card pad"><h2>เอกสาร endpoint</h2><div class="hint">ทุกชุดข้อมูลมี endpoint ครบ — พารามิเตอร์: <code>page</code> <code>per_page</code> <code>sort=-price,name</code> <code>q</code> <code>filter=price>50;category=coffee</code> <code>ฟิลด์=ค่า</code> <code>expand</code> <code>fields</code></div>
+          ${API.collections.map(c => `<details style="margin-bottom:8px"><summary style="cursor:pointer"><b>${esc(c.name)}</b> <code>/${esc(c.slug)}</code></summary>
+            <div class="small" style="margin:8px 0 4px">${[['GET', '', 'list'], ['POST', '', 'create'], ['GET', '/{_id}', 'view'], ['PATCH', '/{_id}', 'update'], ['DELETE', '/{_id}', 'delete']].map(([m, p, a]) =>
+              `<div class="row" style="gap:8px;margin:3px 0"><code style="width:62px;text-align:center">${m}</code><code>/${esc(c.slug)}${p}</code><span class="muted">${RULE_OPTS.find(r => r[0] === c.rules[a])[1]}</span></div>`).join('')}</div>
+            <table class="table small"><thead><tr><th>ฟิลด์</th><th>ชนิด</th><th>กฎ</th></tr></thead><tbody>${c.fields.map(f => `<tr><td class="mono">${esc(f.name)}${f.hidden ? ' <span class="badge">ซ่อน</span>' : ''}</td><td>${TYPES[f.type] || f.type}${f.relation ? ' → ' + esc(f.relation) : ''}</td>
+              <td class="muted">${[f.required && 'จำเป็น', f.unique && 'ไม่ซ้ำ', f.min != null && 'min ' + f.min, f.max != null && 'max ' + f.max, f.pattern && 'regex', f.options && f.options.length && f.options.join('/')].filter(Boolean).join(' · ')}</td></tr>`).join('')}</tbody></table></details>`).join('') || '<div class="muted">ยังไม่มีชุดข้อมูล</div>'}
+          <div class="small muted" style="margin-top:8px">ในหน้าเว็บใช้ JavaScript ได้เลย: <code>bw.list('${esc((API.collections[0] || { slug: 'products' }).slug)}', {sort: '-_id'})</code> · <code>bw.create(…)</code> · <code>bw.update(…)</code> · <code>bw.remove(…)</code></div></div>
+        <div class="card"><div class="card-head"><h2>บันทึกการเรียกล่าสุด</h2><button class="btn sm" id="log-refresh">${BW_ICON('refresh')} รีเฟรช</button></div><div id="api-logs" class="data-table-wrap" style="max-height:520px"></div></div>
+      </div>`;
+    document.getElementById('api-copy').onclick = () => navigator.clipboard.writeText(base).then(() => toast('คัดลอกแล้ว', 'ok'));
+    document.getElementById('api-on').onchange = async e => {
+      try { await api(`/api/sites/${site.id}/restapi`, { settings: { enabled: e.target.checked } }); toast(e.target.checked ? 'เปิด API แล้ว' : 'ปิด API แล้ว', 'ok'); renderApi(); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+    root.querySelectorAll('tr[data-slug] select').forEach(sel => sel.onchange = async () => {
+      sel.className = `input sm rule-${sel.value}`;
+      try { await api(`/api/sites/${site.id}/restapi`, { rules: { [sel.closest('tr').dataset.slug]: { [sel.dataset.a]: sel.value } } }); toast('บันทึกสิทธิ์แล้ว', 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
+    });
+    document.getElementById('api-save').onclick = async () => {
+      try {
+        await api(`/api/sites/${site.id}/restapi`, { settings: { cors: document.getElementById('api-cors').value, rate: document.getElementById('api-rate').value, log: document.getElementById('api-log').checked } });
+        toast('บันทึกแล้ว', 'ok');
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    document.getElementById('key-new').onclick = newKeyModal;
+    root.querySelectorAll('#key-list [data-id]').forEach(row => {
+      const id = row.dataset.id;
+      const rv = row.querySelector('[data-revoke]'), del = row.querySelector('[data-del]');
+      if (rv) rv.onclick = async () => {
+        if (!await confirmBox('ยกเลิก key', 'โปรแกรมที่ใช้ key นี้จะเรียก API ไม่ได้ทันที — ย้อนกลับไม่ได้', { ok: 'ยกเลิก key', danger: true })) return;
+        await api(`/api/apikeys/${id}/revoke`, {}); renderApi();
+      };
+      if (del) del.onclick = async () => { await api(`/api/apikeys/${id}/delete`, {}); renderApi(); };
+    });
+    playground(base);
+    loadLogs();
+    document.getElementById('log-refresh').onclick = loadLogs;
+  }
+
+  function newKeyModal() {
+    const m = modal(`<header><h2>สร้าง API key</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <label class="field"><span>ชื่อ</span><input class="input" name="name" placeholder="เช่น แอปมือถือ, ระบบหลังร้าน, n8n"></label>
+      <label class="check"><input type="checkbox" name="write">เขียนข้อมูลได้ (เพิ่ม/แก้ไข/ลบ ตามสิทธิ์ที่ตั้งเป็น “ต้องมี key”)</label>
+      <div class="sect-title">ใช้กับชุดข้อมูล <span class="small muted" style="text-transform:none;letter-spacing:0">— ไม่เลือก = ทุกชุด</span></div>
+      ${API.collections.map(c => `<label class="check"><input type="checkbox" data-col="${esc(c.slug)}">${esc(c.name)} <code>${esc(c.slug)}</code></label>`).join('')}
+      <div class="alert info" style="margin-top:10px">key ที่เขียนได้ห้ามใส่ในโค้ดหน้าเว็บ (ใครก็เปิดดูได้) — ใช้ในเซิร์ฟเวอร์ แอป หรือเครื่องมืออัตโนมัติเท่านั้น</div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>สร้าง</button></footer>`);
+    m.el.querySelector('[data-ok]').onclick = async () => {
+      const d = formData(m.el);
+      d.collections = [...m.el.querySelectorAll('[data-col]:checked')].map(x => x.dataset.col);
+      try {
+        const r = await api(`/api/sites/${site.id}/restapi/keys`, d);
+        m.close();
+        const k = modal(`<header><h2>key ใหม่: ${esc(r.key.name)}</h2></header><div class="body">
+          <div class="alert warn">คัดลอกเก็บไว้ตอนนี้ — key จะแสดงครั้งเดียว BuildWeb เก็บไว้แค่ค่าแฮช</div>
+          <div class="row" style="flex-wrap:nowrap"><code style="flex:1;word-break:break-all;padding:8px">${esc(r.plain)}</code><button class="btn" data-copy>${BW_ICON('copy')} คัดลอก</button></div>
+          <div class="small muted" style="margin-top:10px">ส่งใน header: <code>X-API-Key: ${esc(r.plain.slice(0, 10))}…</code> หรือ <code>Authorization: Bearer …</code></div></div>
+          <footer><button class="btn primary" data-close>เสร็จแล้ว</button></footer>`, { onClose: renderApi });
+        k.el.querySelector('[data-copy]').onclick = () => navigator.clipboard.writeText(r.plain).then(() => toast('คัดลอกแล้ว', 'ok'));
+      } catch (e) { showFieldError(m.el, e); }
+    };
+  }
+
+  function playground(base) {
+    let as = 'public', lang = 'curl';
+    const $ = id => document.getElementById(id);
+    const segs = (id, cb) => $(id).querySelectorAll('button').forEach(b => b.onclick = () => {
+      $(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset.v); code();
+    });
+    segs('pg-as', v => as = v); segs('pg-lang', v => lang = v);
+    const parts = () => {
+      const method = $('pg-method').value, path = $('pg-path').value.replace(/^\/+/, ''), key = $('pg-key').value.trim();
+      let bodyText = method === 'GET' || method === 'DELETE' ? '' : $('pg-body').value.trim();
+      return { method, path, key, bodyText, url: `${base}/${path}` };
+    };
+    function code() {
+      const p = parts(), b = p.bodyText;
+      const hk = p.key ? p.key : '';
+      const out = {
+        curl: `curl -X ${p.method} '${p.url}'${hk ? ` \\\n  -H 'X-API-Key: ${hk}'` : ''}${b ? ` \\\n  -H 'Content-Type: application/json' \\\n  -d '${b.replace(/\n\s*/g, ' ')}'` : ''}`,
+        fetch: `const res = await fetch('${p.url}', {\n  method: '${p.method}',\n  headers: {${hk ? ` 'X-API-Key': '${hk}',` : ''}${b ? " 'Content-Type': 'application/json'" : ''} },${b ? `\n  body: JSON.stringify(${b.replace(/\n\s*/g, ' ')}),` : ''}\n});\nconst data = await res.json();`,
+        PHP: `$ch = curl_init('${p.url}');\ncurl_setopt_array($ch, [\n  CURLOPT_CUSTOMREQUEST => '${p.method}',\n  CURLOPT_RETURNTRANSFER => true,\n  CURLOPT_HTTPHEADER => [${hk ? `'X-API-Key: ${hk}', ` : ''}'Content-Type: application/json'],${b ? `\n  CURLOPT_POSTFIELDS => '${b.replace(/\n\s*/g, ' ')}',` : ''}\n]);\n$data = json_decode(curl_exec($ch), true);`,
+        Python: `import requests\nr = requests.request('${p.method}', '${p.url}'${hk ? `,\n    headers={'X-API-Key': '${hk}'}` : ''}${b ? `,\n    json=${b.replace(/\n\s*/g, ' ').replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False').replace(/\bnull\b/g, 'None')}` : ''})\ndata = r.json()`,
+      }[lang];
+      $('pg-code').textContent = out;
+    }
+    ['pg-method', 'pg-path', 'pg-key', 'pg-body'].forEach(id => $(id).addEventListener('input', code));
+    code();
+    $('pg-send').onclick = async () => {
+      const p = parts(), h = {};
+      if (as === 'public') h['X-BW-As'] = 'public';
+      if (p.key) h['X-API-Key'] = p.key;
+      if (p.bodyText) h['Content-Type'] = 'application/json';
+      const t0 = performance.now();
+      $('pg-out').textContent = 'กำลังส่ง…';
+      try {
+        const r = await fetch(`/preview/${site.slug}/api/v1/${p.path}`, { method: p.method, headers: h, body: p.bodyText || undefined });
+        const ms = Math.round(performance.now() - t0), text = await r.text();
+        $('pg-meta').innerHTML = `<span class="badge ${r.ok ? 'ok' : r.status >= 500 ? 'err' : 'warn'}">${r.status}</span> ${ms} ms`;
+        try { $('pg-out').textContent = text ? JSON.stringify(JSON.parse(text), null, 2) : '(ไม่มีเนื้อหา)'; } catch (e) { $('pg-out').textContent = text; }
+        loadLogs();
+      } catch (e) { $('pg-out').textContent = e.message; }
+    };
+  }
+
+  async function loadLogs() {
+    const box = document.getElementById('api-logs');
+    if (!box) return;
+    const r = await api(`/api/sites/${site.id}/restapi/logs`);
+    box.innerHTML = r.logs.length ? `<table class="table small"><thead><tr><th>เวลา</th><th>คำขอ</th><th>ผล</th><th class="num">ms</th></tr></thead><tbody>
+      ${r.logs.map(x => `<tr title="${esc(x.error || '')}"><td class="muted" style="white-space:nowrap">${when(x.at)}</td><td class="mono" style="word-break:break-all"><b>${esc(x.method)}</b> ${esc(x.path.replace(/^\/(preview\/)?[^/]+\/api\/v1/, ''))}
+        <div class="muted">${esc(x.key || x.ip)}</div></td><td><span class="badge ${x.status < 300 ? 'ok' : x.status >= 500 ? 'err' : 'warn'}">${x.status}</span></td><td class="num">${x.ms}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty-state">ยังไม่มีการเรียก API</div>';
   }
 
   // ---------------------------------------------------------------- statistics

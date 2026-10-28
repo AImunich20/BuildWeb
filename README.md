@@ -93,6 +93,33 @@ BuildWeb ยังไม่ได้ซื้อใบรับรองนั�
 - ระบบเดาชนิดฟิลด์ให้ (ตัวเลข, รูป, ลิงก์, วันที่, ข้อความยาว) · ส่งออก CSV ได้
 - **แก้ไขทีละแถวแบบเต็ม** — ช่องตามชนิดฟิลด์, ปุ่มเลือกรูป, ตัวแก้ไขข้อความ (หัวข้อ ตัวหนา รายการ ลิงก์ รูป) สำหรับฟิลด์ HTML
 
+### 4.0 Backend & REST API — ใหม่ใน v0.2
+
+<img src="docs/images/api.png" alt="REST API" width="100%">
+
+ทุกชุดข้อมูลมี **REST API** ให้ทันที ที่ `http://<โฮสต์>/<เว็บ>/api/v1/<ชุดข้อมูล>` — ใช้กับแอปมือถือ, หน้าเว็บอื่น, ระบบหลังร้าน, n8n/Zapier
+
+```bash
+curl 'http://192.168.1.10:8090/bean-cafe/api/v1/products?sort=-price&per_page=6&filter=price>50'
+curl -X POST 'http://…/api/v1/orders' -H 'X-API-Key: bw_…' -H 'Content-Type: application/json' -d '{"product": 3, "qty": 2}'
+```
+
+| | |
+|---|---|
+| Endpoint | `GET /<ชุด>` · `POST /<ชุด>` · `GET/PATCH/PUT/DELETE /<ชุด>/<_id>` · `GET /openapi.json` |
+| พารามิเตอร์ | `page` `per_page` (≤200) · `sort=-price,name` · `q` · `filter=price>50;category=coffee` · `ฟิลด์=ค่า` · `expand=author` · `fields=name,price` |
+| สิทธิ์ | ต่อชุดข้อมูล × การกระทำ: ทุกคน / ต้องมี API key / ปิด · ฟิลด์ “ซ่อนจาก API” ไม่ถูกส่งออก |
+| API key | อ่านอย่างเดียว หรืออ่าน+เขียน · จำกัดชุดข้อมูลได้ · ยกเลิกได้ทันที · เก็บแค่แฮช (`X-API-Key` หรือ `Authorization: Bearer`) |
+| ความปลอดภัย | CORS ตามโดเมน, จำกัดครั้งต่อนาที, บันทึกการเรียก 30 วัน, API ปิดไว้จนกว่าจะเปิดเอง |
+| ตรวจข้อมูล | ชนิด + กฎของฟิลด์ (จำเป็น, ห้ามซ้ำ, ต่ำสุด/สูงสุด, regex, ตัวเลือก, relation) — ผิดได้ `422` พร้อมข้อความทุกช่อง |
+| MySQL / XAMPP | ชุดข้อมูลแบบเชื่อมสด อ่าน-เขียนตารางจริงผ่าน API |
+| เครื่องมือ | แท็บ “API” มีตัวทดลองเรียก + โค้ด curl/fetch/PHP/Python, เอกสาร endpoint, บันทึกการเรียก, `openapi.json` สำหรับ Postman/Swagger |
+| ในหน้าเว็บ | `bw.list('products', {sort: '-price'})` · `bw.create('reviews', {...})` · `bw.update()` · `bw.remove()` |
+
+**ฟิลด์:** ข้อความ, ข้อความยาว, HTML, ตัวเลข, ใช่/ไม่, วันที่, วันเวลา, อีเมล, ลิงก์, รูป, ตัวเลือก, **เชื่อมชุดข้อมูล** (หนึ่ง/หลายแถว), JSON — ในหน้าเว็บใช้ `{{author.name}}` ดึงค่าจากแถวที่เชื่อมได้
+
+> API ทำงานบนเซิร์ฟเวอร์โฮสติ้งของ BuildWeb (เครื่องนี้, LAN, Tailscale) · เว็บที่เผยแพร่ไป GitHub Pages/Netlify/FTP เป็นไฟล์อย่างเดียว — การ deploy backend ขึ้นเซิร์ฟเวอร์อยู่ในเฟส 4
+
 ### 4.1 หน้ารายละเอียด, ค้นหา & บทความ — ใหม่ใน v0.1.4
 
 <img src="docs/images/data-pages.png" alt="หน้ารายการพร้อมค้นหาและหมวดหมู่" width="100%">
@@ -312,10 +339,13 @@ flowchart LR
 - [x] ฟอร์มที่บันทึกลงชุดข้อมูลพร้อมระบบอนุมัติ (v0.1.4)
 - [x] เผยแพร่ขึ้น GitHub Pages / Netlify / FTP ด้วยปุ่มเดียว (v0.1.4)
 - [x] sitemap.xml, robots.txt, คะแนน SEO ต่อหน้า, สถิติผู้เข้าชม, ปุ่มติดต่อลอย (v0.1.4)
-- [ ] คลังรูปฟรี (Unsplash/Pexels) และย่อรูปเป็น WebP อัตโนมัติ
-- [ ] บันทึกบล็อกของตัวเองไว้ใช้ซ้ำ · แม่แบบเพิ่ม · หลายภาษา
-- [ ] สำรอง/กู้คืนในคลิกเดียว · หลายผู้ใช้
-- [ ] ผู้ช่วย AI เขียนข้อความและสร้างหน้า
+- [x] **เฟส 1 · Backend core (v0.2):** REST API อัตโนมัติ, API key, สิทธิ์, CORS, rate limit, log, OpenAPI, ตัวทดลอง API, ฟิลด์พร้อมกฎและ relation, JS SDK
+- [ ] **เฟส 2 · ผู้ใช้ของเว็บ:** สมัคร/ล็อกอิน/ลืมรหัส, บทบาท, หน้าเฉพาะสมาชิก, ข้อมูลของใครของมัน, บล็อกล็อกอิน
+- [ ] **เฟส 3 · Logic:** webhook, งานตั้งเวลา, endpoint เขียนเอง, เชื่อม API ภายนอก + เก็บ secret
+- [ ] **เฟส 4 · Deploy full-stack:** backend ขึ้นเซิร์ฟเวอร์ (Docker/VPS + HTTPS + โดเมน), PostgreSQL, สำรอง/กู้คืน, เข้ารหัส secret
+- [ ] **เฟส 5 · งานทีม:** หลายผู้ใช้ + สิทธิ์, โหมด CMS ให้ลูกค้า, ตัวแก้โค้ด, คอมโพเนนต์เอง, Git
+- [ ] **เฟส 6 · E-commerce:** สินค้า/ตะกร้า/คำสั่งซื้อ, PromptPay/Omise/Stripe, LINE Messaging API
+- [ ] คลังรูปฟรี + WebP · แม่แบบเพิ่ม · หลายภาษา · ผู้ช่วย AI
 
 ประวัติทุกเวอร์ชันอยู่ที่ [CHANGELOG.md](CHANGELOG.md)
 
@@ -342,6 +372,7 @@ backend/
     generate.py          หน้ารายการ/รายละเอียด, ระบบบทความ, ฟอร์มจากชุดข้อมูล
     forms.py stats.py    ฟอร์ม → ชุดข้อมูล (อนุมัติ, กันสแปม) · สถิติผู้เข้าชม
     seo.py publish.py    คะแนน SEO · เผยแพร่ GitHub Pages / Netlify / FTP
+    schema.py restapi.py ฟิลด์ + การตรวจข้อมูล · REST API (keys, สิทธิ์, CORS, rate limit, OpenAPI)
     widgets.py           ค้นหา/หมวดหมู่/แบ่งหน้า (JS) · ปุ่มติดต่อลอย
     sections.py          บล็อกสำเร็จรูปและแม่แบบ
     importer.py          นำเข้าเว็บ (html/zip/โฟลเดอร์/GitHub)

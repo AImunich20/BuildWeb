@@ -57,6 +57,7 @@ class Site(models.Model):
     )
     contact = models.JSONField("ปุ่มติดต่อลอย", default=dict, blank=True)
     publish = models.JSONField("ปลายทางเผยแพร่", default=dict, blank=True)  # {"github": {...}, "netlify": {...}, "ftp": {...}}
+    api = models.JSONField("ตั้งค่า REST API", default=dict, blank=True)  # {"enabled", "cors", "rate", "log"}
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -301,7 +302,8 @@ class Collection(models.Model):
 
     COPY, LIVE = "copy", "live"
     MODES = [(COPY, "เก็บไว้ใน BuildWeb"), (LIVE, "เชื่อมสดกับ MySQL")]
-    FIELD_TYPES = ["text", "longtext", "number", "image", "link", "date", "bool", "html"]
+    FIELD_TYPES = ["text", "longtext", "html", "number", "bool", "date", "datetime", "email", "link", "image", "select",
+                   "relation", "json"]  # labels and validation: schema.py
 
     site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="collections")
     name = models.CharField("ชื่อ", max_length=120)
@@ -366,3 +368,47 @@ class Stat(models.Model):
         indexes = [models.Index(fields=["site", "day"])]
         verbose_name = "สถิติผู้เข้าชม"
         verbose_name_plural = "สถิติผู้เข้าชม"
+
+
+class ApiKey(models.Model):
+    """A key for a site's REST API. Only a SHA-256 hash is stored; the key is shown once when created."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="api_keys")
+    name = models.CharField("ชื่อ", max_length=100)
+    prefix = models.CharField(max_length=16, db_index=True)  # first characters, to find the key and show it
+    key_hash = models.CharField(max_length=64)
+    write = models.BooleanField("เขียนข้อมูลได้", default=False)
+    collections = models.JSONField(default=list, blank=True)  # [] = every collection
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+    revoked = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "API key"
+        verbose_name_plural = "API keys"
+
+    def __str__(self):
+        return f"{self.site.name} / {self.name} ({self.prefix}…)"
+
+    def allows(self, collection_slug, write=False):
+        if self.revoked or (write and not self.write):
+            return False
+        return not self.collections or collection_slug in self.collections
+
+
+class ApiLog(models.Model):
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="api_logs")
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    method = models.CharField(max_length=8)
+    path = models.CharField(max_length=300)
+    status = models.PositiveSmallIntegerField()
+    ms = models.PositiveIntegerField(default=0)
+    key = models.ForeignKey(ApiKey, null=True, blank=True, on_delete=models.SET_NULL)
+    ip = models.CharField(max_length=64, blank=True)
+    error = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        ordering = ["-at"]
+        verbose_name = "บันทึกการเรียก API"
+        verbose_name_plural = "บันทึกการเรียก API"

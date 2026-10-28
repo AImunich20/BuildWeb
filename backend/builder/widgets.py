@@ -98,6 +98,38 @@ DATA_JS = r"""
   });
 """
 
+# Tiny client for the site's REST API, for custom JavaScript on pages:
+#   bw.list('products', {sort: '-price', per_page: 6}).then(r => r.items)
+#   bw.get('products', 12) · bw.create('reviews', {name, comment}) · bw.update(...) · bw.remove(...)
+#   bw.key = 'bw_…' to send an API key (only for keys meant to be public, e.g. read-only).
+SDK_JS = r"""
+window.bw = window.bw || (function(){
+  var base = new URL('api/v1/', document.baseURI).href;
+  function req(method, path, body, params){
+    var url = base + path;
+    if (params) { var q = new URLSearchParams(); Object.keys(params).forEach(function(k){ if (params[k] != null) q.set(k, params[k]); }); if (String(q)) url += '?' + q; }
+    var h = {}; if (body) h['Content-Type'] = 'application/json'; if (api.key) h['X-API-Key'] = api.key;
+    return fetch(url, {method: method, headers: h, body: body ? JSON.stringify(body) : undefined}).then(function(r){
+      if (r.status === 204) return null;
+      return r.json().then(function(j){
+        if (!r.ok) { var e = new Error((j.error && j.error.message) || r.status); e.status = r.status; e.code = j.error && j.error.code; e.fields = j.error && j.error.fields; throw e; }
+        return j;
+      });
+    });
+  }
+  var api = {
+    key: '',
+    list: function(c, params){ return req('GET', c, null, params); },
+    get: function(c, id, params){ return req('GET', c + '/' + encodeURIComponent(id), null, params); },
+    create: function(c, data){ return req('POST', c, data); },
+    update: function(c, id, data){ return req('PATCH', c + '/' + encodeURIComponent(id), data); },
+    replace: function(c, id, data){ return req('PUT', c + '/' + encodeURIComponent(id), data); },
+    remove: function(c, id){ return req('DELETE', c + '/' + encodeURIComponent(id)); }
+  };
+  return api;
+})();
+"""
+
 # --- floating contact buttons ---------------------------------------------------------------------
 
 CHANNELS = [

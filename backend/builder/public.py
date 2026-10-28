@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from buildweb import config
 
-from . import forms, notify, render, stats
+from . import forms, notify, render, restapi, stats
 from .middleware import SITE_ENV_KEY
 from .models import FormSubmission, Site
 
@@ -21,6 +21,8 @@ def serve(request, site, path, include_drafts):
         return receive_form(request, site)
     root = request.path[:len(request.path) - len(path)] if path and request.path.endswith(path) else request.path
     base = request.build_absolute_uri(root if root.endswith("/") else root + "/")
+    if path == "api" or path.startswith("api/"):
+        return restapi.handle(request, site, path[3:], base_url=site.base_url or base)
     found = render.resolve(site, path, include_drafts, base=base)
     if found is None:
         return not_found(site)

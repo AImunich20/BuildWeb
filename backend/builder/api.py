@@ -15,9 +15,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from buildweb import config
 
-from . import data, dbtools, exporter, generate, importer, navbar, notify, publish, sections, seo, services, stats, system, widgets
+from . import data, dbtools, restapi, schema, exporter, generate, importer, navbar, notify, publish, sections, seo, services, stats, system, widgets
 from .hosting import server as hosting
-from .models import (DEFAULT_THEME, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
+from .models import (DEFAULT_THEME, ApiKey, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
                      SharedSection, Site)
 
 MAX_UPLOAD = 200 * 1024 * 1024
@@ -71,6 +71,7 @@ def site_json(site):
         "home_page": home.id if home else None, "page_count": site.pages.count(),
         "shared": [shared_json(sec) for sec in site.shared_sections.order_by("-kind")],
         "base_url": site.base_url, "contact": widgets.clean_contact(site.contact), "publish": publish_json(site),
+        "api": restapi.site_settings(site),
     }
 
 
@@ -871,9 +872,16 @@ def clean_fields(raw):
     used, out = set(), []
     for f in raw or []:
         name = data.field_key(f.get("name") or f.get("label"), used)
-        typ = f.get("type") if f.get("type") in Collection.FIELD_TYPES else "text"
-        out.append({"name": name, "label": (f.get("label") or name)[:100], "type": typ, "source": f.get("source", name)})
+        try:
+            out.append(schema.clean_field(f, name))
+        except schema.ValidationError as e:
+            raise ApiError(f"ฟิลด์ {name}: {e.fields[name]}")
     return out
+
+
+def validation_error(col, e):
+    labels = {f["name"]: f.get("label") or f["name"] for f in col.fields}
+    return ApiError(" · ".join(f"{labels.get(k, k)}: {v}" for k, v in e.fields.items()))
 
 
 @require_GET
@@ -1069,9 +1077,14 @@ def record_save(request, col_id):
     if c.mode != Collection.COPY:
         raise ApiError("ชุดข้อมูลแบบเชื่อมสดแก้ไขได้ที่ MySQL (phpMyAdmin)")
     d = body(request)
-    values = {f["name"]: d.get("data", {}).get(f["name"], "") for f in c.fields}
-    if d.get("_id"):
-        r = get_object_or_404(Record, pk=d["_id"], collection=c)
+    raw = d.get("data", {})
+    r = get_object_or_404(Record, pk=d["_id"], collection=c) if d.get("_id") else None
+    try:  # inline edits send the whole row; new rows get defaults for what they leave out
+        values = schema.full_validate(c, raw, partial=r is not None, current=r.data if r else None,
+                                      exclude_id=r.id if r else None)
+    except schema.ValidationError as e:
+        raise validation_error(c, e)
+    if r:
         r.data = {**r.data, **values}
         r.save()
     else:
@@ -1245,3 +1258,84 @@ def navbar_settings(request, site_id):
     head = site.shared_sections.filter(kind=SharedSection.HEADER).first()
     return {"settings": navbar.settings(site), "managed": bool(head and head.managed), "enabled": bool(head and head.enabled),
             "layouts": navbar.LAYOUTS, "pages": [{"title": p.menu_label, "href": p.filename} for p in site.pages.all()]}
+
+
+# --- REST API management --------------------------------------------------------------------------
+
+def key_json(k):
+    return {"id": k.id, "name": k.name, "prefix": k.prefix, "write": k.write, "collections": k.collections,
+            "created_at": k.created_at.isoformat(), "last_used": k.last_used.isoformat() if k.last_used else None,
+            "revoked": k.revoked}
+
+
+@api
+def restapi_settings(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request)
+        if isinstance(d.get("settings"), dict):
+            cur = restapi.site_settings(site)
+            st = d["settings"]
+            if "enabled" in st:
+                cur["enabled"] = as_bool(st["enabled"])
+            if "log" in st:
+                cur["log"] = as_bool(st["log"])
+            if "cors" in st:
+                cur["cors"] = str(st["cors"] or "").strip()[:1000] or "*"
+            if "rate" in st:
+                try:
+                    cur["rate"] = max(0, min(100000, int(st["rate"] or 0)))
+                except ValueError:
+                    raise ApiError("จำนวนครั้งต่อนาทีต้องเป็นตัวเลข", field="rate")
+            site.api = cur
+            site.save(update_fields=["api"])
+        for slug, r in (d.get("rules") or {}).items():
+            col = site.collections.filter(slug=slug).first()
+            if col and isinstance(r, dict):
+                cur = restapi.rules(col)
+                cur.update({k: v for k, v in r.items() if k in restapi.ACTIONS and v in restapi.RULES})
+                col.options = {**(col.options or {}), "api": cur}
+                col.save(update_fields=["options"])
+    return {
+        "settings": restapi.site_settings(site),
+        "collections": [{"id": c.id, "slug": c.slug, "name": c.name, "mode": c.mode, "rules": restapi.rules(c),
+                         "fields": c.fields, "hidden": [f["name"] for f in c.fields if f.get("hidden")]}
+                        for c in site.collections.all()],
+        "keys": [key_json(k) for k in site.api_keys.all()],
+    }
+
+
+@require_POST
+@api
+def restapi_key_create(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request)
+    name = (d.get("name") or "").strip()
+    if not name:
+        raise ApiError("ตั้งชื่อ key ก่อน เช่น “แอปมือถือ” หรือ “เว็บหลังบ้าน”", field="name")
+    cols = [c for c in (d.get("collections") or []) if site.collections.filter(slug=c).exists()]
+    key, plain = restapi.create_key(site, name, as_bool(d.get("write")), cols)
+    return {"key": key_json(key), "plain": plain}
+
+
+@require_POST
+@api
+def restapi_key_action(request, key_id, action):
+    key = get_object_or_404(ApiKey, pk=key_id)
+    if action == "revoke":
+        key.revoked = True
+        key.save(update_fields=["revoked"])
+    elif action == "delete":
+        key.delete()
+    else:
+        raise ApiError("unknown action", status=404)
+    return {}
+
+
+@require_GET
+@api
+def restapi_logs(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    logs = site.api_logs.select_related("key")[:200]
+    return {"logs": [{"at": x.at.isoformat(), "method": x.method, "path": x.path, "status": x.status, "ms": x.ms,
+                      "key": x.key.name if x.key else "", "ip": x.ip, "error": x.error} for x in logs]}

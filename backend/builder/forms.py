@@ -13,7 +13,7 @@ from datetime import date
 
 from django.db.models import Max
 
-from . import data
+from . import data, schema
 from .models import Collection, Record
 
 RATE_WINDOW = 60  # seconds
@@ -78,6 +78,11 @@ def save_to_collection(site, slug, posted):
     for f in col.fields:  # a date field left out = the day it was sent
         if f.get("type") == "date" and not values.get(f["name"]):
             values[f["name"]] = date.today().isoformat()
+    try:
+        values = schema.full_validate(col, values)
+    except schema.ValidationError as e:
+        labels = {f["name"]: f.get("label") or f["name"] for f in col.fields}
+        raise FormError(" · ".join(f"{labels.get(k, k)}: {v}" for k, v in e.fields.items()))
     approved = col.opt("auto_approve")
     if col.mode == Collection.LIVE:
         insert_live(col, values, approved)
@@ -94,23 +99,8 @@ def save_to_collection(site, slug, posted):
 def insert_live(col, values, approved):
     if not col.connection:
         raise FormError("ชุดข้อมูลนี้ไม่มีการเชื่อมต่อ MySQL")
-    source = {f["name"]: f.get("source", f["name"]) for f in col.fields}
-    row = {source[k]: v for k, v in values.items() if k in source}
-    if "approved" in source:
-        row[source["approved"]] = 1 if approved else 0
-    cols = list(row)
-    sql = (f"INSERT INTO {data.qname(col.source_table)} ({', '.join(data.qname(c) for c in cols)}) "
-           f"VALUES ({', '.join(['%s'] * len(cols))})")
     try:
-        conn = data.connect(col.connection.as_config(col.source_database), database=col.source_database)
+        data.live_insert(col, values, approved)
     except RuntimeError as e:
-        raise FormError("บันทึกไม่สำเร็จ: ฐานข้อมูลไม่พร้อม") from e
-    try:
-        with conn.cursor() as c:
-            c.execute(sql, [row[k] for k in cols])
-        conn.commit()
-    except Exception as e:
         raise FormError(f"บันทึกลง MySQL ไม่สำเร็จ: {e}") from e
-    finally:
-        conn.close()
     data.invalidate(col)

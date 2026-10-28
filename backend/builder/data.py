@@ -20,6 +20,7 @@ working.
 import csv
 import html as htmllib
 import io
+import json
 import re
 import threading
 import time
@@ -215,6 +216,75 @@ def fetch_table(cfg, database, table, order="", desc=False, limit=500):
         conn.close()
 
 
+_pk_cache = {}
+
+
+def primary_key(col):
+    """The primary-key column of a live collection's MySQL table (cached), or None."""
+    if not (col.connection_id and col.source_table):
+        return None
+    k = (col.id, col.source_database, col.source_table)
+    if k not in _pk_cache:
+        conn = connect(col.connection.as_config(col.source_database), database=col.source_database)
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s "
+                          "AND COLUMN_KEY='PRI' ORDER BY ORDINAL_POSITION LIMIT 1", (col.source_database, col.source_table))
+                r = c.fetchone()
+            _pk_cache[k] = r["c"] if r else None
+        finally:
+            conn.close()
+    return _pk_cache[k]
+
+
+def _live_exec(col, sql, args):
+    conn = connect(col.connection.as_config(col.source_database), database=col.source_database)
+    try:
+        with conn.cursor() as c:
+            c.execute(sql, args)
+            last = c.lastrowid
+        conn.commit()
+        return last
+    except pymysql.err.MySQLError as e:
+        raise RuntimeError(f"MySQL: {e.args[1] if len(e.args) > 1 else e}") from e
+    finally:
+        conn.close()
+
+
+def _live_columns(col, values):
+    source = {f["name"]: f.get("source", f["name"]) for f in col.fields}
+    return {source[k]: (json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v)
+            for k, v in values.items() if k in source}
+
+
+def live_insert(col, values, approved=True):
+    """INSERT a row into a live collection's table; returns the new id (auto-increment) if any."""
+    row = _live_columns(col, values)
+    if "approved" in col.field_names:
+        row[{f["name"]: f.get("source", f["name"]) for f in col.fields}["approved"]] = 1 if approved else 0
+    cols = list(row)
+    if not cols:
+        raise RuntimeError("ไม่มีข้อมูลที่จะบันทึก")
+    sql = (f"INSERT INTO {qname(col.source_table)} ({', '.join(qname(c) for c in cols)}) "
+           f"VALUES ({', '.join(['%s'] * len(cols))})")
+    return _live_exec(col, sql, [row[c] for c in cols])
+
+
+def live_update(col, pk_value, values):
+    pk = primary_key(col)
+    row = {c: v for c, v in _live_columns(col, values).items() if c != pk}
+    if not row:
+        return
+    sql = (f"UPDATE {qname(col.source_table)} SET {', '.join(f'{qname(c)}=%s' for c in row)} "
+           f"WHERE {qname(pk)}=%s LIMIT 1")
+    _live_exec(col, sql, list(row.values()) + [pk_value])
+
+
+def live_delete(col, pk_value):
+    pk = primary_key(col)
+    _live_exec(col, f"DELETE FROM {qname(col.source_table)} WHERE {qname(pk)}=%s LIMIT 1", [pk_value])
+
+
 # --- collections ----------------------------------------------------------------------------------
 
 def make_fields(columns, rows, sql_types=None):
@@ -297,7 +367,7 @@ def rows_for(col):
         with _live_lock:
             _live_cache[col.id] = (now, out)
         return out
-    return [r.data for r in col.records.filter(approved=True)]
+    return [{**r.data, "_id": r.id} for r in col.records.filter(approved=True)]
 
 
 # --- detail pages ---------------------------------------------------------------------------------
@@ -467,29 +537,35 @@ def parse_sql_dump(text):
 
 # --- rendering ------------------------------------------------------------------------------------
 
+def filter_rows(rows, expr, blocked=()):
+    """Rows matching "field=value;price>50;name~lat" (=, !=, ~ contains, >, <, >=, <=)."""
+    for cond in (expr or "").split(";"):
+        m = re.match(r"\s*([^!=~<>\s]+)\s*(!=|=|~|>=|<=|>|<)\s*(.*?)\s*$", cond)
+        if not m or m.group(1) in blocked:
+            continue
+        f, op, val = m.groups()
+
+        def ok(r, f=f, op=op, val=val):
+            v = r.get(f, "")
+            if op in (">", "<", ">=", "<="):
+                try:
+                    a, b = float(v), float(val)
+                except (TypeError, ValueError):
+                    return False
+                return {">": a > b, "<": a < b, ">=": a >= b, "<=": a <= b}[op]
+            sv = str(v).lower()
+            if op == "~":
+                return val.lower() in sv
+            return (sv == val.lower()) == (op == "=")
+
+        rows = [r for r in rows if ok(r)]
+    return rows
+
+
 def _apply_query(rows, attrs):
     flt = ATTR("data-bw-filter").search(attrs)
     if flt and flt.group(1).strip():
-        for cond in flt.group(1).split(";"):
-            m = re.match(r"\s*([^!=~<>\s]+)\s*(!=|=|~|>=|<=|>|<)\s*(.*?)\s*$", cond)
-            if not m:
-                continue
-            f, op, val = m.groups()
-
-            def ok(r, f=f, op=op, val=val):
-                v = r.get(f, "")
-                if op in (">", "<", ">=", "<="):
-                    try:
-                        a, b = float(v), float(val)
-                    except (TypeError, ValueError):
-                        return False
-                    return {">": a > b, "<": a < b, ">=": a >= b, "<=": a <= b}[op]
-                sv = str(v).lower()
-                if op == "~":
-                    return val.lower() in sv
-                return (sv == val.lower()) == (op == "=")
-
-            rows = [r for r in rows if ok(r)]
+        rows = filter_rows(rows, flt.group(1))
     sort = ATTR("data-bw-sort").search(attrs)
     if sort and sort.group(1).strip():
         key = sort.group(1).strip()
@@ -652,6 +728,7 @@ class Binder:
         self._cols = None
         self._rows = {}
         self._detail = None
+        self._by_id = {}
         self.errors = []
 
     def collections(self):
@@ -690,9 +767,29 @@ class Binder:
                     self._rows[slug] = []
         return self._rows[slug]
 
+    def related(self, col, row, key):
+        """{{author.name}}: a field of the row(s) a relation field points to."""
+        head, _, rest = key.partition(".")
+        f = next((x for x in (col.fields if col else []) if x["name"] == head and x.get("type") == "relation"), None)
+        if not f or not rest:
+            return None
+        target = self.collections().get(f.get("relation"))
+        if not target or target.mode != target.COPY:
+            return None
+        if target.slug not in self._by_id:
+            self._by_id[target.slug] = {r.id: r.data for r in target.records.filter(approved=True)}
+        by_id = self._by_id[target.slug]
+        v = row.get(head)
+        ids = v if isinstance(v, list) else [v]
+        return ", ".join(str(by_id[i].get(rest, "")) for i in ids if i in by_id)
+
     def global_value(self, key):
         if self.row is not None and key in self.row:
             return self.row[key]
+        if self.row is not None and "." in key and self.page is not None and self.page.collection_id:
+            v = self.related(self.page.collection, self.row, key)
+            if v is not None:
+                return v
         head, _, rest = key.partition(".")
         if head == "site" and rest in ("name", "description", "slug"):
             return getattr(self.site, rest)
@@ -742,9 +839,14 @@ class Binder:
                 if not rows:
                     empty = ATTR("data-bw-empty").search(attrs)
                     out.append(f'<p class="bw-empty">{htmllib.escape(empty.group(1)) if empty else ""}</p>' if empty else "")
+                col = self.collections().get(slug)
                 for i, row in enumerate(rows, 1):
                     def resolve(k, row=row, i=i):
-                        return i if k == "#" else (row.get(k) if k in row else None)
+                        if k == "#":
+                            return i
+                        if k in row:
+                            return row.get(k)
+                        return self.related(col, row, k) if "." in k else None
 
                     item = _fill(_conditions(template, resolve), resolve)
                     item = self._repeats(item)  # nested repeats of other collections

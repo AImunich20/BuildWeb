@@ -56,7 +56,7 @@ def spark_svg(values, w=120, h=28):
 
 def site_manage(request, site_id, tab="pages"):
     site = get_object_or_404(Site, pk=site_id)
-    if tab not in ("pages", "data", "files", "forms", "stats", "settings", "export"):
+    if tab not in ("pages", "data", "api", "files", "forms", "stats", "settings", "export"):
         tab = "pages"
     data = {
         "site": site_json(site),

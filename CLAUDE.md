@@ -41,6 +41,11 @@ user in Thai. The UI copy is in Thai.
   - `seo.py` (scores), `stats.py` (hosting-server visit counters in `Stat`, buffered), `publish.py` (GitHub
     Pages via the git data API, Netlify zip deploy, FTP; background jobs; tokens in config.json "publish").
     Never publish to real GitHub/Netlify accounts in tests: `publish.http`/`FTP` are mocked.
+  - `schema.py`: field definitions + validation (`full_validate`), used by the admin row editor, forms and the
+    API. `restapi.py`: the public REST API at `<site>/api/v1/` (routed from `public.serve`); access rules in
+    `Collection.options["api"]`, site settings in `Site.api` (off by default), `ApiKey` (SHA-256 only), `ApiLog`.
+    In-app preview requests are the owner unless they send `X-BW-As: public`. Live collections write through
+    `data.live_insert/update/delete` using the table's primary key.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus
