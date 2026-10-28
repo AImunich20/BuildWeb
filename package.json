@@ -1,0 +1,25 @@
+{
+  "name": "buildweb",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "vendor": "sh scripts/vendor.sh",
+    "dmg": "tauri build --bundles app && sh scripts/make-dmg.sh",
+    "release": "sh scripts/release.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "grapesjs": "0.23.8",
+    "grapesjs-blocks-basic": "1.0.2",
+    "grapesjs-component-countdown": "1.0.2",
+    "grapesjs-custom-code": "1.0.2",
+    "grapesjs-navbar": "1.0.2",
+    "grapesjs-parser-postcss": "1.0.3",
+    "grapesjs-plugin-forms": "2.0.6",
+    "grapesjs-style-bg": "2.0.2",
+    "grapesjs-tabs": "1.0.6",
+    "grapesjs-tooltip": "0.1.8"
+  }
+}

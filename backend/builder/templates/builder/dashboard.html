@@ -1,0 +1,74 @@
+{% extends "builder/base.html" %}
+{% block title %}เว็บไซต์ของฉัน · BuildWeb{% endblock %}
+{% block main %}
+<div class="topline">
+  <div><h1>เว็บไซต์ของฉัน</h1><div class="sub">สร้าง แก้ไข และเผยแพร่เว็บไซต์ด้วยการลากวาง</div></div>
+  <button class="btn primary" id="new-site">＋ สร้างเว็บใหม่</button>
+</div>
+
+<div class="grid g4" style="margin-bottom:26px">
+  <div class="card stat"><b>{{ stats.sites }}</b><span>เว็บไซต์</span></div>
+  <div class="card stat"><b>{{ stats.pages }}</b><span>หน้าทั้งหมด</span></div>
+  <div class="card stat"><b>{{ stats.unread }}</b><span>ข้อความฟอร์มที่ยังไม่อ่าน</span></div>
+  <div class="card stat">
+    {% if hosting.running %}<b style="color:var(--ok)">● ออนไลน์</b><span class="mono">{{ hosting.base }}</span>
+    {% else %}<b style="color:var(--muted)">○ ปิดอยู่</b><span><a href="/settings/">เปิดโฮสติ้ง →</a></span>{% endif %}
+  </div>
+</div>
+
+<div class="sites">
+  <div class="new-card" id="new-site-card"><div><div class="plus">＋</div>สร้างเว็บใหม่</div></div>
+  {% for c in cards %}
+  <div class="card site-card">
+    <div class="thumb" data-href="/sites/{{ c.site.id }}/edit/">
+      {% if c.home %}<iframe loading="lazy" src="/preview/{{ c.site.slug }}/" tabindex="-1" title="ตัวอย่าง"></iframe>{% else %}<div class="empty">ยังไม่มีหน้า</div>{% endif %}
+    </div>
+    <div class="info">
+      <div class="row between"><h3 title="{{ c.site.name }}">{{ c.site.name }}</h3>
+        {% if c.site.published %}<span class="badge ok">เผยแพร่</span>{% else %}<span class="badge">ปิด</span>{% endif %}</div>
+      <div class="muted small">{{ c.pages }} หน้า · แก้ไข <span data-ago="{{ c.site.updated_at.isoformat }}"></span>{% if c.unread %} · <span class="badge brand">{{ c.unread }} ข้อความใหม่</span>{% endif %}</div>
+      <div class="acts">
+        <a class="btn primary sm" href="/sites/{{ c.site.id }}/edit/">✎ ออกแบบ</a>
+        <a class="btn sm" href="/sites/{{ c.site.id }}/">จัดการ</a>
+        <a class="btn sm ghost" href="/preview/{{ c.site.slug }}/" target="_blank" title="ดูตัวอย่าง">👁</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{{ templates|json_script:"tpl-data" }}
+{% endblock %}
+{% block scripts %}
+<script>
+const TEMPLATES = JSON.parse(document.getElementById('tpl-data').textContent);
+document.querySelectorAll('[data-ago]').forEach(e => e.textContent = BW.ago(e.dataset.ago));
+document.querySelectorAll('.thumb[data-href]').forEach(t => t.addEventListener('click', () => location.href = t.dataset.href));
+
+function newSite() {
+  const tpls = TEMPLATES.map((t, i) => `<div class="tpl ${i === 1 ? 'sel' : ''}" data-id="${t.id}">
+      <div class="sw" style="background:${t.preview}"></div><div class="t"><b>${BW.esc(t.name)}</b><span>${BW.esc(t.description)}</span></div></div>`).join('');
+  const m = BW.modal(`<header><h2>สร้างเว็บใหม่</h2><button class="btn ghost icon" data-close>✕</button></header>
+    <div class="body">
+      <label class="field"><span>ชื่อเว็บไซต์</span><input class="input" name="name" placeholder="เช่น ร้านกาแฟของฉัน" maxlength="200"></label>
+      <label class="field"><span>คำอธิบายสั้นๆ <small>(ใช้เป็นคำอธิบายบน Google)</small></span><input class="input" name="description" maxlength="300"></label>
+      <div class="sect-title">เลือกแม่แบบ</div><div class="tpls">${tpls}</div>
+    </div>
+    <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-go>สร้างและเริ่มออกแบบ →</button></footer>`, { wide: true });
+  m.el.querySelectorAll('.tpl').forEach(t => t.addEventListener('click', () => {
+    m.el.querySelectorAll('.tpl').forEach(x => x.classList.remove('sel')); t.classList.add('sel');
+  }));
+  const go = async () => {
+    const d = BW.formData(m.el);
+    d.template = m.el.querySelector('.tpl.sel').dataset.id;
+    const btn = m.el.querySelector('[data-go]'); btn.disabled = true;
+    try { const r = await BW.api('/api/sites/create', d); location.href = r.editor; }
+    catch (e) { BW.showFieldError(m.el, e); btn.disabled = false; }
+  };
+  m.el.querySelector('[data-go]').addEventListener('click', go);
+  m.el.querySelector('[name=name]').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+}
+document.getElementById('new-site').addEventListener('click', newSite);
+document.getElementById('new-site-card').addEventListener('click', newSite);
+if (location.hash === '#new') newSite();
+</script>
+{% endblock %}

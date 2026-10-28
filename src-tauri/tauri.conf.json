@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BuildWeb",
+  "version": "../package.json",
+  "identifier": "com.buildweb.app",
+  "build": {
+    "beforeBuildCommand": "sh scripts/stage-backend.sh",
+    "beforeDevCommand": "sh scripts/stage-backend.sh",
+    "frontendDist": "../desktop-ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "BuildWeb",
+        "width": 1480,
+        "height": 940,
+        "minWidth": 1100,
+        "minHeight": 680
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": { "backend-stage/backend/": "backend/", "backend-stage/bin/": "bin/" },
+    "category": "DeveloperTool",
+    "shortDescription": "Drag-and-drop website builder",
+    "createUpdaterArtifacts": true,
+    "macOS": { "signingIdentity": "-", "minimumSystemVersion": "12.0" }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNFRTFGQTU5RTYxNDRBRkEKUldUNlNoVG1XZnJoUGpDcFlIUW12ckdJTlB2M3RUUWNpWC9OWmFQSjlFcW9YbnBpbXIyZVVTeTYK",
+      "endpoints": ["https://github.com/AImunich20/buildweb-releases/releases/latest/download/latest.json"]
+    }
+  }
+}

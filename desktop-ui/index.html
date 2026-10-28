@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>BuildWeb</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f5f5f7; --fg: #1d1d1f; --muted: #6e6e73; --card: #fff; --accent: #7c3aed; --err: #d70015; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161618; --fg: #f5f5f7; --muted: #98989d; --card: #1f1f22; --err: #ff6961; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Sukhumvit Set", sans-serif; }
+  .card { width: min(560px, 92vw); background: var(--card); border-radius: 16px; padding: 32px; box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .spin { width: 18px; height: 18px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; flex: none; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  #log { margin-top: 16px; height: 140px; overflow: auto; font: 11px/1.45 ui-monospace, Menlo, monospace; color: var(--muted);
+         white-space: pre-wrap; word-break: break-all; }
+  .error .spin { display: none; }
+  .error #status { color: var(--err); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <h1>BuildWeb</h1>
+  <p class="sub">สร้างเว็บไซต์แบบลากวาง</p>
+  <div class="row"><div class="spin"></div><div id="status">กำลังเตรียมระบบ…</div></div>
+  <div id="log"></div>
+</div>
+<script>
+  const log = document.getElementById("log");
+  window.setStatus = (t) => { document.getElementById("status").textContent = t; };
+  window.addLog = (t) => {
+    log.textContent += t + "\n";
+    if (log.textContent.length > 20000) log.textContent = log.textContent.slice(-15000);
+    log.scrollTop = log.scrollHeight;
+  };
+  window.setError = (t) => { document.getElementById("card").classList.add("error"); window.setStatus("เกิดข้อผิดพลาด: " + t); };
+</script>
+</body>
+</html>

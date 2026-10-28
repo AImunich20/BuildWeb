@@ -1,0 +1,129 @@
+{% extends "builder/base.html" %}
+{% block title %}ฐานข้อมูล · BuildWeb{% endblock %}
+{% block main %}
+<div class="topline"><div><h1>ฐานข้อมูล</h1><div class="sub">เก็บเว็บไซต์ หน้า ไฟล์ และข้อมูลฟอร์มไว้ใน SQLite (ในเครื่อง) หรือ MySQL/MariaDB ของ XAMPP</div></div></div>
+{% if db_failed %}
+<div class="alert err"><div><b>เชื่อมต่อ MySQL ไม่ได้ — โปรแกรมอยู่ในโหมดปลอดภัย</b><br>{{ db_failed }}<br>
+เปิด MySQL ใน XAMPP แล้วกด “ลองเชื่อมต่อใหม่” หรือแก้การตั้งค่าด้านล่าง</div></div>
+<div class="row" style="margin-bottom:20px"><button class="btn primary" id="retry">↻ ลองเชื่อมต่อใหม่</button><button class="btn" id="open-xampp">เปิด XAMPP</button></div>
+{% endif %}
+<div class="grid g2">
+  <div class="card pad"><h2>สถานะ</h2><div class="hint">ฐานข้อมูลที่ใช้อยู่ตอนนี้</div><div id="status" class="muted">กำลังตรวจสอบ...</div></div>
+  <div class="card pad" id="xampp-card"><h2>XAMPP</h2><div class="hint">MySQL/MariaDB และ Apache ที่ติดตั้งในเครื่อง</div><div id="xampp"></div></div>
+  <div class="card pad" style="grid-column:1/-1">
+    <h2>เปลี่ยนฐานข้อมูล</h2><div class="hint">เลือกที่เก็บข้อมูล ข้อมูลทั้งหมดจะถูกคัดลอกไปให้ แล้วโปรแกรมจะรีสตาร์ทเอง</div>
+    <div class="grid g2" style="gap:0 16px;margin-bottom:6px">
+      <label class="opt" data-engine="sqlite"><input type="radio" name="engine" value="sqlite"><div><b>SQLite (ค่าเริ่มต้น)</b><span>ไฟล์เดียวในเครื่อง ไม่ต้องติดตั้งอะไร เหมาะกับใช้คนเดียว</span></div></label>
+      <label class="opt" data-engine="mysql"><input type="radio" name="engine" value="mysql"><div><b>MySQL / MariaDB (XAMPP)</b><span>ดู/แก้ข้อมูลผ่าน phpMyAdmin ได้ ใช้ร่วมกับ PHP และโปรแกรมอื่นได้</span></div></label>
+    </div>
+    <div id="mysql-form" class="hidden">
+      <div class="grid g3" style="gap:0 16px">
+        <label class="field"><span>โฮสต์</span><input class="input mono" name="host" value="127.0.0.1"></label>
+        <label class="field"><span>พอร์ต</span><input class="input mono" name="port" type="number" value="3306"></label>
+        <label class="field"><span>ชื่อฐานข้อมูล</span><input class="input mono" name="name" value="buildweb"><small>ถ้ายังไม่มีจะสร้างให้อัตโนมัติ</small></label>
+        <label class="field"><span>ผู้ใช้</span><input class="input mono" name="user" value="root"></label>
+        <label class="field"><span>รหัสผ่าน</span><input class="input mono" name="password" type="password" placeholder="XAMPP ค่าเริ่มต้นไม่มีรหัสผ่าน"><small id="pw-hint"></small></label>
+        <label class="field"><span>Unix socket <small>(ไม่บังคับ)</small></span><input class="input mono" name="socket" placeholder="ใช้ TCP"><small id="sock-hint"></small></label>
+      </div>
+      <div class="row" style="margin-bottom:14px"><button class="btn" id="test">⚡ ทดสอบการเชื่อมต่อ</button><span id="test-result"></span></div>
+    </div>
+    <div id="mode-box" class="hidden">
+      <div class="sect-title">ข้อมูลที่มีอยู่</div>
+      <label class="check"><input type="radio" name="mode" value="copy" checked>คัดลอกข้อมูลปัจจุบันไปฐานข้อมูลใหม่ (แนะนำ)</label>
+      <label class="check"><input type="radio" name="mode" value="replace">คัดลอกและ <b>แทนที่</b> ข้อมูลที่มีอยู่ในฐานข้อมูลปลายทาง</label>
+      <label class="check"><input type="radio" name="mode" value="existing">ใช้ข้อมูลที่มีอยู่ในฐานข้อมูลปลายทาง (ไม่คัดลอก)</label>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="switch">บันทึกและเปลี่ยนฐานข้อมูล</button></div>
+    <div id="switch-log" style="margin-top:14px"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const { api, toast, esc } = BW;
+let ST = null;
+const form = document.getElementById('mysql-form');
+const val = n => document.querySelector(`[name=${n}]`).value;
+
+function setEngine(e) {
+  document.querySelectorAll('[name=engine]').forEach(r => r.checked = r.value === e);
+  document.querySelectorAll('[data-engine]').forEach(o => o.classList.toggle('sel', o.dataset.engine === e));
+  form.classList.toggle('hidden', e !== 'mysql');
+  const changed = ST && (e !== ST.active_engine || ST.failed);
+  document.getElementById('mode-box').classList.toggle('hidden', !changed || !!ST.failed);
+}
+document.querySelectorAll('[name=engine]').forEach(r => r.addEventListener('change', () => setEngine(r.value)));
+
+function payload() {
+  return { engine: document.querySelector('[name=engine]:checked').value, host: val('host'), port: val('port'), name: val('name'),
+    user: val('user'), password: val('password'), socket: val('socket'), keep_password: !val('password') && ST && ST.config.password_set,
+    mode: (document.querySelector('[name=mode]:checked') || {}).value };
+}
+
+async function load() {
+  ST = await api('/api/settings/db/status');
+  const c = ST.config, x = ST.xampp;
+  ['host', 'port', 'name', 'user', 'socket'].forEach(k => { if (c[k] !== undefined && c[k] !== '') document.querySelector(`[name=${k}]`).value = c[k]; });
+  document.getElementById('pw-hint').textContent = c.password_set ? 'ตั้งรหัสผ่านไว้แล้ว — เว้นว่างเพื่อใช้รหัสเดิม' : '';
+  document.getElementById('sock-hint').innerHTML = x.socket ? `XAMPP: <a href="#" id="use-sock">${esc(x.socket)}</a>` : '';
+  const us = document.getElementById('use-sock'); if (us) us.onclick = e => { e.preventDefault(); document.querySelector('[name=socket]').value = x.socket; };
+  setEngine(ST.failed ? 'mysql' : ST.active_engine);
+  let s = '';
+  if (ST.failed) s = `<span class="badge err"><span class="dot"></span>MySQL เชื่อมต่อไม่ได้</span>`;
+  else if (ST.active_engine === 'mysql') {
+    s = ST.server ? `<span class="badge ok"><span class="dot"></span>เชื่อมต่อ MySQL แล้ว</span>
+      <div style="margin-top:12px;line-height:1.9">เซิร์ฟเวอร์: <b>${ST.server.mariadb ? 'MariaDB' : 'MySQL'} ${esc(ST.server.version)}</b><br>
+      ฐานข้อมูล: <code>${esc(c.name)}</code> @ <code>${esc(c.socket || c.host + ':' + c.port)}</code><br>ผู้ใช้: <code>${esc(c.user)}</code></div>
+      <a class="btn sm" href="#" id="pma" style="margin-top:10px">เปิด phpMyAdmin</a>`
+      : `<span class="badge err">${esc(ST.server_error || 'ไม่ทราบสถานะ')}</span>`;
+  } else s = `<span class="badge"><span class="dot"></span>SQLite</span><div class="muted small" style="margin-top:10px">ไฟล์ <code>db.sqlite3</code> ในโฟลเดอร์ข้อมูลของโปรแกรม</div>`;
+  document.getElementById('status').innerHTML = s;
+  const pma = document.getElementById('pma'); if (pma) pma.onclick = e => { e.preventDefault(); BW.openUrl(x.phpmyadmin); };
+  document.getElementById('xampp').innerHTML = x.installed
+    ? `<span class="badge ok">พบ XAMPP</span><div style="margin-top:12px;line-height:1.9">htdocs: <code>${esc(x.htdocs)}</code><br>
+       ${x.socket ? 'MySQL socket: <code>' + esc(x.socket) + '</code>' : '<span class="muted">MySQL ยังไม่ได้เปิด (ไม่พบ socket)</span>'}</div>
+       <div class="row" style="margin-top:10px"><button class="btn sm" id="xm">เปิด XAMPP Manager</button><button class="btn sm" id="xp">phpMyAdmin</button>
+       <button class="btn sm" id="fill">ใช้ค่ามาตรฐาน XAMPP</button></div>`
+    : `<span class="badge warn">ไม่พบ XAMPP</span><div class="muted small" style="margin-top:10px">ติดตั้ง XAMPP จาก apachefriends.org แล้วเปิด MySQL Database</div>`;
+  if (x.installed) {
+    document.getElementById('xm').onclick = () => BW.openUrl(x.manager);
+    document.getElementById('xp').onclick = () => BW.openUrl(x.phpmyadmin);
+    document.getElementById('fill').onclick = () => {
+      setEngine('mysql');
+      Object.entries({ host: '127.0.0.1', port: 3306, user: 'root', password: '', name: 'buildweb' }).forEach(([k, v]) => document.querySelector(`[name=${k}]`).value = v);
+      toast('ใส่ค่ามาตรฐานของ XAMPP แล้ว — กด “ทดสอบการเชื่อมต่อ”');
+    };
+  }
+}
+
+document.getElementById('test').onclick = async () => {
+  const out = document.getElementById('test-result');
+  out.innerHTML = '<span class="muted">กำลังทดสอบ...</span>';
+  try {
+    const r = await api('/api/settings/db/test', payload());
+    out.innerHTML = `<span class="badge ok">✓ เชื่อมต่อได้ — ${r.server.mariadb ? 'MariaDB' : 'MySQL'} ${esc(r.server.version)}</span>
+      <span class="muted small">${r.server.exists ? 'มีฐานข้อมูล ' + esc(r.server.name) + ' แล้ว' : 'จะสร้างฐานข้อมูล ' + esc(r.server.name) + ' ให้'}</span>`;
+  } catch (e) { out.innerHTML = `<span class="badge err">${esc(e.message)}</span>`; }
+};
+
+document.getElementById('switch').onclick = async (ev) => {
+  const p = payload();
+  const btn = ev.currentTarget, log = document.getElementById('switch-log');
+  if (!ST.failed && p.engine === ST.active_engine && p.engine === 'sqlite') return toast('ใช้ SQLite อยู่แล้ว');
+  if (!await BW.confirmBox('เปลี่ยนฐานข้อมูล', p.engine === 'mysql' ? `ใช้ MySQL <code>${esc(p.name)}</code> ที่ <code>${esc(p.socket || p.host + ':' + p.port)}</code>` : 'กลับไปใช้ SQLite ในเครื่อง', { ok: 'ดำเนินการ' })) return;
+  btn.disabled = true;
+  log.innerHTML = '<div class="log">กำลังดำเนินการ... (อาจใช้เวลาสักครู่)</div>';
+  try {
+    const r = await api('/api/settings/db/switch', p);
+    log.innerHTML = `<div class="log">${r.steps.map(s => '✓ ' + esc(s)).join('\n')}</div>`;
+    setTimeout(function wait() { fetch('/api/settings/db/status').then(x => x.ok ? location.reload() : setTimeout(wait, 700)).catch(() => setTimeout(wait, 700)); }, 1800);
+  } catch (e) { log.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; btn.disabled = false; }
+};
+
+const retry = document.getElementById('retry');
+if (retry) retry.onclick = async () => { await api('/api/system/restart', {}); toast('กำลังลองใหม่...'); setTimeout(() => location.reload(), 5000); };
+const ox = document.getElementById('open-xampp');
+if (ox) ox.onclick = () => BW.openUrl('/Applications/XAMPP/xamppfiles/manager-osx.app');
+load().catch(e => toast(e.message, 'err'));
+</script>
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends "builder/base.html" %}
+{% block title %}โฮสติ้ง & ตั้งค่า · BuildWeb{% endblock %}
+{% block main %}
+<div class="topline"><div><h1>โฮสติ้ง & ตั้งค่า</h1><div class="sub">เปิดเว็บให้คนอื่นเข้าชมจากเครื่องนี้ และอัพเดทโปรแกรม</div></div></div>
+<div class="grid g2">
+  <div class="card pad" id="hosting"></div>
+  <div class="grid" style="align-content:start">
+    <div class="card pad">
+      <h2>อัพเดทโปรแกรม</h2>
+      <div class="hint">BuildWeb ตรวจหาเวอร์ชันใหม่จาก GitHub อัตโนมัติทุกครั้งที่เปิด และทุก 6 ชั่วโมง — กด “อัพเดทเลย” แล้วโปรแกรมจะติดตั้งและเปิดใหม่ให้เอง ข้อมูลเว็บของคุณไม่หาย</div>
+      <div class="row"><span class="badge brand">เวอร์ชันปัจจุบัน v{{ app_version }}</span><button class="btn primary" onclick="BW.checkUpdates()">ตรวจสอบอัพเดทตอนนี้</button></div>
+    </div>
+    <div class="card pad">
+      <h2>ระบบ</h2>
+      <div class="hint">เครื่องมือสำหรับผู้ดูแล</div>
+      <div class="row">
+        <a class="btn" href="/django-admin/">⚑ Django Admin</a>
+        <a class="btn" href="/settings/database/">⛁ ฐานข้อมูล</a>
+        <button class="btn" id="restart">↻ รีสตาร์ทระบบ</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script id="settings-data" type="application/json">{{ data_json|safe }}</script>
+{% endblock %}
+{% block scripts %}
+<script>
+const D = JSON.parse(document.getElementById('settings-data').textContent);
+const { api, toast, esc } = BW;
+
+function drawHosting(h) {
+  const el = document.getElementById('hosting');
+  const sites = D.sites.map(s => `<option value="${esc(s.slug)}" ${s.slug === h.default_site ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+  el.innerHTML = `<div class="row between"><div><h2>โฮสต์เว็บไซต์</h2><div class="hint" style="margin:0">เซิร์ฟเวอร์สำหรับเว็บที่เผยแพร่ (แยกจากหน้าแอดมิน — คนอื่นเข้าหน้าแก้ไขไม่ได้)</div></div>
+      <label class="switch"><input type="checkbox" id="h-enabled" ${h.enabled ? 'checked' : ''}><span></span></label></div>
+    <div style="margin:16px 0">${h.running ? '<span class="badge ok"><span class="dot"></span>ออนไลน์</span>' : '<span class="badge"><span class="dot"></span>ปิดอยู่</span>'}
+      ${h.error ? `<div class="alert err" style="margin-top:10px">${esc(h.error)}</div>` : ''}</div>
+    ${h.running ? `<div class="sect-title">ลิงก์สำหรับเปิดเว็บ</div>${h.urls.map(u => `<div class="row" style="margin-bottom:8px"><code style="flex:1">${esc(u)}</code>
+      <button class="btn sm" data-copy="${esc(u)}">คัดลอก</button><a class="btn sm" href="${esc(u)}" target="_blank">เปิด</a></div>`).join('')}
+      ${h.lan ? `<div class="muted small">อุปกรณ์อื่นที่ต่อ Wi-Fi เดียวกันเปิดลิงก์ <code>${esc(h.lan_ip)}</code> ได้เลย (ถ้า macOS ถามเรื่อง Firewall ให้กด “อนุญาต”)</div>` : ''}` : ''}
+    <div class="sect-title">ตั้งค่า</div>
+    <div class="grid g2" style="gap:0 16px">
+      <label class="field"><span>พอร์ต</span><input class="input mono" id="h-port" type="number" min="1024" max="65535" value="${h.port}"></label>
+      <label class="field"><span>เว็บหลัก (เปิดที่ “/”)</span><select class="input" id="h-default"><option value="">— แสดงรายการเว็บ —</option>${sites}</select></label>
+    </div>
+    <label class="check"><input type="checkbox" id="h-lan" ${h.lan ? 'checked' : ''}>ให้เครื่องอื่นในเครือข่ายเข้าได้ (LAN)</label>
+    <div class="muted small" style="margin-bottom:14px">แต่ละเว็บเปิดได้ที่ <code>http://…:${h.port}/&lt;ชื่อในลิงก์&gt;/</code> · ต้องเปิดโปรแกรมทิ้งไว้ระหว่างโฮสต์</div>
+    <button class="btn primary" id="h-save">บันทึกการตั้งค่าโฮสติ้ง</button>`;
+  el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); toast('คัดลอกแล้ว', 'ok'); });
+  const save = async () => {
+    try {
+      const r = await api('/api/settings/hosting', {
+        enabled: document.getElementById('h-enabled').checked, lan: document.getElementById('h-lan').checked,
+        port: document.getElementById('h-port').value, default_site: document.getElementById('h-default').value,
+      });
+      drawHosting(r.hosting);
+      toast(r.hosting.running ? 'โฮสติ้งเปิดแล้ว' : 'บันทึกแล้ว', 'ok');
+    } catch (e) { toast(e.message, 'err'); const r = await api('/api/settings/hosting'); drawHosting(r.hosting); }
+  };
+  document.getElementById('h-save').onclick = save;
+  document.getElementById('h-enabled').onchange = save;
+}
+drawHosting(D.hosting);
+
+document.getElementById('restart').onclick = async () => {
+  if (!await BW.confirmBox('รีสตาร์ทระบบ', 'เริ่มเซิร์ฟเวอร์เบื้องหลังใหม่ ใช้เวลาไม่กี่วินาที')) return;
+  await api('/api/system/restart', {});
+  toast('กำลังรีสตาร์ท...');
+  setTimeout(function wait() { fetch('/api/settings/hosting').then(() => location.reload()).catch(() => setTimeout(wait, 700)); }, 1500);
+};
+</script>
+{% endblock %}

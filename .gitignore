@@ -1,0 +1,12 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/backend-stage/
+backend/.venv/
+backend/.data/
+__pycache__/
+*.pyc
+release/
+.DS_Store
+*.key
+.env
