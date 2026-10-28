@@ -7,32 +7,37 @@ from your Mac, and export plain HTML/CSS/JS. It ships as a `.dmg` and updates it
 
 ## Features
 
-- **Drag-and-drop editor** (GrapesJS): 19 ready-made sections in Thai (hero, features, pricing, reviews,
-  team, FAQ, contact form, map, YouTube, menu/products, footer …) plus basic elements, forms, tabs,
-  countdown and custom code. It has device previews (desktop/tablet/mobile), undo/redo, code view, HTML
-  import, autosave, and a page history you can restore from.
-- **Starter templates:** business, café/restaurant, portfolio, landing page, or blank.
-- **Site theme:** colors, Thai Google Fonts, corner radius and content width. Every section follows the
-  theme.
-- **Detailed page management:** title, file name, draft/published, parent page, menu label and order (drag
-  to reorder), SEO title, description and keywords, og:image, noindex, and per-page `<head>`/CSS/JS. You can
-  duplicate a page, set the home page, and rebuild the menu on every page with one click.
-- **File manager:** upload by drag-and-drop with a progress bar, folders, search and filter, rename and move
-  (pages that use the file are updated), alt text, and a warning before deleting a file that is in use.
-- **Forms that work:** submissions are stored in the database. You can read them, mark them as read, delete
-  them, and download them as CSV (Excel-friendly, Thai-safe).
-- **Hosting:** a separate server on your LAN (default port 8090) serves only published sites. The editor
-  and admin stay on `127.0.0.1`. You can choose a default site at `/`.
-- **Export:** a folder or `.zip` with `index.html`, `<page>.html`, `css/`, `js/site.js` and `assets/`. You can
-  export to `~/Downloads/BuildWeb`, straight into **XAMPP `htdocs`** (`http://localhost/<site>/`), or to any
-  folder you choose. The optional `bw-form.php` saves form submissions into XAMPP MySQL.
-- **Database:** SQLite by default, or one click to switch to **MySQL/MariaDB (XAMPP)**. The switch tests
-  the connection, creates the database (utf8mb4), migrates and copies every record, then restarts the app.
-  If MySQL is down when the app starts, BuildWeb opens in a safe mode where you can fix the connection.
-- **Admin:** the BuildWeb dashboard plus the full **Django Admin** at `/django-admin/`. You are signed in
-  automatically, because the admin only listens on localhost.
-- **Auto-update:** the app checks GitHub Releases at start and every 6 hours. Click “อัพเดทเลย” and it
-  installs the update and restarts. You can also check manually from the app menu or Settings.
+- **Drag-and-drop editor** (GrapesJS): 19 ready-made sections in Thai plus basic elements, forms, tabs,
+  countdown and custom code. It has device previews, undo/redo, code view, HTML import (paste or a .html
+  file), autosave, and a page history you can restore from.
+- **Shared header & footer:** edit them once and every page changes. Menus fill themselves from the page
+  list, with the current page highlighted and child pages shown as a dropdown. Each page can opt out, and
+  older or imported sites can be converted with one click.
+- **Import existing websites:** from `.html` files, a `.zip`, a whole folder, or a **GitHub repo**
+  (public, or private with a token; branch and subfolder supported; build folders such as `dist/` are
+  detected). Every page becomes editable. CSS, JS, images and fonts are kept, and links are rewritten.
+- **Starter templates**, a **site theme** (colors, Thai Google Fonts, radius, width), and detailed
+  **page management**: SEO, og:image, draft/published, parent pages, menu order, and per-page code.
+- **File manager:** drag-and-drop upload, folders, rename and move (pages are updated), alt text, and
+  in-use protection.
+- **Forms:** submissions are stored in the database, viewable in the app and exportable as CSV. You get
+  **notifications** for new submissions through macOS, Telegram, Discord, e-mail (SMTP) or a webhook.
+- **Hosting several sites at once:**
+  - Every published site is served at `/<slug>/` on the main port (8090).
+  - Any site can also get **its own port** and be served at `/` there.
+  - Sites can be reached on the LAN.
+  - **Tailscale:** one switch publishes the sites as `https://<machine>.ts.net/` (`tailscale serve`,
+    tailnet only) or, with Funnel, publicly on the internet. The links are taken down when the app quits.
+- **Export:** a folder or `.zip` of HTML/CSS/JS/assets, written to Downloads, **XAMPP `htdocs`**, or any
+  folder you choose. The optional `bw-form.php` saves submissions into XAMPP MySQL, and they show up in the
+  app when it uses the same database.
+- **Database:** SQLite, or switch with one click to **MySQL/MariaDB (XAMPP)**, which migrates and copies all
+  data. If the database is unreachable, the app starts in a safe mode.
+- **Admin:** the BuildWeb dashboard plus the full **Django Admin**. The UI is a minimal technical design
+  with **light, dark and system** themes.
+- **Mac app:** closing the window keeps BuildWeb in the menu bar, so hosted sites stay online. It can
+  launch at login (hidden) and **auto-updates** from GitHub Releases, either by asking first or by
+  installing on its own.
 
 ## Stack
 
