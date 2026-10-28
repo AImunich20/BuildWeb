@@ -63,6 +63,10 @@ DEFAULTS = {
         "last_target": "downloads",
         "custom_path": "",
     },
+    "team": {
+        "enabled": False,  # serve the app on the network for teammates (they log in; roles limit what they see)
+        "port": 5055,
+    },
     "publish": {
         "github_token": "",   # personal access token (repo scope) for GitHub Pages
         "netlify_token": "",  # personal access token from app.netlify.com/user/applications

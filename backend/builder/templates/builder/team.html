@@ -1,0 +1,62 @@
+{% extends "builder/base.html" %}{% load static %}
+{% block title %}ทีม · BuildWeb{% endblock %}
+{% block main %}
+<div class="topline"><div><div class="crumbs">~/settings/team</div><h1>ทีม</h1><div class="sub">ให้คนอื่นเข้ามาทำงานในโปรแกรมนี้ผ่านเครือข่าย (Wi-Fi เดียวกัน หรือ Tailscale) ด้วยบัญชีของตัวเอง</div></div></div>
+<div id="team"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const { api, toast, esc, modal, confirmBox, formData, showFieldError, ago, when } = BW;
+  const root = document.getElementById('team');
+  const ROLE_HINT = { admin: 'ทำได้ทุกอย่าง รวมถึงตั้งค่าโปรแกรม', developer: 'ทำได้ทุกอย่างในเว็บที่ได้รับสิทธิ์ (API, Logic, สมาชิก, เผยแพร่) ยกเว้นตั้งค่าโปรแกรม', editor: 'โหมด CMS: แก้เนื้อหาหน้าเว็บ ข้อมูล ไฟล์ และอ่านข้อความฟอร์ม ในเว็บที่ได้รับสิทธิ์' };
+  let T;
+  async function draw() {
+    T = await api('/api/team');
+    const st = T.status;
+    root.innerHTML = `<div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);align-items:start">
+      <div class="card pad"><div class="row between"><h2>เปิดให้ทีมเข้าใช้</h2><label class="switch"><input type="checkbox" id="t-on" ${T.settings.enabled ? 'checked' : ''}><span></span></label></div>
+        <label class="field" style="margin-top:12px"><span>พอร์ต</span><input class="input mono" id="t-port" type="number" value="${T.settings.port || 5055}"></label>
+        ${st.running ? `<div class="alert ok"><div>เปิดอยู่ — ให้ทีมเปิด<br>${st.urls.map(u => `<code>${esc(u)}</code>`).join('<br>')}</div></div>` : st.error ? `<div class="alert err">${esc(st.error)}</div>` : '<div class="alert">ปิดอยู่ — ใช้ได้เฉพาะเครื่องนี้</div>'}
+        <div class="small muted">ผ่านอินเทอร์เน็ต: ใช้ Tailscale แล้วเปิด <code>http://ชื่อเครื่อง:${T.settings.port || 5055}/</code> · เครื่องนี้ยังใช้ได้โดยไม่ต้องล็อกอิน</div>
+        <button class="btn primary" id="t-save" style="margin-top:12px">บันทึก</button>
+        <div class="sect-title">บทบาท</div>${Object.entries(T.roles).map(([k, l]) => `<div style="margin-bottom:6px"><b>${l}</b><div class="small muted">${ROLE_HINT[k]}</div></div>`).join('')}</div>
+      <div class="card"><div class="card-head"><h2>สมาชิกทีม</h2><button class="btn sm primary" id="t-add">${BW_ICON('plus')} เพิ่มคน</button></div>
+        <table class="table"><thead><tr><th>ผู้ใช้</th><th>บทบาท</th><th>เว็บ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody>
+        ${T.members.map(m => `<tr data-id="${m.id}"><td><b>${esc(m.username)}</b><div class="small muted">${esc(m.name || '')}${m.is_owner ? 'เจ้าของเครื่อง' : ''}</div></td>
+          <td>${T.roles[m.role]}</td><td class="small">${m.role === 'admin' ? 'ทุกเว็บ' : m.sites.map(id => esc((T.sites.find(s => s.id === id) || { name: '#' + id }).name)).join(', ') || '<span class="muted">ยังไม่มี</span>'}</td>
+          <td class="small muted">${m.last_login ? ago(m.last_login) : 'ยังไม่เคย'}</td><td>${m.is_owner ? '' : '<button class="btn sm" data-edit>แก้ไข</button>'}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><h2>ประวัติการแก้ไข</h2><span class="small muted">ทุกการเปลี่ยนแปลงในโปรแกรม (ล่าสุด 150 รายการ)</span></div>
+        <div class="data-table-wrap" style="max-height:420px">${T.audit.length ? `<table class="table small"><thead><tr><th>เวลา</th><th>ใคร</th><th>ทำอะไร</th><th>ผล</th></tr></thead><tbody>
+        ${T.audit.map(a => `<tr><td class="muted" style="white-space:nowrap">${when(a.at)}</td><td>${esc(a.user)}</td><td class="mono">${esc(a.method)} ${esc(a.path)}</td><td><span class="badge ${a.status < 400 ? 'ok' : 'err'}">${a.status}</span></td></tr>`).join('')}</tbody></table>` : '<div class="empty-state">ยังไม่มี</div>'}</div></div>`;
+    document.getElementById('t-save').onclick = async () => {
+      try { await api('/api/team', { enabled: document.getElementById('t-on').checked, port: document.getElementById('t-port').value }); toast('บันทึกแล้ว', 'ok'); draw(); }
+      catch (e) { showFieldError(root, e); }
+    };
+    document.getElementById('t-on').onchange = () => document.getElementById('t-save').click();
+    document.getElementById('t-add').onclick = () => edit(null);
+    root.querySelectorAll('tr[data-id] [data-edit]').forEach(b => b.onclick = () => edit(T.members.find(m => m.id === +b.closest('tr').dataset.id)));
+  }
+  function edit(m) {
+    const isNew = !m;
+    m = m || { username: '', name: '', role: 'editor', sites: [] };
+    const md = modal(`<header><h2>${isNew ? 'เพิ่มคนในทีม' : 'แก้ไข ' + esc(m.username)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อผู้ใช้</span><input class="input mono" name="username" value="${esc(m.username)}" ${isNew ? '' : 'disabled'}></label>
+      <label class="field"><span>ชื่อที่แสดง</span><input class="input" name="name" value="${esc(m.name || '')}"></label>
+      <label class="field"><span>รหัสผ่าน ${isNew ? '' : '<small>(เว้นว่าง = ไม่เปลี่ยน)</small>'}</span><input class="input" type="password" name="password" autocomplete="new-password"></label>
+      <label class="field"><span>บทบาท</span><select class="input" name="role">${Object.entries(T.roles).map(([k, l]) => `<option value="${k}" ${k === m.role ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+      <div class="sect-title">เว็บที่เข้าได้ <span class="small muted" style="text-transform:none;letter-spacing:0">— ผู้ดูแลเข้าได้ทุกเว็บ</span></div>
+      ${T.sites.map(s => `<label class="check"><input type="checkbox" data-site="${s.id}" ${m.sites.includes(s.id) ? 'checked' : ''}>${esc(s.name)}</label>`).join('')}</div>
+      <footer>${isNew ? '' : '<button class="btn danger" data-del style="margin-right:auto">ลบ</button>'}<button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>บันทึก</button></footer>`);
+    md.el.querySelector('[data-save]').onclick = async () => {
+      const d = formData(md.el); if (!isNew) d.id = m.id;
+      d.sites = [...md.el.querySelectorAll('[data-site]:checked')].map(x => +x.dataset.site);
+      try { await api('/api/team/members', d); md.close(); toast('บันทึกแล้ว', 'ok'); draw(); } catch (e) { showFieldError(md.el, e); }
+    };
+    const del = md.el.querySelector('[data-del]');
+    if (del) del.onclick = async () => { if (!await confirmBox('ลบบัญชี', `ลบ ${esc(m.username)} ออกจากทีม?`, { ok: 'ลบ', danger: true })) return; await api(`/api/team/members/${m.id}/delete`, {}); md.close(); draw(); };
+  }
+  draw();
+})();
+</script>
+{% endblock %}

@@ -133,11 +133,61 @@
     label: s.label, category: s.category, content: s.content, media: `<div class="bw-bicon">${BW_ICON(s.icon, 20)}</div>`,
     attributes: { title: 'ลากไปวางในหน้า' },
   }));
+  // ------------------------------------------------------------------ my blocks + raw code
+  const MY_CAT = 'บล็อกของฉัน';
+  const addMyBlock = b => bm.add('bw-my-' + b.id, { label: b.name, category: b.category || MY_CAT, content: b.html + (b.css ? `<style>${b.css}</style>` : ''),
+    media: `<div class="bw-bicon">${BW_ICON('star', 20)}</div>`, attributes: { title: 'บล็อกที่บันทึกไว้ · ใช้ได้ทุกเว็บ' } });
+  api('/api/blocks').then(r => r.blocks.forEach(addMyBlock)).catch(() => { });
+  editor.Commands.add('bw-save-block', {
+    run(ed) {
+      const comp = ed.getSelected();
+      if (!comp) return;
+      const html = comp.toHTML();
+      let css = '';
+      try { css = ed.getCss({ component: comp, keepUnusedStyles: false }) || ''; } catch (e) { css = ''; }
+      const m = modal(`<header><h2>บันทึกเป็นบล็อก</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+        <label class="field"><span>ชื่อบล็อก</span><input class="input" name="name" placeholder="เช่น การ์ดราคา, ส่วนหัวโปรโมชัน"></label>
+        <label class="field"><span>หมวด</span><input class="input" name="category" value="${MY_CAT}"></label>
+        <div class="small muted">ใช้ซ้ำได้ทุกหน้าและทุกเว็บ จากแถบ “เพิ่ม” › ${MY_CAT}</div></div>
+        <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>บันทึก</button></footer>`);
+      m.el.querySelector('[data-ok]').onclick = async () => {
+        const d = formData(m.el);
+        try {
+          const r = await api('/api/blocks', { ...d, html, css });
+          r.blocks.filter(b => !bm.get('bw-my-' + b.id)).forEach(addMyBlock);
+          m.close(); toast('บันทึกบล็อกแล้ว', 'ok');
+        } catch (e) { showFieldError(m.el, e); }
+      };
+    },
+  });
+  editor.on('component:selected', comp => {
+    if (!comp || comp.is('wrapper') || comp.get('type') === 'bw-shared') return;
+    const tb = comp.get('toolbar') || [];
+    if (tb.some(t => t.command === 'bw-save-block')) return;
+    comp.set('toolbar', [...tb, { command: 'bw-save-block', label: BW_ICON('star', 14), attributes: { title: 'บันทึกเป็นบล็อกของฉัน' } }]);
+  });
+  // Raw HTML box: double-click to edit the code (embeds, iframes, widgets, your own markup).
+  editor.DomComponents.addType('bw-code', {
+    isComponent: el => el && el.getAttribute && el.hasAttribute('data-bw-code') ? { type: 'bw-code' } : false,
+    model: { defaults: { name: 'โค้ด HTML', droppable: false, editable: false, attributes: { 'data-bw-code': '' } } },
+    view: {
+      events: { dblclick: 'editCode' },
+      editCode() {
+        const comp = this.model;
+        const m = modal(`<header><h2>แก้โค้ด HTML</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+          <textarea class="input code fn-code" spellcheck="false" style="min-height:320px">${BW.esc(comp.getInnerHTML())}</textarea>
+          <div class="small muted">วาง embed (YouTube, Google Maps, Facebook), widget หรือ HTML ของคุณเอง · สคริปต์ทำงานบนเว็บจริง ไม่ทำงานในตัวออกแบบ</div></div>
+          <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>ใช้โค้ดนี้</button></footer>`, { wide: true });
+        m.el.querySelector('[data-ok]').onclick = () => { comp.components(m.el.querySelector('textarea').value); m.close(); };
+      },
+    },
+  });
   // A few small Canva-style elements
   const el = (id, label, icon, content, category = 'พื้นฐาน') => bm.add('bw-el-' + id, { label, category, content, media: `<div class="bw-bicon">${BW_ICON(icon, 20)}</div>` });
   el('heading', 'หัวข้อ', 'heading', '<h2 style="padding:10px 0">หัวข้อใหม่</h2>');
   el('para', 'ย่อหน้า', 'text', '<p style="padding:6px 0">ดับเบิลคลิกเพื่อพิมพ์ข้อความของคุณ</p>');
   el('button', 'ปุ่ม', 'button', '<a href="#" class="bw-btn">ปุ่มของคุณ</a>');
+  el('code', 'โค้ด HTML (embed)', 'code', '<div data-bw-code style="padding:20px;border:1px dashed #c4b5fd;border-radius:10px"><p>ดับเบิลคลิกเพื่อวางโค้ด HTML / embed</p></div>', 'ขั้นสูง');
   el('button2', 'ปุ่มขอบ', 'button-outline', '<a href="#" class="bw-btn bw-btn-outline">ปุ่มของคุณ</a>');
   el('divider', 'เส้นคั่น', 'divider', '<hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">');
   el('spacer', 'ช่องว่าง', 'spacer', '<div style="height:60px"></div>');

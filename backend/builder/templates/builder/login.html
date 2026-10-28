@@ -1,0 +1,11 @@
+{% load static %}<!doctype html><html lang="th"><head>{% include "builder/_head.html" %}<title>เข้าสู่ระบบ · BuildWeb</title>
+<link rel="stylesheet" href="{% static 'builder/app.css' %}?v={{ app_version }}"></head>
+<body style="display:grid;place-items:center;min-height:100vh;background:var(--bg-2)">
+<form method="post" class="card pad" style="width:min(380px,92vw)">{% csrf_token %}
+  <div class="row" style="gap:8px;margin-bottom:6px"><span class="logo-mark" style="width:26px;height:26px;display:grid;place-items:center;border-radius:7px;background:var(--ink);color:var(--bg)">B</span><b style="font-size:17px">BuildWeb</b></div>
+  <div class="hint">เข้าสู่ระบบเพื่อทำงานร่วมกับทีม</div>
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+  <label class="field"><span>ชื่อผู้ใช้</span><input class="input" name="username" autocomplete="username" autofocus required></label>
+  <label class="field"><span>รหัสผ่าน</span><input class="input" type="password" name="password" autocomplete="current-password" required></label>
+  <button class="btn primary" style="width:100%;justify-content:center">เข้าสู่ระบบ</button>
+</form></body></html>

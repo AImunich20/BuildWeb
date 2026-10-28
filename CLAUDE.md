@@ -61,6 +61,9 @@ user in Thai. The UI copy is in Thai.
     `BUILDWEB_DATABASE_URL`, `BUILDWEB_DOMAINS` host→site). `server_api.py` = /__bw/health|deploy|pull (Bearer
     `BUILDWEB_DEPLOY_TOKEN`); `serverkit.py` builds the Docker kit. Desktop deploys through publish target "server".
     Docker itself is not available on the dev Mac: the kit is tested by running server.py directly.
+  - `team.py`: team access. `TeamServer` serves the app on 0.0.0.0:<team port> with `TEAM_ENV_KEY`; there
+    `LocalAdminMiddleware` requires login and `team.check()` applies roles (admin/developer/editor; regex path
+    rules + `site_of()` to scope by site). `audit()` logs every write. `TeamMember`, `AuditLog`, `SavedBlock`.
   - `system.py`: OS helpers (open/reveal, desktop notifications, XAMPP/Tailscale paths). Never call
     `os.kill(pid, 0)` directly, because on Windows it terminates the process.
 - `src-tauri/src/lib.rs`: same pattern as ClearFrame (bundled uv → venv → run backend → updater), plus

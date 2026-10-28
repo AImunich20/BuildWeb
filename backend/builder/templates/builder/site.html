@@ -13,14 +13,14 @@
 <nav class="tabs">
   <a href="/sites/{{ site.id }}/pages/" class="{% if tab == 'pages' %}active{% endif %}">หน้าเว็บ</a>
   <a href="/sites/{{ site.id }}/data/" class="{% if tab == 'data' %}active{% endif %}">ข้อมูล</a>
-  <a href="/sites/{{ site.id }}/api/" class="{% if tab == 'api' %}active{% endif %}">API</a>
-  <a href="/sites/{{ site.id }}/members/" class="{% if tab == 'members' %}active{% endif %}">สมาชิก</a>
-  <a href="/sites/{{ site.id }}/logic/" class="{% if tab == 'logic' %}active{% endif %}">Logic</a>
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/api/" class="{% if tab == 'api' %}active{% endif %}">API</a>{% endif %}
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/members/" class="{% if tab == 'members' %}active{% endif %}">สมาชิก</a>{% endif %}
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/logic/" class="{% if tab == 'logic' %}active{% endif %}">Logic</a>{% endif %}
   <a href="/sites/{{ site.id }}/files/" class="{% if tab == 'files' %}active{% endif %}">ไฟล์ & รูปภาพ</a>
   <a href="/sites/{{ site.id }}/forms/" class="{% if tab == 'forms' %}active{% endif %}">ข้อมูลจากฟอร์ม{% if unread %}<span class="badge brand">{{ unread }}</span>{% endif %}</a>
-  <a href="/sites/{{ site.id }}/stats/" class="{% if tab == 'stats' %}active{% endif %}">สถิติ</a>
-  <a href="/sites/{{ site.id }}/settings/" class="{% if tab == 'settings' %}active{% endif %}">ตั้งค่าเว็บ & ธีม</a>
-  <a href="/sites/{{ site.id }}/export/" class="{% if tab == 'export' %}active{% endif %}">เผยแพร่ & ส่งออก</a>
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/stats/" class="{% if tab == 'stats' %}active{% endif %}">สถิติ</a>{% endif %}
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/settings/" class="{% if tab == 'settings' %}active{% endif %}">ตั้งค่าเว็บ & ธีม</a>{% endif %}
+  {% if bw_role != 'editor' %}  <a href="/sites/{{ site.id }}/export/" class="{% if tab == 'export' %}active{% endif %}">เผยแพร่ & ส่งออก</a>{% endif %}
 </nav>
 <div id="tab" data-tab="{{ tab }}"></div>
 <script id="site-data" type="application/json">{{ data_json|safe }}</script>

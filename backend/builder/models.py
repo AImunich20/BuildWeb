@@ -547,3 +547,43 @@ class RunLog(models.Model):
 
     class Meta:
         ordering = ["-at"]
+
+
+class TeamMember(models.Model):
+    """A person who works in this BuildWeb app over the network (team access). The owner on this computer
+    is always an admin and needs no account."""
+
+    ROLES = [("admin", "ผู้ดูแล"), ("developer", "นักพัฒนา"), ("editor", "ผู้แก้เนื้อหา")]
+    user = models.OneToOneField("auth.User", on_delete=models.CASCADE, related_name="team")
+    role = models.CharField(max_length=12, choices=ROLES, default="editor")
+    sites = models.JSONField(default=list, blank=True)  # site ids this person may open ([] = all, admin only)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AuditLog(models.Model):
+    """Who changed what in the app (every write request)."""
+
+    user = models.CharField(max_length=150, blank=True)
+    method = models.CharField(max_length=8)
+    path = models.CharField(max_length=300)
+    status = models.PositiveSmallIntegerField(default=0)
+    site_id = models.IntegerField(null=True, blank=True, db_index=True)
+    ip = models.CharField(max_length=64, blank=True)
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-at"]
+
+
+class SavedBlock(models.Model):
+    """A section saved from the editor to reuse on any page of any site ("บล็อกของฉัน")."""
+
+    name = models.CharField(max_length=120)
+    category = models.CharField(max_length=60, default="บล็อกของฉัน")
+    html = models.TextField()
+    css = models.TextField(blank=True)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["category", "name"]

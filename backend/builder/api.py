@@ -1818,3 +1818,119 @@ def server_kit(request, site_id):
 
     site = get_object_or_404(Site, pk=site_id)
     return download(serverkit.build_kit(site, request.GET.get("domain", "")), f"buildweb-server-{site.slug}.zip")
+
+
+# --- team access ----------------------------------------------------------------------------------
+
+def team_json():
+    from django.contrib.auth import get_user_model
+
+    from .models import TeamMember
+
+    out = []
+    for u in get_user_model().objects.order_by("username"):
+        m = TeamMember.objects.filter(user=u).first()
+        if not m and not u.is_superuser:
+            continue
+        out.append({"id": u.id, "username": u.username, "name": u.get_full_name() or u.first_name, "role": m.role if m else "admin",
+                    "sites": m.sites if m else [], "last_login": u.last_login.isoformat() if u.last_login else None,
+                    "is_owner": u.is_superuser and not m})
+    return out
+
+
+@api
+def team_settings(request):
+    from . import team
+    from .models import AuditLog, TeamMember
+
+    if request.method == "POST":
+        d = body(request)
+        port = int(d.get("port") or 5055)
+        if not 1024 <= port <= 65535 or port == settings.ADMIN_PORT:
+            raise ApiError("พอร์ตไม่ถูกต้อง", field="port")
+        config.update("team", {"enabled": as_bool(d.get("enabled")), "port": port})
+        team.server.apply_config()
+    return {"settings": config.load().get("team", {"enabled": False, "port": 5055}), "status": team.server.status(),
+            "members": team_json(), "roles": dict(TeamMember.ROLES),
+            "sites": [{"id": s.id, "name": s.name} for s in Site.objects.all()],
+            "audit": [{"user": a.user, "method": a.method, "path": a.path, "status": a.status, "at": a.at.isoformat()}
+                      for a in AuditLog.objects.all()[:150]]}
+
+
+@require_POST
+@api
+def team_member_save(request):
+    from django.contrib.auth import get_user_model
+
+    from .models import TeamMember
+
+    d = body(request)
+    User = get_user_model()
+    if d.get("id"):
+        user = get_object_or_404(User, pk=d["id"])
+    else:
+        username = (d.get("username") or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9_.@-]{3,60}", username):
+            raise ApiError("ชื่อผู้ใช้ใช้ a-z 0-9 . _ - @ ยาว 3 ตัวขึ้นไป", field="username")
+        if User.objects.filter(username=username).exists():
+            raise ApiError("มีชื่อผู้ใช้นี้แล้ว", field="username")
+        if len(d.get("password") or "") < 8:
+            raise ApiError("รหัสผ่านอย่างน้อย 8 ตัวอักษร", field="password")
+        user = User.objects.create_user(username, password=d["password"])
+    if user.is_superuser and not TeamMember.objects.filter(user=user).exists():
+        raise ApiError("แก้บัญชีเจ้าของเครื่องไม่ได้")
+    if "name" in d:
+        user.first_name = (d.get("name") or "")[:150]
+    if d.get("id") and d.get("password"):
+        if len(d["password"]) < 8:
+            raise ApiError("รหัสผ่านอย่างน้อย 8 ตัวอักษร", field="password")
+        user.set_password(d["password"])
+    user.save()
+    role = d.get("role") if d.get("role") in dict(TeamMember.ROLES) else "editor"
+    sites = [int(x) for x in d.get("sites") or [] if Site.objects.filter(pk=x).exists()]
+    TeamMember.objects.update_or_create(user=user, defaults={"role": role, "sites": sites})
+    return {"members": team_json()}
+
+
+@require_POST
+@api
+def team_member_delete(request, user_id):
+    from django.contrib.auth import get_user_model
+
+    from .models import TeamMember
+
+    user = get_object_or_404(get_user_model(), pk=user_id)
+    if not TeamMember.objects.filter(user=user).exists():
+        raise ApiError("ลบบัญชีเจ้าของเครื่องไม่ได้")
+    user.delete()
+    return {"members": team_json()}
+
+
+# --- saved blocks ---------------------------------------------------------------------------------
+
+def block_json(b):
+    return {"id": b.id, "name": b.name, "category": b.category, "html": b.html, "css": b.css}
+
+
+@api
+def saved_blocks(request):
+    from .models import SavedBlock
+
+    if request.method == "POST":
+        d = body(request)
+        name = (d.get("name") or "").strip()[:120]
+        if not name or not (d.get("html") or "").strip():
+            raise ApiError("ตั้งชื่อบล็อก", field="name")
+        SavedBlock.objects.create(name=name, category=(d.get("category") or "บล็อกของฉัน").strip()[:60], html=d["html"][:500000],
+                                  css=(d.get("css") or "")[:200000],
+                                  created_by=request.user.get_username() if request.user.is_authenticated else "")
+    return {"blocks": [block_json(b) for b in SavedBlock.objects.all()]}
+
+
+@require_POST
+@api
+def saved_block_delete(request, block_id):
+    from .models import SavedBlock
+
+    get_object_or_404(SavedBlock, pk=block_id).delete()
+    return {"blocks": [block_json(b) for b in SavedBlock.objects.all()]}

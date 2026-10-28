@@ -32,6 +32,19 @@ class LocalAdminMiddleware:
     def __call__(self, request):
         if request.path.startswith(("/api/system/restart", "/api/system/shutdown")) or settings.SERVER_MODE:
             return self.get_response(request)  # a server never signs anyone in automatically
+        from . import team
+
+        if team.is_team_request(request):  # team access over the network: own login + role checks
+            if not request.user.is_authenticated and not request.path.startswith(("/login", "/static/")):
+                if request.path.startswith("/api/"):
+                    return JsonResponse({"ok": False, "error": "กรุณาเข้าสู่ระบบ"}, status=401)
+                return redirect(f"/login?next={request.path}")
+            blocked = team.check(request) if request.user.is_authenticated else None
+            if blocked:
+                return blocked
+            response = self.get_response(request)
+            team.audit(request, response)
+            return response
         try:
             if not request.is_public and not request.user.is_authenticated and not settings.DB_FAILED:
                 User = get_user_model()
@@ -41,7 +54,9 @@ class LocalAdminMiddleware:
                 login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         except OperationalError as e:
             return database_down(request, e)
-        return self.get_response(request)
+        response = self.get_response(request)
+        team.audit(request, response)
+        return response
 
     def process_exception(self, request, exception):
         if isinstance(exception, OperationalError):

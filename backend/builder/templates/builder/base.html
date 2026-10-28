@@ -15,11 +15,14 @@
     <a class="nav {% if nav == 'dashboard' %}active{% endif %}" href="/"><i data-icon="overview"></i>ภาพรวม</a>
     {% if site %}<a class="nav {% if nav == 'sites' %}active{% endif %}" href="/sites/{{ site.id }}/"><i data-icon="site"></i>{{ site.name|truncatechars:22 }}</a>{% endif %}
     <a class="nav" href="/#import"><i data-icon="import"></i>นำเข้าเว็บ</a>
-    <div class="group">ระบบ</div>
+    {% if bw_role == 'owner' or bw_role == 'admin' %}<div class="group">ระบบ</div>
     <a class="nav {% if nav == 'settings' %}active{% endif %}" href="/settings/"><i data-icon="server"></i>โฮสติ้ง & ตั้งค่า</a>
+    <a class="nav {% if nav == 'team' %}active{% endif %}" href="/settings/team/"><i data-icon="users"></i>ทีม</a>
     <a class="nav {% if nav == 'notify' %}active{% endif %}" href="/settings/notify/"><i data-icon="bell"></i>การแจ้งเตือน</a>
     <a class="nav {% if nav == 'database' %}active{% endif %}" href="/settings/database/"><i data-icon="database"></i>ฐานข้อมูล</a>
-    <a class="nav" href="/django-admin/"><i data-icon="shield"></i>Django Admin</a>
+    <a class="nav" href="/django-admin/"><i data-icon="shield"></i>Django Admin</a>{% endif %}
+    {% if bw_team %}<div class="group">บัญชี</div><div class="nav" style="cursor:default"><i data-icon="users"></i>{{ bw_user }} <span class="muted small">· {% if bw_role == 'editor' %}ผู้แก้เนื้อหา{% elif bw_role == 'developer' %}นักพัฒนา{% else %}ผู้ดูแล{% endif %}</span></div>
+    <form method="post" action="/logout">{% csrf_token %}<button class="nav" style="border:0;background:none;width:100%;text-align:left;cursor:pointer;font:inherit;color:inherit"><i data-icon="x"></i>ออกจากระบบ</button></form>{% endif %}
     <div class="spacer"></div>
     <div class="foot">
       <div>{% if db_failed %}<span class="badge err"><span class="dot"></span>MySQL ไม่เชื่อมต่อ</span>

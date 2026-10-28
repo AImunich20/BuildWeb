@@ -20,7 +20,12 @@ def dump(data):
 
 
 def dashboard(request):
+    from . import team
+
     sites = Site.objects.all()
+    allowed = team.allowed_sites(request)
+    if allowed is not None:
+        sites = sites.filter(id__in=allowed)
     cards = []
     for s in sites:
         home = s.home_page()
@@ -52,6 +57,32 @@ def spark_svg(values, w=120, h=28):
     return (f'<svg class="spark" viewBox="0 0 {w} {h}" width="{w}" height="{h}" aria-hidden="true">'
             f'<polyline points="{pts}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" '
             f'stroke-linecap="round"/></svg>')
+
+
+def login_view(request):
+    from django.contrib.auth import authenticate, login
+
+    error = ""
+    if request.method == "POST":
+        user = authenticate(request, username=request.POST.get("username", ""), password=request.POST.get("password", ""))
+        if user:
+            login(request, user)
+            nxt = request.GET.get("next") or "/"
+            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
+        error = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
+    return render(request, "builder/login.html", {"error": error})
+
+
+def logout_view(request):
+    from django.contrib.auth import logout
+
+    if request.method == "POST":
+        logout(request)
+    return redirect("/login")
+
+
+def team_page(request):
+    return render(request, "builder/team.html", {"nav": "team"})
 
 
 def site_manage(request, site_id, tab="pages"):

@@ -1348,3 +1348,80 @@ def crypto_value(site, name):
     from . import crypto
 
     return crypto.decrypt(site.secrets[name])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class TeamTests(TestCase):
+    """v0.6 phase 5: team access with roles, CMS mode, audit log, saved blocks."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from .models import TeamMember
+
+        Client().get("/")  # creates the owner account
+        self.a = services.create_site("Client A", "business")
+        self.b = services.create_site("Client B", "business")
+        self.col = Collection.objects.create(site=self.a, name="ข่าว", slug="news", fields=[{"name": "title", "type": "text"}])
+        User = get_user_model()
+        for name, role in (("ed", "editor"), ("dev", "developer")):
+            u = User.objects.create_user(name, password="secret123")
+            TeamMember.objects.create(user=u, role=role, sites=[self.a.id])
+        self.team = {"buildweb.team": True}
+
+    def client_for(self, username):
+        c = Client()
+        r = c.post("/login", {"username": username, "password": "secret123"}, **self.team)
+        self.assertEqual(r.status_code, 302)
+        c.get("/", **self.team)
+        return c
+
+    def jpost(self, c, url, d=None):
+        return c.post(url, json.dumps(d or {}), content_type="application/json", **self.team)
+
+    def test_login_required_on_team_server(self):
+        c = Client()
+        self.assertEqual(c.get("/", **self.team)["Location"], "/login?next=/")
+        self.assertEqual(c.get(f"/api/sites/{self.a.id}/pages", **self.team).status_code, 401)
+        self.assertEqual(c.get("/").status_code, 200)  # the owner's local server still needs no login
+        self.assertEqual(c.post("/login", {"username": "ed", "password": "wrong"}, **self.team).status_code, 200)
+
+    def test_editor_is_content_only_and_site_scoped(self):
+        c = self.client_for("ed")
+        dash = c.get("/", **self.team).content.decode()
+        self.assertIn("Client A", dash)
+        self.assertNotIn("Client B", dash)
+        self.assertEqual(c.get(f"/sites/{self.a.id}/data/", **self.team).status_code, 200)
+        self.assertNotIn(f'/sites/{self.a.id}/logic/', c.get(f"/sites/{self.a.id}/", **self.team).content.decode())
+        for url in (f"/sites/{self.a.id}/logic/", f"/sites/{self.b.id}/", "/settings/", "/django-admin/"):
+            self.assertEqual(c.get(url, **self.team).status_code, 403, url)
+        self.assertEqual(self.jpost(c, f"/api/collections/{self.col.id}/rows/save", {"data": {"title": "ข่าวใหม่"}}).status_code, 200)
+        self.assertEqual(self.jpost(c, f"/api/collections/{self.col.id}/update", {"name": "x"}).status_code, 403)
+        home = self.a.home_page()
+        self.assertEqual(self.jpost(c, f"/api/pages/{home.id}/delete").status_code, 403)
+        self.assertEqual(self.jpost(c, f"/api/pages/{self.b.home_page().id}/project", {"html": "x"}).status_code, 403)
+        self.assertEqual(self.jpost(c, f"/api/pages/{home.id}/project", {"project": {}, "html": "<p>edited</p>", "css": ""}).status_code, 200)
+        from .models import AuditLog
+
+        self.assertTrue(AuditLog.objects.filter(user="ed", path__contains="/rows/save", status=200).exists())
+
+    def test_developer_and_admin_endpoints(self):
+        c = self.client_for("dev")
+        self.assertEqual(c.get(f"/sites/{self.a.id}/logic/", **self.team).status_code, 200)
+        self.assertEqual(self.jpost(c, f"/api/sites/{self.a.id}/restapi", {"settings": {"enabled": True}}).status_code, 200)
+        self.assertEqual(c.get("/api/team", **self.team).status_code, 403)
+        self.assertEqual(self.jpost(c, "/api/sites/create", {"name": "x"}).status_code, 403)
+        owner = Client()
+        owner.get("/")
+        r = owner.post("/api/team/members", json.dumps({"username": "new.person", "password": "secret123", "role": "editor",
+                                                        "sites": [self.b.id]}), content_type="application/json").json()
+        self.assertIn("new.person", [m["username"] for m in r["members"]])
+
+    def test_saved_blocks(self):
+        c = Client()
+        c.get("/")
+        r = c.post("/api/blocks", json.dumps({"name": "การ์ดราคา", "html": "<div class=p>฿99</div>", "css": ".p{color:red}"}),
+                   content_type="application/json").json()
+        self.assertEqual(r["blocks"][0]["name"], "การ์ดราคา")
+        r = c.post(f"/api/blocks/{r['blocks'][0]['id']}/delete", "{}", content_type="application/json").json()
+        self.assertEqual(r["blocks"], [])
