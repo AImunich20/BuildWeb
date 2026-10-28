@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from buildweb import config
 
-from . import data, dbtools, exporter, importer, notify, sections, services, system
+from . import data, dbtools, exporter, importer, navbar, notify, sections, services, system
 from .hosting import server as hosting
 from .models import (DEFAULT_THEME, Asset, AssetFolder, Collection, DataConnection, FormSubmission, Page, PageRevision, Record,
                      SharedSection, Site)
@@ -74,7 +74,7 @@ def site_json(site):
 
 
 def shared_json(sec):
-    return {"id": sec.id, "kind": sec.kind, "label": sec.label, "enabled": sec.enabled,
+    return {"id": sec.id, "kind": sec.kind, "label": sec.label, "enabled": sec.enabled, "managed": sec.managed,
             "edit_url": f"/sites/{sec.site_id}/edit-shared/{sec.kind}/", "updated_at": sec.updated_at.isoformat()}
 
 
@@ -1068,3 +1068,20 @@ def collection_csv(request, col_id):
     for r in rows:
         w.writerow([r.get(f["name"], "") for f in c.fields])
     return resp
+
+
+# --- navbar settings ------------------------------------------------------------------------------
+
+@api
+def navbar_settings(request, site_id):
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request)
+        if "settings" in d:
+            site.nav = navbar.clean(d["settings"])
+            site.save(update_fields=["nav", "updated_at"])
+        if "managed" in d:
+            services.set_header_managed(site, as_bool(d["managed"]))
+    head = site.shared_sections.filter(kind=SharedSection.HEADER).first()
+    return {"settings": navbar.settings(site), "managed": bool(head and head.managed), "enabled": bool(head and head.enabled),
+            "layouts": navbar.LAYOUTS, "pages": [{"title": p.menu_label, "href": p.filename} for p in site.pages.all()]}

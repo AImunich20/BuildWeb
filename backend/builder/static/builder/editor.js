@@ -199,7 +199,7 @@
     const sp = D.shared_preview || {};
     const make = (kind, label) => ({
       type: 'bw-shared', editUrl: sp[kind].edit_url, attributes: { 'data-bw-shared': kind, title: `${label} — ดับเบิลคลิกเพื่อแก้ไข` },
-      components: sp[kind].html,
+      content: sp[kind].html, // raw HTML: parsing it would let plugins rewrite parts (e.g. <button> → "Send")
     });
     const lock = c => { c.onAll(x => x.set({ selectable: false, hoverable: false, editable: false, draggable: false, droppable: false, removable: false, copyable: false, layerable: false, badgable: false, highlightable: false })); };
     if (sp.header) lock(wrapper.append(make('header', 'ส่วนหัวร่วม'), { at: 0 })[0]);
@@ -435,6 +435,96 @@
     if (comp.getTrait('data-bw-repeat')) return;
     comp.addTrait(repeatTraits(), { at: comp.getTraits().length });
   });
+
+  // ------------------------------------------------------------------ animation panel
+  const ANIMS = [['', 'ไม่มี'], ['fade', 'จางเข้า'], ['fade-up', 'เลื่อนขึ้น'], ['fade-down', 'เลื่อนลง'], ['fade-left', 'จากขวา'], ['fade-right', 'จากซ้าย'],
+    ['zoom-in', 'ขยายเข้า'], ['zoom-out', 'ย่อเข้า'], ['flip-up', 'พลิกขึ้น'], ['blur', 'เบลอ → ชัด'], ['rise', 'ลอยขึ้นสูง'], ['pop', 'เด้ง']];
+  const KEYFRAMES = {
+    fade: [{ opacity: 0 }, { opacity: 1 }],
+    'fade-up': [{ opacity: 0, transform: 'translateY(32px)' }, { opacity: 1, transform: 'none' }],
+    'fade-down': [{ opacity: 0, transform: 'translateY(-32px)' }, { opacity: 1, transform: 'none' }],
+    'fade-left': [{ opacity: 0, transform: 'translateX(40px)' }, { opacity: 1, transform: 'none' }],
+    'fade-right': [{ opacity: 0, transform: 'translateX(-40px)' }, { opacity: 1, transform: 'none' }],
+    'zoom-in': [{ opacity: 0, transform: 'scale(.88)' }, { opacity: 1, transform: 'none' }],
+    'zoom-out': [{ opacity: 0, transform: 'scale(1.12)' }, { opacity: 1, transform: 'none' }],
+    'flip-up': [{ opacity: 0, transform: 'perspective(800px) rotateX(18deg) translateY(20px)' }, { opacity: 1, transform: 'none' }],
+    blur: [{ opacity: 0, filter: 'blur(12px)' }, { opacity: 1, filter: 'none' }],
+    rise: [{ opacity: 0, transform: 'translateY(80px)' }, { opacity: 1, transform: 'none' }],
+    pop: [{ opacity: 0, transform: 'scale(.6)' }, { opacity: 1, transform: 'scale(1.05)', offset: .7 }, { opacity: 1, transform: 'none' }],
+  };
+  const HOVERS = [['', 'ไม่มี'], ['lift', 'ยกลอย'], ['grow', 'ขยาย'], ['glow', 'เรืองแสง'], ['zoom-img', 'ซูมรูปข้างใน'], ['tilt', 'เอียง 3D'], ['shine', 'แสงวาบ']];
+
+  function playAnim(comp) {
+    const el = comp && comp.getEl(); if (!el) return;
+    const a = comp.getAttributes();
+    const dur = +(a['data-bw-anim-duration'] || 700), delay = +(a['data-bw-anim-delay'] || 0);
+    const opts = { duration: dur, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'backwards' };
+    if (a['data-bw-stagger'] != null) {
+      const step = +(a['data-bw-stagger'] || 120);
+      [...el.children].forEach((ch, i) => ch.animate(KEYFRAMES[a['data-bw-anim'] || 'fade-up'] || KEYFRAMES['fade-up'], { ...opts, delay: delay + i * step }));
+    } else if (KEYFRAMES[a['data-bw-anim']]) el.animate(KEYFRAMES[a['data-bw-anim']], { ...opts, delay });
+    if (a['data-bw-count'] != null) {
+      const m = (el.textContent || '').match(/^(\D*)([\d,]+(?:\.\d+)?)(.*)$/);
+      if (m) { const target = parseFloat(m[2].replace(/,/g, '')), t0 = performance.now(), orig = el.textContent;
+        const f = t => { const p = Math.min(1, (t - t0) / 1600); el.textContent = m[1] + Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString('en-US') + m[3];
+          if (p < 1) requestAnimationFrame(f); else el.textContent = orig; };
+        requestAnimationFrame(f); }
+    }
+  }
+
+  function drawAnim() {
+    const box = $('#anim-panel');
+    const comp = editor.getSelected();
+    if (!comp || comp.get('type') === 'bw-shared' || comp.get('tagName') === 'body' || comp.is('wrapper')) {
+      box.innerHTML = '<div class="r-empty">เลือกองค์ประกอบในหน้าเพื่อใส่แอนิเมชัน</div>'; return;
+    }
+    const a = comp.getAttributes();
+    const anim = a['data-bw-anim'] || '';
+    const isStagger = a['data-bw-stagger'] != null;
+    const kids = comp.components().filter(c => c.get('type') !== 'textnode').length;
+    const text = (comp.getEl() && comp.getEl().textContent || '').trim();
+    box.innerHTML = `<div class="anim-pane">
+      <div class="row between"><b>ตอนเลื่อนมาถึง</b><button class="btn sm" id="an-play" ${anim || a['data-bw-count'] != null ? '' : 'disabled'}>${BW_ICON('play', 14)} ดูตัวอย่าง</button></div>
+      <div class="anim-grid">${ANIMS.map(([v, l]) => `<button class="anim-opt ${v === anim ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="anim-ctl ${anim ? '' : 'dim'}">
+        <label class="anim-row"><span>ระยะเวลา</span><input type="range" min="200" max="2000" step="50" id="an-dur" value="${a['data-bw-anim-duration'] || 700}"><code id="an-dur-v">${a['data-bw-anim-duration'] || 700}ms</code></label>
+        <label class="anim-row"><span>หน่วงเวลา</span><input type="range" min="0" max="2000" step="50" id="an-delay" value="${a['data-bw-anim-delay'] || 0}"><code id="an-delay-v">${a['data-bw-anim-delay'] || 0}ms</code></label>
+        <label class="check"><input type="checkbox" id="an-repeat" ${a['data-bw-anim-once'] === 'false' ? 'checked' : ''}>เล่นซ้ำทุกครั้งที่เลื่อนมาถึง</label>
+        ${kids > 1 ? `<label class="check"><input type="checkbox" id="an-stagger" ${isStagger ? 'checked' : ''}>ให้ ${kids} ชิ้นด้านในโผล่ทีละชิ้น</label>
+          <label class="anim-row ${isStagger ? '' : 'hidden'}" id="an-step-row"><span>ห่างกัน</span><input type="range" min="40" max="600" step="20" id="an-step" value="${a['data-bw-stagger'] || 120}"><code id="an-step-v">${a['data-bw-stagger'] || 120}ms</code></label>` : ''}
+      </div>
+      <div class="sect-title">ตอนชี้เมาส์</div>
+      <select class="input" id="an-hover">${HOVERS.map(([v, l]) => `<option value="${v}" ${v === (a['data-bw-hover'] || '') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <div class="sect-title">เอฟเฟกต์พิเศษ</div>
+      <label class="check" ${/\d/.test(text) ? '' : 'title="ใช้กับข้อความที่มีตัวเลข เช่น 1,200+"'}><input type="checkbox" id="an-count" ${a['data-bw-count'] != null ? 'checked' : ''} ${/\d/.test(text) ? '' : 'disabled'}>ตัวเลขนับขึ้น <span class="muted small">(${/\d/.test(text) ? 'เช่น 0 → ' + BW.esc(text.slice(0, 12)) : 'ต้องมีตัวเลข'})</span></label>
+      <label class="check"><input type="checkbox" id="an-typing" ${a['data-bw-typing'] != null ? 'checked' : ''}>ข้อความพิมพ์ทีละตัว</label>
+      <input class="input ${a['data-bw-typing'] != null ? '' : 'hidden'}" id="an-words" placeholder="คำที่ 1|คำที่ 2|คำที่ 3" value="${BW.esc(a['data-bw-typing'] || '')}" style="margin-bottom:10px">
+      <label class="check"><input type="checkbox" id="an-parallax" ${a['data-bw-parallax'] != null ? 'checked' : ''}>Parallax ภาพพื้นหลัง <span class="muted small">(ส่วนที่มีรูปพื้นหลัง)</span></label>
+      <div class="small muted" style="margin-top:12px">แอนิเมชันเล่นบนเว็บจริงและไฟล์ที่ส่งออก · ในตัวออกแบบกด “ดูตัวอย่าง” · ผู้ที่ตั้งค่าลดการเคลื่อนไหวในเครื่องจะไม่เห็นแอนิเมชัน</div>
+    </div>`;
+    const set = (k, v) => { if (v === null || v === undefined || v === false) comp.removeAttributes(k); else comp.addAttributes({ [k]: v === true ? '' : String(v) }); };
+    box.querySelectorAll('.anim-opt').forEach(b => b.onclick = () => {
+      set('data-bw-anim', b.dataset.v || null);
+      if (!b.dataset.v) ['data-bw-anim-duration', 'data-bw-anim-delay', 'data-bw-anim-once', 'data-bw-stagger'].forEach(k => set(k, null));
+      drawAnim(); if (b.dataset.v) playAnim(comp);
+    });
+    const range = (id, attr, def) => { const r = box.querySelector(id); if (!r) return;
+      r.oninput = () => { box.querySelector(id + '-v').textContent = r.value + 'ms'; };
+      r.onchange = () => { set(attr, +r.value === def ? null : r.value); playAnim(comp); }; };
+    range('#an-dur', 'data-bw-anim-duration', 700); range('#an-delay', 'data-bw-anim-delay', 0); range('#an-step', 'data-bw-stagger', -1);
+    box.querySelector('#an-repeat').onchange = e => set('data-bw-anim-once', e.target.checked ? 'false' : null);
+    const st = box.querySelector('#an-stagger');
+    if (st) st.onchange = e => { set('data-bw-stagger', e.target.checked ? (box.querySelector('#an-step').value || 120) : null);
+      if (e.target.checked && !comp.getAttributes()['data-bw-anim']) set('data-bw-anim', 'fade-up'); drawAnim(); playAnim(comp); };
+    box.querySelector('#an-hover').onchange = e => set('data-bw-hover', e.target.value || null);
+    box.querySelector('#an-count').onchange = e => { set('data-bw-count', e.target.checked ? true : null); drawAnim(); if (e.target.checked) playAnim(comp); };
+    box.querySelector('#an-typing').onchange = e => { set('data-bw-typing', e.target.checked ? (text || 'ข้อความ') : null); drawAnim(); };
+    const words = box.querySelector('#an-words'); words.onchange = () => set('data-bw-typing', words.value || text);
+    box.querySelector('#an-parallax').onchange = e => set('data-bw-parallax', e.target.checked ? '0.3' : null);
+    const play = box.querySelector('#an-play'); if (play) play.onclick = () => playAnim(comp);
+  }
+  editor.on('component:toggled', () => { if (!$('[data-rpane=anim]').classList.contains('hidden')) drawAnim(); });
+  document.querySelector('[data-rt=anim]').addEventListener('click', drawAnim);
 
   // ------------------------------------------------------------------ media panel
   const am = editor.AssetManager;

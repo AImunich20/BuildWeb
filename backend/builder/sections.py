@@ -52,11 +52,11 @@ flex-direction:column;background:#fff;padding:16px 20px;border-bottom:1px solid 
         "category": "เนื้อหา",
         "icon": "star",
         "html": f"""<section class="bw-hero"><div class="bw-container bw-hero-in">
-<div class="bw-hero-text"><span class="bw-badge">✨ ใหม่ล่าสุด</span>
+<div class="bw-hero-text" data-bw-anim="fade-up"><span class="bw-badge">✨ ใหม่ล่าสุด</span>
 <h1>สร้างสิ่งที่ยอดเยี่ยม<br>ให้ลูกค้าของคุณ</h1>
 <p>บอกเล่าเรื่องราวธุรกิจของคุณในหนึ่งประโยค ให้ผู้เข้าชมรู้ทันทีว่าคุณช่วยอะไรเขาได้</p>
 <div class="bw-hero-actions"><a href="contact.html" class="bw-btn">ติดต่อเรา</a><a href="#features" class="bw-btn bw-btn-outline">ดูเพิ่มเติม</a></div></div>
-<img class="bw-hero-img" src="{IMG}" alt="ภาพประกอบ"></div></section>""",
+<img class="bw-hero-img" src="{IMG}" alt="ภาพประกอบ" data-bw-anim="fade-left" data-bw-anim-delay="150"></div></section>""",
         "css": """.bw-hero{padding:90px 0;background:linear-gradient(135deg,var(--bw-surface),#fff 60%)}
 .bw-hero-in{display:grid;grid-template-columns:1.1fr 1fr;gap:48px;align-items:center}
 .bw-hero h1{font-size:clamp(34px,5vw,56px);font-weight:700}
@@ -72,7 +72,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "label": "ฮีโร่ตรงกลาง",
         "category": "เนื้อหา",
         "icon": "target",
-        "html": """<section class="bw-hero2"><div class="bw-container">
+        "html": """<section class="bw-hero2"><div class="bw-container" data-bw-anim="zoom-in">
 <h1>ทุกอย่างที่คุณต้องการ<br>อยู่ในที่เดียว</h1>
 <p>คำอธิบายสั้นๆ ที่ดึงดูดให้ผู้คนอยากอ่านต่อ</p>
 <a href="contact.html" class="bw-btn">เริ่มต้นใช้งานฟรี</a></div></section>""",
@@ -87,11 +87,11 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "เนื้อหา",
         "icon": "grid",
         "html": """<section class="bw-features" id="features"><div class="bw-container">
-<div class="bw-sec-head"><h2>ทำไมต้องเลือกเรา</h2><p>สามเหตุผลที่ลูกค้าไว้วางใจ</p></div>
-<div class="bw-grid3">
-<div class="bw-card"><div class="bw-icon">⚡</div><h3>รวดเร็ว</h3><p>อธิบายจุดเด่นข้อแรกของคุณให้ชัดเจนและกระชับ</p></div>
-<div class="bw-card"><div class="bw-icon">🛡️</div><h3>ปลอดภัย</h3><p>อธิบายจุดเด่นข้อที่สองที่ทำให้คุณแตกต่าง</p></div>
-<div class="bw-card"><div class="bw-icon">💜</div><h3>ใส่ใจ</h3><p>อธิบายจุดเด่นข้อที่สามที่ลูกค้าชื่นชอบ</p></div>
+<div class="bw-sec-head" data-bw-anim="fade-up"><h2>ทำไมต้องเลือกเรา</h2><p>สามเหตุผลที่ลูกค้าไว้วางใจ</p></div>
+<div class="bw-grid3" data-bw-anim="fade-up" data-bw-stagger="120">
+<div class="bw-card" data-bw-hover="lift"><div class="bw-icon">⚡</div><h3>รวดเร็ว</h3><p>อธิบายจุดเด่นข้อแรกของคุณให้ชัดเจนและกระชับ</p></div>
+<div class="bw-card" data-bw-hover="lift"><div class="bw-icon">🛡️</div><h3>ปลอดภัย</h3><p>อธิบายจุดเด่นข้อที่สองที่ทำให้คุณแตกต่าง</p></div>
+<div class="bw-card" data-bw-hover="lift"><div class="bw-icon">💜</div><h3>ใส่ใจ</h3><p>อธิบายจุดเด่นข้อที่สามที่ลูกค้าชื่นชอบ</p></div>
 </div></div></section>""",
         "css": """.bw-features{padding:90px 0}
 .bw-sec-head{text-align:center;max-width:640px;margin:0 auto 48px}
@@ -110,8 +110,8 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "เนื้อหา",
         "icon": "columns",
         "html": f"""<section class="bw-about"><div class="bw-container bw-about-in">
-<img src="{IMG_SQ}" alt="เกี่ยวกับเรา">
-<div><h2>เรื่องราวของเรา</h2>
+<img src="{IMG_SQ}" alt="เกี่ยวกับเรา" data-bw-anim="fade-right">
+<div data-bw-anim="fade-left" data-bw-anim-delay="120"><h2>เรื่องราวของเรา</h2>
 <p>เล่าที่มา ความตั้งใจ และสิ่งที่ทำให้ธุรกิจของคุณพิเศษ ผู้คนชอบเชื่อมโยงกับเรื่องราวที่จริงใจ</p>
 <ul class="bw-checks"><li>ประสบการณ์มากกว่า 10 ปี</li><li>ทีมงานมืออาชีพ</li><li>บริการหลังการขายดีเยี่ยม</li></ul>
 <a href="about.html" class="bw-btn">อ่านต่อ</a></div></div></section>""",
@@ -131,8 +131,8 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "เนื้อหา",
         "icon": "hash",
         "html": """<section class="bw-stats"><div class="bw-container bw-stats-in">
-<div><strong>1,200+</strong><span>ลูกค้า</span></div><div><strong>98%</strong><span>ความพึงพอใจ</span></div>
-<div><strong>24/7</strong><span>ดูแลตลอด</span></div><div><strong>15</strong><span>รางวัล</span></div></div></section>""",
+<div><strong data-bw-count>1,200+</strong><span>ลูกค้า</span></div><div><strong data-bw-count>98%</strong><span>ความพึงพอใจ</span></div>
+<div><strong>24/7</strong><span>ดูแลตลอด</span></div><div><strong data-bw-count>15</strong><span>รางวัล</span></div></div></section>""",
         "css": """.bw-stats{padding:60px 0;background:var(--bw-text);color:#fff}
 .bw-stats-in{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;text-align:center}
 .bw-stats strong{display:block;font-family:var(--bw-font-heading);font-size:42px;color:var(--bw-secondary)}
@@ -145,7 +145,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "สื่อ",
         "icon": "images",
         "html": "<section class=\"bw-gallery\"><div class=\"bw-container\"><div class=\"bw-sec-head\"><h2>ผลงานของเรา</h2></div>"
-        "<div class=\"bw-gal-grid\">"
+        "<div class=\"bw-gal-grid\" data-bw-anim=\"zoom-in\" data-bw-stagger=\"80\">"
         + "".join(
             f'<img src="{placeholder(f"ผลงาน {i}", 600, 450, c1, c2)}" alt="ผลงาน {i}">'
             for i, (c1, c2) in enumerate(
@@ -165,8 +165,8 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "ขาย",
         "icon": "tag",
         "html": """<section class="bw-pricing"><div class="bw-container">
-<div class="bw-sec-head"><h2>แพ็กเกจราคา</h2><p>เลือกแพ็กเกจที่เหมาะกับคุณ</p></div>
-<div class="bw-grid3">
+<div class="bw-sec-head" data-bw-anim="fade-up"><h2>แพ็กเกจราคา</h2><p>เลือกแพ็กเกจที่เหมาะกับคุณ</p></div>
+<div class="bw-grid3" data-bw-anim="fade-up" data-bw-stagger="140">
 <div class="bw-price"><h3>เริ่มต้น</h3><div class="bw-amount">฿290<small>/เดือน</small></div><ul><li>ฟีเจอร์พื้นฐาน</li><li>ผู้ใช้ 1 คน</li><li>อีเมลซัพพอร์ต</li></ul><a href="contact.html" class="bw-btn bw-btn-outline">เลือกแพ็กเกจ</a></div>
 <div class="bw-price bw-price-hot"><span class="bw-tag">ยอดนิยม</span><h3>มืออาชีพ</h3><div class="bw-amount">฿890<small>/เดือน</small></div><ul><li>ทุกอย่างในแพ็กเริ่มต้น</li><li>ผู้ใช้ 5 คน</li><li>ซัพพอร์ตด่วน</li></ul><a href="contact.html" class="bw-btn">เลือกแพ็กเกจ</a></div>
 <div class="bw-price"><h3>องค์กร</h3><div class="bw-amount">฿2,490<small>/เดือน</small></div><ul><li>ทุกอย่างในแพ็กมืออาชีพ</li><li>ผู้ใช้ไม่จำกัด</li><li>ผู้ดูแลส่วนตัว</li></ul><a href="contact.html" class="bw-btn bw-btn-outline">ติดต่อฝ่ายขาย</a></div>
@@ -186,7 +186,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "category": "ขาย",
         "icon": "quote",
         "html": f"""<section class="bw-testi"><div class="bw-container">
-<div class="bw-sec-head"><h2>เสียงจากลูกค้า</h2></div><div class="bw-grid3">
+<div class="bw-sec-head" data-bw-anim="fade-up"><h2>เสียงจากลูกค้า</h2></div><div class="bw-grid3" data-bw-anim="fade-up" data-bw-stagger="120">
 <figure class="bw-quote"><blockquote>“บริการดีมาก ประทับใจตั้งแต่ครั้งแรก แนะนำเลยค่ะ”</blockquote><figcaption><img src="{AVATAR}" alt="">คุณสมหญิง<br><small>เจ้าของร้าน</small></figcaption></figure>
 <figure class="bw-quote"><blockquote>“ทีมงานเป็นมืออาชีพ งานเสร็จตรงเวลา คุ้มค่ามาก”</blockquote><figcaption><img src="{AVATAR}" alt="">คุณสมชาย<br><small>ผู้จัดการ</small></figcaption></figure>
 <figure class="bw-quote"><blockquote>“ใช้มาหลายปีแล้ว ไม่เคยผิดหวังเลยครับ”</blockquote><figcaption><img src="{AVATAR}" alt="">คุณวิชัย<br><small>ลูกค้าประจำ</small></figcaption></figure>
@@ -203,7 +203,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "label": "ทีมงาน",
         "category": "เนื้อหา",
         "icon": "users",
-        "html": "<section class=\"bw-team\"><div class=\"bw-container\"><div class=\"bw-sec-head\"><h2>ทีมของเรา</h2></div><div class=\"bw-team-grid\">"
+        "html": "<section class=\"bw-team\"><div class=\"bw-container\"><div class=\"bw-sec-head\" data-bw-anim=\"fade-up\"><h2>ทีมของเรา</h2></div><div class=\"bw-team-grid\" data-bw-anim=\"fade-up\" data-bw-stagger=\"100\">"
         + "".join(
             f'<div class="bw-member"><img src="{AVATAR}" alt="{n}"><h3>{n}</h3><p>{r}</p></div>'
             for n, r in [("อรุณี", "ผู้ก่อตั้ง"), ("ธนพล", "นักออกแบบ"), ("ปิยะ", "นักพัฒนา"), ("มาลี", "การตลาด")]
@@ -236,7 +236,7 @@ font-size:14px;margin-bottom:18px;box-shadow:0 4px 14px -6px rgba(0,0,0,.15)}
         "label": "ชวนให้ติดต่อ (CTA)",
         "category": "ขาย",
         "icon": "arrow",
-        "html": """<section class="bw-cta"><div class="bw-container bw-cta-in">
+        "html": """<section class="bw-cta"><div class="bw-container bw-cta-in" data-bw-anim="zoom-in">
 <div><h2>พร้อมเริ่มต้นแล้วหรือยัง?</h2><p>ปรึกษาฟรี ไม่มีค่าใช้จ่าย</p></div>
 <a href="contact.html" class="bw-btn">คุยกับเราเลย</a></div></section>""",
         "css": """.bw-cta{padding:70px 0}
@@ -307,6 +307,46 @@ background:linear-gradient(120deg,var(--bw-primary),var(--bw-secondary));border-
 .bw-menu-item h3{margin:0 0 4px}.bw-menu-item p{margin:0 0 6px;color:var(--bw-muted)}
 .bw-menu-item strong{color:var(--bw-primary);font-size:18px}
 @media (max-width:768px){.bw-menu-grid{grid-template-columns:1fr}}""",
+    },
+    {
+        "id": "carousel",
+        "label": "สไลด์รูป",
+        "category": "สื่อ",
+        "icon": "images",
+        "html": "<section class=\"bw-slider\"><div class=\"bw-container\"><div class=\"bw-carousel\" data-bw-autoplay=\"5000\"><div class=\"bw-carousel-track\">"
+        + "".join(f'<figure class="bw-slide"><img src="{placeholder(f"สไลด์ {i}", 1200, 560, c1, c2)}" alt="สไลด์ {i}"><figcaption>คำบรรยายสไลด์ที่ {i}</figcaption></figure>'
+                  for i, (c1, c2) in enumerate([("#c4b5fd", "#67e8f9"), ("#fbcfe8", "#fde68a"), ("#a7f3d0", "#93c5fd")], 1))
+        + "</div><button class=\"bw-carousel-btn prev\" aria-label=\"ก่อนหน้า\">‹</button><button class=\"bw-carousel-btn next\" aria-label=\"ถัดไป\">›</button>"
+        "<div class=\"bw-carousel-dots\"></div></div></div></section>",
+        "css": """.bw-slider{padding:60px 0}
+.bw-slide{margin:0;position:relative}
+.bw-slide img{width:100%;aspect-ratio:21/9;object-fit:cover;display:block}
+.bw-slide figcaption{position:absolute;left:24px;bottom:22px;background:rgba(0,0,0,.55);color:#fff;padding:8px 14px;border-radius:10px;font-weight:500}""",
+    },
+    {
+        "id": "logos",
+        "label": "แถบโลโก้วิ่ง",
+        "category": "สื่อ",
+        "icon": "arrow",
+        "html": "<section class=\"bw-logos\"><div class=\"bw-container\"><p class=\"bw-logos-title\">ได้รับความไว้วางใจจาก</p></div><div class=\"bw-marquee\"><div class=\"bw-marquee-track\">"
+        + "".join(f'<span class="bw-logo-item">แบรนด์ {i}</span>' for i in range(1, 7)) * 2
+        + "</div></div></section>",
+        "css": """.bw-logos{padding:50px 0}
+.bw-logos-title{text-align:center;color:var(--bw-muted);margin-bottom:22px}
+.bw-logo-item{font-family:var(--bw-font-heading);font-size:24px;font-weight:700;color:var(--bw-muted);opacity:.7;white-space:nowrap}""",
+    },
+    {
+        "id": "typing-hero",
+        "label": "ฮีโร่ข้อความพิมพ์",
+        "category": "เนื้อหา",
+        "icon": "text",
+        "html": """<section class="bw-type-hero"><div class="bw-container"><h1>เราช่วยคุณ<br><span class="bw-type" data-bw-typing="สร้างเว็บไซต์|เพิ่มยอดขาย|เติบโตออนไลน์">สร้างเว็บไซต์</span></h1>
+<p data-bw-anim="fade-up" data-bw-anim-delay="300">คำอธิบายสั้นๆ ที่บอกว่าคุณทำอะไรและช่วยลูกค้าอย่างไร</p>
+<div data-bw-anim="fade-up" data-bw-anim-delay="450"><a href="contact.html" class="bw-btn" data-bw-hover="shine">เริ่มต้นเลย</a></div></div></section>""",
+        "css": """.bw-type-hero{padding:120px 0;text-align:center;background:radial-gradient(800px 400px at 50% 0,var(--bw-surface),transparent)}
+.bw-type-hero h1{font-size:clamp(36px,5.5vw,64px)}
+.bw-type{color:var(--bw-primary)}
+.bw-type-hero p{font-size:19px;color:var(--bw-muted);max-width:560px;margin:18px auto 28px}""",
     },
     {
         "id": "page-header",

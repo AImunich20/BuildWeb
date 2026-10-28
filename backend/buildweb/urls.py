@@ -43,6 +43,7 @@ urlpatterns = [
     path("api/sites/<int:site_id>/submissions/read-all", api.submission_read_all),
     path("api/sites/<int:site_id>/export", api.site_export),
     path("api/sites/<int:site_id>/shared/extract", api.shared_extract),
+    path("api/sites/<int:site_id>/navbar", api.navbar_settings),
     path("api/shared/<int:shared_id>/project", api.shared_project),
     path("api/shared/<int:shared_id>/update", api.shared_update),
     path("api/pages/<int:page_id>/update", api.page_update),

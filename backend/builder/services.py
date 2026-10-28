@@ -87,16 +87,40 @@ def create_site(name, template_id="blank", description=""):
         )
     # Blank sites start with an empty (disabled) header/footer the user can switch on later.
     has_parts = any(set(ids) & sections.SHARED_IDS for _, _, ids in tpl["pages"])
-    create_shared(site, enabled=has_parts)
+    has_contact = any(slug == "contact" for _, slug, _ in tpl["pages"])
+    site.nav = {"cta": {"show": has_parts, "text": "ติดต่อเรา", "href": "contact.html" if has_contact else "#contact"}}
+    site.save(update_fields=["nav"])
+    create_shared(site, enabled=has_parts, managed_header=True)
     return site
 
 
-def create_shared(site, enabled=True):
+def create_shared(site, enabled=True, managed_header=False):
     for kind, sid in ((SharedSection.HEADER, "navbar"), (SharedSection.FOOTER, "footer")):
         sec = sections.BY_ID[sid]
         SharedSection.objects.get_or_create(site=site, kind=kind, defaults={
             "enabled": enabled, "html": brand(sec["html"], site.name), "css": sec["css"],
+            "managed": managed_header and kind == SharedSection.HEADER,
         })
+
+
+def set_header_managed(site, managed):
+    """Switch the header between the navbar settings (managed) and free design in the editor."""
+    from .navbar import render_header
+
+    create_shared(site, enabled=True)
+    sec = site.shared_sections.get(kind=SharedSection.HEADER)
+    if not managed and sec.managed:
+        # Start the free design from what the settings produce; keep the menu automatic.
+        html = render_header(site, list(site.pages.all()), None)
+        html = re.sub(r'<span class="bw-nav-menu">.*?</span>(?=<a |</nav>)',
+                      '<span class="bw-nav-menu" data-bw-auto-nav></span>', html, count=1, flags=re.S)
+        from .navbar import NAV_CSS
+
+        sec.html, sec.css, sec.project_data = html, NAV_CSS, {}
+    sec.managed, sec.enabled = managed, True
+    sec.save()
+    site.touch()
+    return sec
 
 
 def similar(a, b, threshold=0.7):

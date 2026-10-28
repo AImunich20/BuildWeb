@@ -51,7 +51,7 @@ class BuildWebTests(TestCase):
 
     def test_shared_sections_edit_once_and_opt_out(self):
         site = services.create_site("Shared", "business")
-        header = site.shared_sections.get(kind="header")
+        header = services.set_header_managed(site, False)  # design the header freely
         services.save_shared(header, {}, '<header class="x">NEW HEADER <span data-bw-auto-nav>old</span></header>', ".x{color:red}")
         about = site.pages.get(slug="about")
         out = render.render_page(about)
@@ -231,7 +231,8 @@ class BuildWebTests(TestCase):
         self.assertIn('href="home.html">หน้าแรก', about)
         sec = Site.objects.get(pk=sid).shared_sections.get(kind="header")
         self.assertTrue(self.post(f"/api/shared/{sec.id}/project", {"project": {}, "html": "<header>H</header>"}).json()["ok"])
-        self.assertEqual(self.c.get(f"/sites/{sid}/edit-shared/header/").status_code, 200)
+        self.assertEqual(self.c.get(f"/sites/{sid}/edit-shared/header/").status_code, 302)  # managed → navbar settings
+        self.assertEqual(self.c.get(f"/sites/{sid}/edit-shared/footer/").status_code, 200)
         self.assertFalse(self.post(f"/api/shared/{sec.id}/update", {"enabled": False}).json()["shared"]["enabled"])
         ids = list(Site.objects.get(pk=sid).pages.values_list("id", flat=True))[::-1]
         self.assertTrue(self.post(f"/api/sites/{sid}/pages/reorder", {"ids": ids}).json()["ok"])
@@ -535,3 +536,59 @@ class DataTests(TestCase):
         self.assertIn("ลาเต้", c.get(f"/api/collections/{cid}/export.csv").content.decode("utf-8-sig"))
         self.assertEqual(c.get(f"/sites/{self.site.id}/data/").status_code, 200)
         self.assertTrue(post(f"/api/collections/{cid}/delete", {})["ok"])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class NavbarAnimTests(TestCase):
+    def setUp(self):
+        self.site = services.create_site("Nav", "business")
+
+    def test_managed_navbar_settings(self):
+        from . import navbar
+
+        home = self.site.home_page()
+        out = render.render_page(home)
+        self.assertIn("bw-nav--managed", out)
+        self.assertIn('href="index.html" class="active"', out)
+        self.site.nav = navbar.clean({
+            "layout": "center-logo", "transparent": True, "autohide": True, "mobile": "fullscreen", "logo_image": "/media/x/logo.png",
+            "menu_mode": "custom", "items": [{"label": "บริการ", "href": "services.html", "children": [{"label": "ราคา", "href": "services.html#price"}]},
+                                              {"label": "Blog", "href": "https://example.com", "target": "_blank"}, {"label": ""}],
+            "cta": {"show": True, "text": "จองเลย", "href": "#book"}, "topbar": {"show": True, "text": "โทร 02-123", "links": [{"label": "LINE", "href": "#"}]},
+            "logo_height": 999,
+        })
+        self.site.save()
+        out = render.render_page(self.site.pages.get(slug="services"))
+        for cls in ("bw-nav--center-logo", "bw-nav--transparent", "bw-nav--autohide", "bw-nav--m-fullscreen"):
+            self.assertIn(cls, out)
+        self.assertIn('src="assets/x/logo.png"', out)
+        self.assertIn("height:120px", out)  # clamped
+        self.assertIn('class="bw-dd"><a href="services.html" class="active">บริการ</a>', out)
+        self.assertIn('target="_blank" rel="noopener">Blog</a>', out)
+        self.assertIn(">จองเลย</a>", out)
+        self.assertIn("โทร 02-123", out)
+        self.assertNotIn(">เกี่ยวกับเรา</a><a", out.split("<header")[1].split("</header>")[0])  # custom menu replaces auto
+
+    def test_switch_to_free_design_and_back(self):
+        sec = services.set_header_managed(self.site, False)
+        self.assertFalse(sec.managed)
+        self.assertIn("data-bw-auto-nav", sec.html)
+        out = render.render_page(self.site.pages.get(slug="about"))
+        self.assertIn('href="about.html" class="active"', out)  # auto menu still filled
+        self.assertTrue(services.set_header_managed(self.site, True).managed)
+
+    def test_navbar_api(self):
+        c = Client()
+        c.get("/")
+        r = c.post(f"/api/sites/{self.site.id}/navbar", json.dumps({"settings": {"layout": "nope", "sticky": False}}),
+                   content_type="application/json").json()
+        self.assertEqual(r["settings"]["layout"], "split")
+        self.assertFalse(r["settings"]["sticky"])
+        self.assertTrue(r["managed"])
+
+    def test_animation_assets_in_output(self):
+        files, _ = render.build_files(self.site)
+        self.assertIn("bw-anim", files["index.html"].split("</head>")[0])
+        self.assertIn("[data-bw-anim]", files["css/site.css"])
+        self.assertIn("IntersectionObserver", files["js/site.js"])
+        self.assertIn("data-bw-nav", files["js/site.js"])

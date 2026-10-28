@@ -4,14 +4,19 @@
 
 <br>
 
-**สร้างเว็บไซต์แบบลากวาง ผูกข้อมูลจาก MySQL/XAMPP โฮสต์จากเครื่องคุณ และส่งออกเป็น HTML/CSS/JS**
+**โปรแกรมสร้างเว็บไซต์แบบลากวางบนเครื่องของคุณ**<br>
+ออกแบบเหมือน Canva · ผูกข้อมูลจาก MySQL/XAMPP · โฮสต์หลายเว็บพร้อมกัน · ส่งออกเป็น HTML/CSS/JS · อัพเดทตัวเองอัตโนมัติ
 
 <a href="https://github.com/AImunich20/buildweb-releases/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/AImunich20/buildweb-releases?label=latest&style=flat-square&color=7c5cff"></a>
 <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-0b0b0e?style=flat-square">
 <img alt="Auto update" src="https://img.shields.io/badge/updates-automatic-16a34a?style=flat-square">
 <img alt="Price" src="https://img.shields.io/badge/price-free-16a34a?style=flat-square">
 
+[ดาวน์โหลด](#ดาวน์โหลด) · [ฟีเจอร์](#ฟีเจอร์ทั้งหมด) · [เริ่มต้นใช้งาน](#เริ่มต้นใช้งานใน-5-นาที) · [ทำงานอย่างไร](#ทำงานอย่างไร) · [คู่มืออ้างอิง](#คู่มืออ้างอิง) · [คำถามที่พบบ่อย](#คำถามที่พบบ่อย--แก้ปัญหา) · [CHANGELOG](CHANGELOG.md)
+
 </div>
+
+---
 
 ## ดาวน์โหลด
 
@@ -19,109 +24,254 @@
 |---|---|---|
 | **macOS** (Apple M1–M4) | <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb.dmg"><img alt="macOS Apple Silicon" src="https://img.shields.io/badge/Download-.dmg-0b0b0e?style=for-the-badge&logo=apple&logoColor=white"></a> | macOS 12 ขึ้นไป |
 | **macOS** (Intel) | <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb-Intel.dmg"><img alt="macOS Intel" src="https://img.shields.io/badge/Download-.dmg_Intel-0b0b0e?style=for-the-badge&logo=apple&logoColor=white"></a> | macOS 12 ขึ้นไป |
-| **Windows** 10/11 | <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb-Setup.exe"><img alt="Windows" src="https://img.shields.io/badge/Download-Setup.exe-0078d4?style=for-the-badge&logo=windows&logoColor=white"></a> | 64-bit · ติดตั้งแบบผู้ใช้ ไม่ต้องใช้สิทธิ์แอดมิน |
+| **Windows** 10/11 | <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb-Setup.exe"><img alt="Windows" src="https://img.shields.io/badge/Download-Setup.exe-0078d4?style=for-the-badge&logo=windows&logoColor=white"></a> | 64-bit · ไม่ต้องใช้สิทธิ์แอดมิน |
 | **Linux** | <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb.AppImage"><img alt="Linux AppImage" src="https://img.shields.io/badge/Download-AppImage-e95420?style=for-the-badge&logo=linux&logoColor=white"></a> <a href="https://github.com/AImunich20/buildweb-releases/releases/latest/download/BuildWeb.deb"><img alt="Debian/Ubuntu" src="https://img.shields.io/badge/.deb-e95420?style=for-the-badge&logo=ubuntu&logoColor=white"></a> | x86_64 · AppImage อัพเดทตัวเองได้ |
 
-**อัพเดทเหมือนแอปทั่วไป:** BuildWeb ตรวจหาเวอร์ชันใหม่ตอนเปิดและทุกชั่วโมง แล้วติดตั้งให้เองเบื้องหลัง ข้อมูลเว็บของคุณไม่หาย
+> **ติดตั้งครั้งเดียว ใช้ได้ตลอด** BuildWeb ตรวจหาเวอร์ชันใหม่ตอนเปิดและทุกชั่วโมง แล้วติดตั้งให้เองเบื้องหลัง (ถามก่อนเปิดใหม่) ข้อมูลเว็บไม่หาย
 
 <details>
-<summary><b>ติดตั้งครั้งแรก: macOS แจ้งว่า “ไม่สามารถตรวจสอบผู้พัฒนาได้”</b></summary>
+<summary><b>เปิดครั้งแรกแล้วระบบเตือนเรื่องความปลอดภัย?</b></summary>
 
-BuildWeb ยังไม่ได้ลงทะเบียนกับ Apple ให้ทำอย่างใดอย่างหนึ่ง
-- **System Settings › Privacy & Security** แล้วกด **Open Anyway**
-- หรือรันใน Terminal ครั้งเดียว: `xattr -dr com.apple.quarantine /Applications/BuildWeb.app`
+BuildWeb ยังไม่ได้ซื้อใบรับรองนักพัฒนาจาก Apple/Microsoft ระบบจึงเตือนในครั้งแรก
+- **macOS:** ไปที่ System Settings › Privacy & Security แล้วกด **Open Anyway** หรือรัน `xattr -dr com.apple.quarantine /Applications/BuildWeb.app`
+- **Windows:** หน้าต่าง SmartScreen ให้กด **More info › Run anyway**
+- **Linux:** `chmod +x BuildWeb.AppImage && ./BuildWeb.AppImage` หรือ `sudo apt install ./BuildWeb.deb`
 
-บน Windows ถ้า SmartScreen เตือน ให้กด **More info › Run anyway** · บน Linux ให้ `chmod +x BuildWeb.AppImage` ก่อนเปิด
-การเปิดครั้งแรกจะติดตั้งส่วนประกอบเอง (ต้องต่ออินเทอร์เน็ต และใช้เวลาประมาณหนึ่งนาที)
+การเปิดครั้งแรกจะติดตั้งส่วนประกอบเอง ต้องต่ออินเทอร์เน็ต และใช้เวลาประมาณหนึ่งนาที
 </details>
 
-<br>
+---
 
-## ทำอะไรได้บ้าง
+## ฟีเจอร์ทั้งหมด
 
-<table>
-<tr>
-<td width="50%" valign="top">
+### 1. ตัวออกแบบแบบลากวาง
 
-#### ออกแบบแบบลากวาง
-บล็อกสำเร็จรูปภาษาไทย 19 แบบ, ธีมสี/ฟอนต์ทั้งเว็บ, ดูได้ทั้งคอม/แท็บเล็ต/มือถือ, undo/redo, เวอร์ชันย้อนหลัง และ**ส่วนหัว/ท้ายร่วม**ที่แก้ครั้งเดียวเปลี่ยนทุกหน้า โดยเมนูอัปเดตตามรายการหน้าเอง
+<img src="docs/images/editor-light.png" alt="ตัวออกแบบ" width="100%">
 
-</td>
-<td width="50%" valign="top">
+| ส่วน | ทำอะไรได้ |
+|---|---|
+| **บล็อกสำเร็จรูป 22 แบบ** (ภาษาไทย) | แถบเมนู, ฮีโร่ 3 แบบ, จุดเด่น, เกี่ยวกับเรา, สถิติ, แกลเลอรี, สไลด์รูป, แถบโลโก้วิ่ง, ราคา, รีวิว, ทีมงาน, FAQ, CTA, ฟอร์มติดต่อ, แผนที่, YouTube, เมนูร้าน, บทความ, ส่วนท้าย |
+| **องค์ประกอบพื้นฐาน** | หัวข้อ, ย่อหน้า, ปุ่ม, รูป, วิดีโอ, คอลัมน์, ช่องว่าง, ฟอร์ม, แท็บ, นับถอยหลัง, โค้ด HTML เอง |
+| **ปรับแต่ง** | แท็บ **สไตล์** (ฟอนต์ไทย, สี, ระยะ, ขอบ, เงา, flex/grid), แท็บ **ตั้งค่า** (ลิงก์ไปหน้าในเว็บ, alt, ฟอร์ม, วนซ้ำข้อมูล), แท็บ **แอนิเมชัน** |
+| **มุมมอง** | คอมพิวเตอร์ / แท็บเล็ต / มือถือ แยกสไตล์ตามขนาดจอได้ |
+| **ความปลอดภัยของงาน** | บันทึกอัตโนมัติทุกการแก้, undo/redo, **เวอร์ชันย้อนหลัง** (อัตโนมัติทุก 5 นาที + บันทึกเองตั้งชื่อได้) |
+| **โค้ด** | ดูโค้ด HTML/CSS, นำเข้า HTML (วางโค้ดหรือเลือกไฟล์ .html) |
+| **ธีมทั้งเว็บ** | สีหลัก/รอง/เน้น, ฟอนต์หัวข้อ/เนื้อหา (Prompt, Kanit, Sarabun, Noto Sans Thai, …), ความโค้งมุม, ความกว้าง เปลี่ยนแล้วทุกบล็อกเปลี่ยนตาม |
 
-#### ข้อมูลจาก MySQL / XAMPP
-นำเข้าตารางจาก XAMPP ได้ 2 แบบ: **คัดลอก** มาเก็บ หรือ**เชื่อมสด** (แก้ใน phpMyAdmin แล้วเว็บเปลี่ยนตาม) รองรับไฟล์ `.sql` และ CSV ด้วย
-ผูกกับบล็อกใดก็ได้: วนซ้ำ เรียง กรอง จำกัดจำนวน และใช้ `{{ฟิลด์}}` ในข้อความ รูป หรือลิงก์
+### 2. แถบเมนูที่ตั้งค่าได้ — ใหม่ใน v0.1.3
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+<img src="docs/images/navbar.png" alt="ตั้งค่าแถบเมนู" width="100%">
 
-#### นำเข้าเว็บที่มีอยู่
-จาก `.html`, `.zip`, ทั้งโฟลเดอร์ หรือ **repo บน GitHub** ทุกหน้าแก้แบบลากวางได้ทันที โดยเก็บ CSS/JS/รูป/ฟอนต์ไว้ครบ และแก้ลิงก์ระหว่างหน้าให้เอง
+- **4 รูปแบบ:** โลโก้ซ้าย/เมนูขวา · เมนูกลาง · โลโก้กลาง · มินิมอล (ปุ่มเมนูอย่างเดียว)
+- **โลโก้:** ข้อความหรือรูป (ปรับความสูงได้)
+- **การทำงาน:** ติดด้านบนตอนเลื่อน · ใสทับหัวเว็บแล้วเป็นสีทึบเมื่อเลื่อน · ซ่อนเมื่อเลื่อนลง/แสดงเมื่อเลื่อนขึ้น · เงา · ความสูง · สีพื้น/ตัวอักษร
+- **มือถือ:** เลื่อนจากด้านข้าง (drawer) · ดรอปดาวน์ · เต็มจอ (ปิดด้วย Esc หรือแตะพื้นหลังได้)
+- **เมนู:** *อัตโนมัติ* จากรายการหน้า (หน้าย่อยกลายเป็น dropdown, ไฮไลต์หน้าปัจจุบัน) หรือ *จัดเอง* (ลิงก์ภายนอก, `#section`, เมนูย่อย, เปิดแท็บใหม่)
+- **ปุ่มเด่น (CTA)** และ **แถบบน** สำหรับเบอร์โทร/เวลาเปิด/ลิงก์โซเชียล
+- พรีวิวสด (คอม/มือถือ) และบันทึกอัตโนมัติ อยากออกแบบเองทั้งหมดก็กด “ออกแบบเองในตัวออกแบบ”
 
-</td>
-<td valign="top">
+### 3. แอนิเมชัน — ใหม่ใน v0.1.3
 
-#### โฮสต์หลายเว็บพร้อมกัน
-แต่ละเว็บมีพอร์ตของตัวเองได้ เปิดดูจากเครื่องใน Wi-Fi เดียวกันได้ และใช้ **Tailscale** เป็น `https://เครื่องคุณ.ts.net/` ได้ด้วยสวิตช์เดียว (Funnel เปิดสู่อินเทอร์เน็ต)
-ปิดหน้าต่างแล้วเว็บยังออนไลน์ เพราะแอปทำงานต่อบนแถบเมนู
+<img src="docs/images/animation.png" alt="แท็บแอนิเมชัน" width="100%">
 
-</td>
-</tr>
-<tr>
-<td valign="top">
+เลือกองค์ประกอบ › แท็บ **แอนิเมชัน** › คลิกเลือก แล้วกด **ดูตัวอย่าง** ได้ทันที
+- **ตอนเลื่อนมาถึง 11 แบบ:** จางเข้า, เลื่อนขึ้น/ลง, จากซ้าย/ขวา, ขยาย/ย่อเข้า, พลิกขึ้น, เบลอ→ชัด, ลอยขึ้นสูง, เด้ง ปรับระยะเวลา/หน่วงเวลา และเล่นซ้ำได้
+- **โผล่ทีละชิ้น (stagger):** ใช้กับกล่องที่มีหลายชิ้น เช่น การ์ด 3 ใบ หรือรายการจากฐานข้อมูล
+- **ตอนชี้เมาส์ 6 แบบ:** ยกลอย, ขยาย, เรืองแสง, ซูมรูปข้างใน, เอียง 3D, แสงวาบ
+- **เอฟเฟกต์พิเศษ:** ตัวเลขนับขึ้น (`1,200+`), ข้อความพิมพ์ทีละตัววนหลายคำ, parallax พื้นหลัง, สไลด์รูปเลื่อนเอง, แถบโลโก้วิ่ง
+- บล็อกสำเร็จรูปมีแอนิเมชันพอดีๆ ใส่ไว้ให้แล้ว · ไม่ใช้ไลบรารีภายนอก เว็บจึงยังโหลดเร็ว · เคารพการตั้งค่า “ลดการเคลื่อนไหว” ของผู้ชม · ใช้ได้ในไฟล์ที่ส่งออกด้วย
 
-#### ฟอร์ม & การแจ้งเตือน
-ฟอร์มบนเว็บใช้งานได้จริง ข้อมูลเก็บลงฐานข้อมูล ส่งออก CSV ได้ และแจ้งเตือนทันทีผ่าน**การแจ้งเตือนบนเครื่อง, Telegram, Discord, อีเมล หรือ Webhook**
+### 4. ข้อมูลจาก MySQL / XAMPP
 
-</td>
-<td valign="top">
+<img src="docs/images/data.png" alt="ข้อมูลจาก MySQL" width="100%">
 
-#### ส่งออก & ผู้ดูแล
-ส่งออกเป็น HTML/CSS/JS ลงเครื่อง หรือส่งตรงเข้า **XAMPP htdocs** (มี `bw-form.php` รับฟอร์มลง MySQL) ใช้ฐานข้อมูล SQLite หรือ MySQL ได้ มี **Django Admin** และธีมสว่าง/มืด
+- **นำเข้าจาก:** การเชื่อมต่อ MySQL/MariaDB (เลือก database › ตาราง), ไฟล์ `.sql` ที่ export จาก phpMyAdmin (ดูตารางก่อนนำเข้า), CSV หรือสร้างเอง
+- **2 โหมด**
+  - **คัดลอก:** เก็บใน BuildWeb แก้ได้ในแอป (ตารางแก้ไขได้ทีละช่อง) กด “ซิงก์” เพื่อดึงใหม่
+  - **เชื่อมสด:** อ่านจาก MySQL ทุกครั้งที่มีคนเปิดเว็บ (แคช 15 วินาที) แก้ใน phpMyAdmin แล้วเว็บเปลี่ยนตาม
+- **ผูกกับหน้าเว็บ:** ลากบล็อก “ข้อมูล › (ชื่อตาราง) การ์ด/ตาราง” หรือเลือกกล่องใดก็ได้ › ตั้งค่า › **วนซ้ำจากข้อมูล** แล้วใส่ `{{ฟิลด์}}` ในข้อความ รูป หรือลิงก์ — ดู [ไวยากรณ์](#ไวยากรณ์ข้อมูล)
+- ระบบเดาชนิดฟิลด์ให้ (ตัวเลข, รูป, ลิงก์, วันที่, ข้อความยาว) · ส่งออก CSV ได้
 
-</td>
-</tr>
-</table>
+### 5. นำเข้าเว็บที่มีอยู่
 
-<div align="center">
-<img src="docs/images/data.png" width="49%" alt="Data from MySQL"> <img src="docs/images/editor-light.png" width="49%" alt="Editor">
-<img src="docs/images/dashboard-dark.png" width="49%" alt="Dashboard dark"> <img src="docs/images/hosting.png" width="49%" alt="Hosting">
-</div>
+จาก `.html`, `.zip`, **ทั้งโฟลเดอร์** (ลากมาวาง) หรือ **repo บน GitHub** (public หรือ private ด้วย token, เลือก branch/โฟลเดอร์ย่อยได้, หา `dist/` ให้อัตโนมัติ)
+- ทุกไฟล์ .html กลายเป็นหน้าที่แก้แบบลากวางได้ · CSS ที่ลิงก์ไว้ไปเป็น CSS ของเว็บ · JS ถูกเก็บไว้ · รูป/ฟอนต์/ไฟล์เข้าคลังไฟล์ · ลิงก์ระหว่างหน้าถูกแก้ให้
+- `<header>`/`<footer>` ที่ซ้ำกันหลายหน้าถูกแยกเป็นส่วนร่วมอัตโนมัติ
+- หน้าตาเหมือนต้นฉบับ (ปิดสไตล์พื้นฐานของ BuildWeb ให้เอง)
 
-## ตัวอย่าง: แสดงสินค้าจาก XAMPP
+### 6. หน้าเว็บ, SEO และส่วนหัว/ท้ายร่วม
 
-1. **ข้อมูล › นำเข้าจาก MySQL / XAMPP** เลือก database และตาราง `products` แล้วเลือก **เชื่อมสด**
-2. ในตัวออกแบบ ลากบล็อก **products (การ์ด)** จากหมวด “ข้อมูล” ลงหน้า เสร็จแล้ว
-3. หรือเขียนเองก็ได้:
+- เพิ่มหน้าพร้อมรูปแบบเริ่มต้น 7 แบบ · ชื่อไฟล์ · ฉบับร่าง/เผยแพร่ · หน้าแม่ (เมนูย่อย) · ลากจัดลำดับเมนู · ทำสำเนา · ตั้งหน้าแรก
+- **SEO:** ชื่อเรื่อง, คำอธิบาย (นับตัวอักษร), คีย์เวิร์ด, รูปตอนแชร์ (og:image), noindex, โค้ดใน `<head>`/CSS/JS เฉพาะหน้า
+- **ส่วนหัว/ท้ายร่วม:** แก้ครั้งเดียวเปลี่ยนทุกหน้า แต่ละหน้าเลือกไม่ใช้ได้
 
-```html
-<div data-bw-repeat="products" data-bw-sort="price" data-bw-order="desc" data-bw-limit="6">
-  <h3>{{name}}</h3> <img src="{{photo}}"> <b>฿{{price}}</b>
-</div>
-<p>มีสินค้า {{products.count}} รายการ</p>
+### 7. ไฟล์ & รูปภาพ
+
+ลากไฟล์มาวาง (มีแถบความคืบหน้า), โฟลเดอร์, ค้นหา/กรองชนิด, เปลี่ยนชื่อหรือย้าย (หน้าที่ใช้ไฟล์ถูกแก้ลิงก์ให้), alt text, ป้องกันการลบไฟล์ที่ยังถูกใช้
+
+### 8. ฟอร์ม & การแจ้งเตือน
+
+ฟอร์มบนเว็บใช้งานได้จริง ข้อมูลบันทึกลงฐานข้อมูล อ่าน/ลบ/ทำเครื่องหมายอ่านแล้ว ส่งออก CSV (เปิดใน Excel ภาษาไทยไม่เพี้ยน) แจ้งเตือนทันทีทาง **การแจ้งเตือนบนเครื่อง · Telegram · Discord · อีเมล (SMTP) · Webhook** (n8n, Make, Zapier) และมีปุ่มทดสอบทุกช่องทาง
+
+### 9. โฮสติ้ง & Tailscale
+
+<img src="docs/images/hosting.png" alt="โฮสติ้ง" width="100%">
+
+- **เซิร์ฟเวอร์แยกจากหน้าแอดมิน:** คนอื่นเห็นเฉพาะเว็บที่เผยแพร่ เข้าหน้าแก้ไขไม่ได้
+- **หลายเว็บพร้อมกัน:** ทุกเว็บอยู่ที่ `/ชื่อเว็บ/` บนพอร์ตหลัก (8090) และตั้ง**พอร์ตเฉพาะ**ให้เว็บใดก็ได้เพื่อเปิดที่ `/` · เลือก “เว็บหลัก” ที่ `/` ได้
+- **LAN:** เครื่องอื่นใน Wi-Fi เดียวกันเปิดได้
+- **Tailscale:** สวิตช์เดียวได้ `https://เครื่องคุณ.ts.net/` (เฉพาะใน tailnet) หรือเลือก **Funnel** ให้คนทั่วไปบนอินเทอร์เน็ตเข้าได้ · มีปุ่มเชื่อมต่อ Tailscale · เชื่อมลิงก์ใหม่ให้เองเมื่อ Tailscale กลับมาออนไลน์ · ปิดลิงก์ให้เมื่อปิดแอป
+- **ปิดหน้าต่างแล้วเว็บยังออนไลน์:** แอปอยู่บนแถบเมนู/ถาดระบบ และเปิดเองเมื่อเข้าเครื่องได้
+
+### 10. ส่งออก, ฐานข้อมูล & ผู้ดูแล
+
+- **ส่งออก** เป็นโฟลเดอร์หรือ `.zip` (`index.html`, `<หน้า>.html`, `css/`, `js/`, `assets/`) ไปที่ Downloads, โฟลเดอร์ที่เลือก หรือ **XAMPP htdocs** (เปิดที่ `http://localhost/<เว็บ>/` ได้ทันที) · มีตัวรับฟอร์ม `bw-form.php` บันทึกลง MySQL
+- **ฐานข้อมูลของแอป:** SQLite (ค่าเริ่มต้น) หรือ **MySQL/MariaDB ของ XAMPP** ย้ายข้อมูลให้ครบในคลิกเดียว · ถ้า MySQL ดับ แอปเข้าโหมดปลอดภัยให้แก้การตั้งค่า
+- **ผู้ดูแล:** แดชบอร์ด BuildWeb + **Django Admin** เต็มรูปแบบ · ธีมสว่าง/มืด/ตามระบบ
+
+---
+
+## เริ่มต้นใช้งานใน 5 นาที
+
+1. **สร้างเว็บ:** หน้า “ภาพรวม” › **สร้างเว็บใหม่** › ตั้งชื่อ › เลือกแม่แบบ (ธุรกิจ, คาเฟ่, พอร์ตโฟลิโอ, แลนดิ้ง, หน้าว่าง)
+2. **ออกแบบ:** ดับเบิลคลิกข้อความเพื่อพิมพ์ · ลากบล็อกจากแถบซ้ายลงหน้า · เลือกองค์ประกอบแล้วปรับที่แถบขวา
+3. **แต่งทั้งเว็บ:** แท็บ “ธีม” (สี/ฟอนต์) · หน้า “หน้าเว็บ” › **ตั้งค่าแถบเมนู**
+4. **ใส่ข้อมูล (ถ้ามี):** แท็บ “ข้อมูล” › นำเข้าจาก XAMPP › ลากบล็อกการ์ดจากหมวด “ข้อมูล”
+5. **เผยแพร่:** “โฮสติ้ง & ตั้งค่า” › เปิดโฮสติ้ง (และ Tailscale) หรือ “ส่งออก” เป็นไฟล์ไปวางที่ใดก็ได้
+
+### คีย์ลัดในตัวออกแบบ
+
+| คีย์ | ทำอะไร |
+|---|---|
+| `⌘/Ctrl + S` | บันทึก (ปกติบันทึกอัตโนมัติอยู่แล้ว) |
+| `⌘/Ctrl + Z` · `⇧ + ⌘/Ctrl + Z` | เลิกทำ · ทำซ้ำ |
+| `⌘/Ctrl + C` · `⌘/Ctrl + V` | คัดลอก · วางองค์ประกอบ |
+| `Delete` / `Backspace` | ลบองค์ประกอบที่เลือก |
+| ดับเบิลคลิก | แก้ข้อความ / เปลี่ยนรูป / เปิดส่วนหัว-ท้ายร่วม |
+
+---
+
+## ทำงานอย่างไร
+
+```mermaid
+flowchart LR
+  subgraph App["แอป BuildWeb (Tauri)"]
+    W["หน้าต่าง + แถบเมนู<br/>อัพเดทอัตโนมัติ"]
+  end
+  subgraph Backend["Backend (Django) — 127.0.0.1:5050"]
+    E["ตัวออกแบบ GrapesJS<br/>แดชบอร์ด · Django Admin"]
+    R["ตัว render เดียว<br/>preview = โฮสต์ = ส่งออก"]
+    H["เซิร์ฟเวอร์โฮสติ้ง<br/>:8090 + พอร์ตเฉพาะเว็บ"]
+  end
+  DB[("SQLite หรือ<br/>MySQL ของ XAMPP")]
+  X[("ตาราง MySQL<br/>(ข้อมูลเว็บ)")]
+  W --> E
+  E --> DB
+  R --> DB
+  R -. เชื่อมสด .-> X
+  H --> R
+  H --> V["ผู้ชมใน LAN / Tailscale / อินเทอร์เน็ต"]
+  R --> F["ไฟล์ HTML/CSS/JS<br/>Downloads · XAMPP htdocs"]
+  GH["GitHub Releases"] -. อัพเดท .-> W
 ```
 
-ตัวกรอง: `data-bw-filter="category=coffee;price>50"` (`=`, `!=`, `~` มีคำนี้, `>`, `<`, `>=`, `<=`) · `{{{field}}}` = HTML ไม่ escape · `{{#}}` = ลำดับแถว
+- **ตัว render เดียว:** หน้าที่เห็นใน preview, หน้าที่โฮสต์ และไฟล์ที่ส่งออกมาจากโค้ดชุดเดียวกัน จึงเหมือนกันทุกที่ ใช้ลิงก์แบบ relative (`about.html`, `assets/...`) จึงเปิดจากดิสก์, XAMPP หรือโฮสต์ใดก็ได้
+- **เมนูและข้อมูลถูกเติมตอน render:** เพิ่มหน้าใหม่หรือแก้ข้อมูลใน MySQL แล้วทุกหน้าอัปเดตเอง ไม่ต้องไล่แก้ทีละหน้า
+- **แยกส่วนสาธารณะ:** เซิร์ฟเวอร์โฮสติ้งเข้าถึงได้เฉพาะเว็บที่เผยแพร่ ส่วนหน้าแอดมินเปิดเฉพาะในเครื่อง (127.0.0.1)
+- **ทนทาน:** บน macOS backend รันเป็นบริการแยก (launchd) จึงไม่หยุดเมื่อปิดหน้าต่าง · ถ้า MySQL ดับจะเข้าโหมดปลอดภัย · ปิดแอปแล้วลิงก์ Tailscale ถูกปิดตาม
 
-## คำถามที่พบบ่อย
+---
 
-<details><summary><b>ข้อมูลเว็บเก็บที่ไหน?</b></summary>
+## คู่มืออ้างอิง
+
+### ไวยากรณ์ข้อมูล
+
+```html
+<!-- วนซ้ำทุกแถวของชุดข้อมูล "products" -->
+<div data-bw-repeat="products" data-bw-sort="price" data-bw-order="desc" data-bw-limit="6"
+     data-bw-filter="category=coffee;price>50" data-bw-empty="ยังไม่มีสินค้า">
+  <article>
+    <img src="{{photo}}" alt="{{name}}">
+    <h3>{{#}}. {{name}}</h3>
+    <p>฿{{price}}</p>
+    <div>{{{description_html}}}</div>
+  </article>
+</div>
+<p>สินค้าทั้งหมด {{products.count}} รายการ · สินค้าแนะนำ: {{products.name}}</p>
+<footer>© {{now.year}} {{site.name}}</footer>
+```
+
+| ใช้ | ความหมาย |
+|---|---|
+| `data-bw-repeat="slug"` | วนซ้ำเนื้อหาข้างในทุกแถว |
+| `data-bw-limit` · `data-bw-offset` | จำนวนแถวสูงสุด · ข้ามกี่แถว |
+| `data-bw-sort="field"` + `data-bw-order="desc"` | เรียงตามฟิลด์ (ตัวเลขเรียงแบบตัวเลข) |
+| `data-bw-filter` | `=`, `!=`, `~` (มีคำนี้), `>`, `<`, `>=`, `<=` คั่นหลายเงื่อนไขด้วย `;` |
+| `data-bw-empty` | ข้อความเมื่อไม่มีแถว |
+| `{{field}}` · `{{{field}}}` · `{{#}}` | ค่า (escape) · ค่า HTML (ไม่ escape) · ลำดับแถว |
+| `{{slug.count}}` · `{{slug.field}}` | จำนวนแถว · ค่าของแถวแรก (ใช้นอกกล่องวนซ้ำ) |
+| `{{site.name}}` · `{{page.title}}` · `{{now.year}}` | ค่าทั่วไป |
+
+`{{...}}` ที่หาค่าไม่เจอจะถูกปล่อยไว้ตามเดิม เว็บที่นำเข้ามาซึ่งใช้ `{{ }}` ของ Vue/Handlebars จึงไม่พัง
+
+### แอตทริบิวต์แอนิเมชัน
+
+แท็บ “แอนิเมชัน” ตั้งค่าเหล่านี้ให้ หรือจะใส่เองในโค้ดก็ได้
+
+| แอตทริบิวต์ | ค่า |
+|---|---|
+| `data-bw-anim` | `fade` `fade-up` `fade-down` `fade-left` `fade-right` `zoom-in` `zoom-out` `flip-up` `blur` `rise` `pop` |
+| `data-bw-anim-duration` · `data-bw-anim-delay` | มิลลิวินาที (ค่าเริ่มต้น 700 · 0) |
+| `data-bw-anim-once="false"` | เล่นซ้ำทุกครั้งที่เลื่อนมาถึง |
+| `data-bw-stagger="120"` | ให้ชิ้นด้านในโผล่ทีละชิ้น ห่างกัน 120ms |
+| `data-bw-hover` | `lift` `grow` `glow` `zoom-img` `tilt` `shine` |
+| `data-bw-count` | นับเลขขึ้นจาก 0 ถึงตัวเลขในข้อความ (คง `+`, `%`, `,` ไว้) |
+| `data-bw-typing="คำ1\|คำ2"` | พิมพ์ทีละตัว วนคำ |
+| `data-bw-parallax="0.3"` | ภาพพื้นหลังเลื่อนช้ากว่าหน้า |
+| `.bw-carousel[data-bw-autoplay="5000"]` · `.bw-marquee` | สไลด์รูป · แถบวิ่ง |
+
+---
+
+## คำถามที่พบบ่อย / แก้ปัญหา
+
+<details><summary><b>ข้อมูลเว็บเก็บที่ไหน? สำรองยังไง?</b></summary>
 
 - macOS: `~/Library/Application Support/com.buildweb.app/data/`
 - Windows: `%APPDATA%\com.buildweb.app\data\`
 - Linux: `~/.local/share/com.buildweb.app/data/`
 
-การอัพเดทไม่ลบข้อมูลเหล่านี้
+ในโฟลเดอร์มี `db.sqlite3` (ฐานข้อมูล), `media/` (ไฟล์ที่อัปโหลด) และ `config.json` (การตั้งค่า) สำรองโดยคัดลอกทั้งโฟลเดอร์ การอัพเดทไม่แตะข้อมูลเหล่านี้
+</details>
+<details><summary><b>เชื่อม XAMPP ไม่ได้</b></summary>
+
+- เปิด **MySQL Database** ใน XAMPP Control Panel/Manager ก่อน
+- ค่ามาตรฐานของ XAMPP คือ host `127.0.0.1`, พอร์ต `3306`, ผู้ใช้ `root`, ไม่มีรหัสผ่าน
+- บน Mac ชิป Apple ถ้า XAMPP เป็นรุ่น Intel ต้องติดตั้ง Rosetta ก่อน: `softwareupdate --install-rosetta`
 </details>
 <details><summary><b>ให้คนนอกบ้านเข้าเว็บได้ยังไง?</b></summary>
-เปิด Tailscale ในหน้า <b>โฮสติ้ง & ตั้งค่า</b> แล้วเลือก “ทุกคนบนอินเทอร์เน็ต (Funnel)” หรือส่งออกเป็นไฟล์ HTML ไปวางบนโฮสติ้งใดก็ได้
+เปิด Tailscale ใน “โฮสติ้ง & ตั้งค่า” แล้วเลือก “ทุกคนบนอินเทอร์เน็ต (Funnel)” (ต้องเปิดสิทธิ์ Funnel และ HTTPS ใน Tailscale admin) หรือส่งออกเป็นไฟล์ HTML ไปวางบนโฮสติ้งที่เช่าไว้
+</details>
+<details><summary><b>Tailscale ขึ้นว่า “ไม่ได้เชื่อมต่อ”</b></summary>
+กดปุ่ม <b>เชื่อมต่อ Tailscale</b> ในหน้าโฮสติ้ง หรือเปิดแอป Tailscale แล้วกด Connect · BuildWeb จะเชื่อมลิงก์ให้เองภายใน 30 วินาทีหลังจาก Tailscale ออนไลน์
+</details>
+<details><summary><b>แอนิเมชันไม่เล่น</b></summary>
+ในตัวออกแบบให้กด “ดูตัวอย่าง” ในแท็บแอนิเมชัน · บนเว็บจริง แอนิเมชันจะเล่นเมื่อเลื่อนมาถึง · ถ้าเครื่องผู้ชมเปิด “ลดการเคลื่อนไหว” (Reduce motion) เนื้อหาจะแสดงทันทีโดยไม่มีแอนิเมชัน
 </details>
 <details><summary><b>เว็บ React/Vue นำเข้าได้ไหม?</b></summary>
 ได้ แต่ต้อง build ก่อน แล้วนำเข้าโฟลเดอร์ <code>dist/</code> หรือ <code>build/</code>
 </details>
+
+---
+
+## แผนต่อไป
+
+- [ ] หน้ารายละเอียดจากข้อมูล (เช่น `/products/latte.html` สร้างให้ทุกแถว)
+- [ ] ฟอร์มที่บันทึกลงชุดข้อมูล (รีวิว/ความคิดเห็นพร้อมระบบอนุมัติ)
+- [ ] เผยแพร่ขึ้น GitHub Pages / Netlify / FTP ด้วยปุ่มเดียว
+- [ ] คลังรูปฟรี (Unsplash/Pexels) และย่อรูปเป็น WebP อัตโนมัติ
+- [ ] sitemap.xml, robots.txt และคะแนน SEO ต่อหน้า
+
+ประวัติทุกเวอร์ชันอยู่ที่ [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -130,10 +280,26 @@ BuildWeb ยังไม่ได้ลงทะเบียนกับ Apple �
 
 | ส่วน | เทคโนโลยี |
 |---|---|
-| แอป | Tauri 2 (Rust): หน้าต่าง, ไอคอนแถบเมนู, ระบบอัพเดท. บน macOS backend รันเป็น launchd job แยก จึงไม่หยุดเมื่อปิดหน้าต่าง |
+| แอป | Tauri 2 (Rust): หน้าต่าง, ไอคอนแถบเมนู, ระบบอัพเดท. บน macOS backend รันเป็น launchd job แยก |
 | Backend | Django 5.2 LTS + waitress, PyMySQL (รองรับ MariaDB 10.4 ของ XAMPP) |
 | ตัวออกแบบ | GrapesJS 0.23 + ปลั๊กอิน (เก็บไว้ใน `backend/builder/static/vendor/grapesjs`) |
 | Python | แอปแนบ `uv` ไปด้วย และสร้าง venv ส่วนตัวตอนเปิดครั้งแรก |
+
+```
+backend/
+  run.py                 จุดเริ่ม: ตรวจฐานข้อมูล, migrate, เปิดโฮสติ้ง, เสิร์ฟตัวออกแบบ
+  buildweb/              settings, urls, config.json
+  builder/
+    render.py            Site → ไฟล์ (preview = โฮสต์ = ส่งออก)
+    navbar.py anim.py    แถบเมนูที่ตั้งค่าได้ · แอนิเมชัน (CSS/JS)
+    data.py              ชุดข้อมูล, MySQL, .sql/CSV, data-bw-repeat
+    sections.py          บล็อกสำเร็จรูปและแม่แบบ
+    importer.py          นำเข้าเว็บ (html/zip/โฟลเดอร์/GitHub)
+    hosting.py tailscale.py notify.py exporter.py dbtools.py system.py
+    static/builder/      app.css, editor.js, site.js, icons.js
+src-tauri/               แอป (Rust)
+scripts/                 stage-backend, collect, publish, set-version
+```
 
 ```sh
 cd backend
@@ -142,8 +308,10 @@ uv venv --python 3.11 .venv && uv pip install --python .venv/bin/python -r requi
 BUILDWEB_DATA=$(mktemp -d) .venv/bin/python manage.py test builder
 ```
 
+แอป: `npm install` แล้ว `npm run dev` · อัปเดต GrapesJS ด้วย `npm run vendor`
+
 **ปล่อยเวอร์ชันใหม่ = push ขึ้น `main`.** ไฟล์ [`release.yml`](.github/workflows/release.yml) จะรันเทสต์ แล้ว build และเซ็นแยกทุกระบบพร้อมกัน (macOS arm64/x64, Windows, Linux) จากนั้นปล่อยเป็น release เดียวใน [buildweb-releases](https://github.com/AImunich20/buildweb-releases/releases) พร้อม `latest.json` สำหรับทุกระบบ
 - เลขเวอร์ชันขึ้นเอง (+1 patch) หรือตั้งเองด้วย `node scripts/set-version.js 0.2.0`
 - ใส่ `[skip release]` ในข้อความ commit ถ้าไม่ต้องการปล่อย
-- Secrets ที่ต้องตั้ง: `TAURI_SIGNING_PRIVATE_KEY` (จาก `~/.tauri/buildweb.key`) และ `RELEASES_TOKEN`
+- Secrets ที่ต้องตั้ง: `TAURI_SIGNING_PRIVATE_KEY` และ `RELEASES_TOKEN`
 </details>

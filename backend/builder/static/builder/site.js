@@ -8,6 +8,189 @@
   const tabs = { data: renderData, pages: renderPages, files: renderFiles, forms: renderForms, settings: renderSettings, export: renderExport };
 
 
+
+  // ---------------------------------------------------------------- navbar settings
+  const NAV_LAYOUTS = [
+    ['split', 'โลโก้ซ้าย · เมนูขวา', '▣ ─── ≡ ≡ ≡ [ ]'],
+    ['center-menu', 'เมนูกลาง', '▣ ── ≡ ≡ ≡ ── [ ]'],
+    ['center-logo', 'โลโก้กลาง', '    ▣\n ≡ ≡ ≡ ≡ [ ]'],
+    ['minimal', 'มินิมอล (ปุ่มเมนู)', '▣ ─────── ☰'],
+  ];
+  const NAV_MOBILE = [['drawer', 'เลื่อนจากด้านข้าง'], ['dropdown', 'ดรอปดาวน์'], ['fullscreen', 'เต็มจอ']];
+
+  async function navbarModal() {
+    let r;
+    try { r = await api(`/api/sites/${site.id}/navbar`); } catch (e) { return toast(e.message, 'err'); }
+    let st = r.settings;
+    const pageOpts = r.pages.map(p => `<option value="${esc(p.href)}">${esc(p.title)}</option>`).join('');
+    const m = modal(`<header><h2>ตั้งค่าแถบเมนู</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
+      <div class="body nav-modal">
+        <div class="nav-form">
+          <div class="alert ${r.managed ? 'info' : 'warn'}" style="margin-bottom:12px"><div>${r.managed
+            ? 'แถบเมนูสร้างจากการตั้งค่านี้ — เมนูอัปเดตตามรายการหน้าอัตโนมัติ'
+            : 'ตอนนี้ส่วนหัวถูก “ออกแบบเอง” ในตัวออกแบบ — เปิดใช้ตัวตั้งค่าเพื่อแทนที่ด้วยแถบเมนูสำเร็จรูป'}</div></div>
+          <div class="row" style="margin-bottom:6px">${r.managed
+            ? `<button class="btn sm" id="nv-free">${BW_ICON('layers')} ออกแบบเองในตัวออกแบบ</button>`
+            : `<button class="btn sm primary" id="nv-managed">${BW_ICON('check')} ใช้ตัวตั้งค่าแถบเมนู</button>`}</div>
+
+          <div class="sect-title">รูปแบบ</div>
+          <div class="nav-layouts">${NAV_LAYOUTS.map(([id, label, art]) => `<label class="nav-layout ${st.layout === id ? 'sel' : ''}">
+            <input type="radio" name="layout" value="${id}" ${st.layout === id ? 'checked' : ''}><pre>${art}</pre><span>${label}</span></label>`).join('')}</div>
+
+          <div class="sect-title">โลโก้</div>
+          <div class="grid g2" style="gap:0 12px">
+            <label class="field"><span>ข้อความโลโก้ <small>(เว้นว่าง = ชื่อเว็บ)</small></span><input class="input" name="logo_text" value="${esc(st.logo_text)}" placeholder="${esc(site.name)}"></label>
+            <label class="field"><span>ความสูงโลโก้ (px)</span><input class="input mono" type="number" name="logo_height" value="${st.logo_height}"></label>
+          </div>
+          <label class="field"><span>รูปโลโก้ <small>(ใช้แทนข้อความ)</small></span><div class="row" style="flex-wrap:nowrap"><input class="input" name="logo_image" value="${esc(st.logo_image)}" placeholder="/media/...">
+            <button class="btn sm" type="button" id="nv-logo">เลือก</button><button class="btn sm ghost" type="button" id="nv-logo-clear">ล้าง</button></div></label>
+
+          <div class="sect-title">การทำงาน</div>
+          <label class="check"><input type="checkbox" name="sticky" ${st.sticky ? 'checked' : ''}>ติดด้านบนตอนเลื่อน</label>
+          <label class="check"><input type="checkbox" name="transparent" ${st.transparent ? 'checked' : ''}>ใสทับหัวเว็บ แล้วเป็นสีทึบเมื่อเลื่อนลง</label>
+          <label class="check"><input type="checkbox" name="autohide" ${st.autohide ? 'checked' : ''}>ซ่อนเมื่อเลื่อนลง แสดงเมื่อเลื่อนขึ้น</label>
+          <label class="check"><input type="checkbox" name="shadow" ${st.shadow ? 'checked' : ''}>มีเงาใต้แถบ</label>
+          <div class="grid g2" style="gap:0 12px;margin-top:6px">
+            <label class="field"><span>เมนูบนมือถือ</span><select class="input" name="mobile">${NAV_MOBILE.map(([v, l]) => `<option value="${v}" ${st.mobile === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+            <label class="field"><span>ความสูงแถบ (px)</span><input class="input mono" type="number" name="height" value="${st.height}"></label>
+            <label class="field"><span>สีพื้น <small>(ว่าง = ตามธีม)</small></span><div class="color-row"><input type="color" data-color="bg" value="${st.bg || '#ffffff'}"><input class="input mono" name="bg" value="${esc(st.bg)}" placeholder="ตามธีม"></div></label>
+            <label class="field"><span>สีตัวอักษร <small>(ว่าง = ตามธีม)</small></span><div class="color-row"><input type="color" data-color="color" value="${st.color || '#1f2937'}"><input class="input mono" name="color" value="${esc(st.color)}" placeholder="ตามธีม"></div></label>
+          </div>
+
+          <div class="sect-title">เมนู</div>
+          <div class="seg" id="nv-mode"><button data-v="auto" class="${st.menu_mode !== 'custom' ? 'on' : ''}">อัตโนมัติจากรายการหน้า</button><button data-v="custom" class="${st.menu_mode === 'custom' ? 'on' : ''}">จัดเอง</button></div>
+          <div class="small muted" id="nv-auto-hint" style="margin-top:8px">ใช้หน้าที่ติ๊ก “แสดงในเมนู” · หน้าที่มีหน้าแม่จะเป็นเมนูย่อย · จัดลำดับได้ที่แท็บ “หน้าเว็บ”</div>
+          <div id="nv-items" style="margin-top:10px"></div>
+
+          <div class="sect-title">ปุ่มเด่น (CTA)</div>
+          <label class="check"><input type="checkbox" id="cta-show" ${st.cta.show ? 'checked' : ''}>แสดงปุ่ม</label>
+          <div class="grid g2" style="gap:0 12px"><label class="field"><span>ข้อความ</span><input class="input" id="cta-text" value="${esc(st.cta.text)}"></label>
+            <label class="field"><span>ลิงก์</span><input class="input mono" id="cta-href" value="${esc(st.cta.href)}" list="nv-pages"></label></div>
+
+          <div class="sect-title">แถบด้านบน</div>
+          <label class="check"><input type="checkbox" id="tb-show" ${st.topbar.show ? 'checked' : ''}>แสดงแถบเล็กเหนือเมนู (เช่น เบอร์โทร เวลาเปิด)</label>
+          <label class="field"><span>ข้อความ</span><input class="input" id="tb-text" value="${esc(st.topbar.text)}" placeholder="โทร 02-123-4567 · เปิดทุกวัน 8:00–20:00"></label>
+          <label class="field"><span>ลิงก์ <small>(ชื่อ|ลิงก์ บรรทัดละอัน)</small></span><textarea class="input" id="tb-links" rows="2" placeholder="LINE|https://line.me/...">${esc((st.topbar.links || []).map(l => l.label + '|' + l.href).join('\n'))}</textarea></label>
+          <datalist id="nv-pages">${pageOpts}<option value="#contact"></datalist>
+        </div>
+        <div class="nav-preview">
+          <div class="row between" style="margin-bottom:8px"><b class="small">ตัวอย่าง</b>
+            <div class="seg" id="nv-dev"><button data-w="100%" class="on">${BW_ICON('monitor', 14)}</button><button data-w="390px">${BW_ICON('phone', 14)}</button></div></div>
+          <div class="nav-frame-wrap"><iframe id="nv-frame" src="/preview/${site.slug}/" title="ตัวอย่าง"></iframe></div>
+          <div class="small muted" id="nv-state" style="margin-top:8px">บันทึกอัตโนมัติ</div>
+        </div>
+      </div>
+      <footer><button class="btn" data-close>ปิด</button></footer>`, { wide: true });
+    m.el.classList.add('xwide');
+    const $q = q => m.el.querySelector(q);
+
+    // custom menu editor
+    let items = (st.items || []).map(it => ({ ...it, children: it.children || [] }));
+    const itemRow = (it, i, ci) => `<div class="nav-item ${ci != null ? 'child' : ''}" data-i="${i}" ${ci != null ? `data-c="${ci}"` : ''}>
+      <input class="input" data-k="label" value="${esc(it.label)}" placeholder="ชื่อเมนู">
+      <input class="input mono" data-k="href" value="${esc(it.href)}" placeholder="about.html หรือ https://" list="nv-pages">
+      <label class="check" style="margin:0" title="เปิดแท็บใหม่"><input type="checkbox" data-k="target" ${it.target === '_blank' ? 'checked' : ''}>${BW_ICON('external', 14)}</label>
+      ${ci == null ? `<button class="btn sm ghost icon" data-a="up" title="ขึ้น">↑</button><button class="btn sm ghost icon" data-a="sub" title="เพิ่มเมนูย่อย">${BW_ICON('plus', 14)}</button>` : ''}
+      <button class="btn sm ghost icon" data-a="rm" title="ลบ">${BW_ICON('x', 14)}</button></div>`;
+    function drawItems() {
+      const custom = $q('#nv-mode .on').dataset.v === 'custom';
+      $q('#nv-auto-hint').classList.toggle('hidden', custom);
+      const box = $q('#nv-items');
+      if (!custom) { box.innerHTML = ''; return; }
+      box.innerHTML = items.map((it, i) => itemRow(it, i) + it.children.map((c, ci) => itemRow(c, i, ci)).join('')).join('') +
+        `<div class="row" style="margin-top:8px"><button class="btn sm" id="nv-add">${BW_ICON('plus')} เพิ่มเมนู</button>
+         <button class="btn sm ghost" id="nv-from-pages">เริ่มจากรายการหน้า</button></div>`;
+      box.querySelectorAll('.nav-item').forEach(row => {
+        const i = +row.dataset.i, ci = row.dataset.c != null ? +row.dataset.c : null;
+        const target = () => ci == null ? items[i] : items[i].children[ci];
+        row.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', () => {
+          const t = target(); t[inp.dataset.k] = inp.type === 'checkbox' ? (inp.checked ? '_blank' : '') : inp.value; queueSave();
+        }));
+        row.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+          if (b.dataset.a === 'rm') { if (ci == null) items.splice(i, 1); else items[i].children.splice(ci, 1); }
+          if (b.dataset.a === 'sub') items[i].children.push({ label: 'เมนูย่อย', href: '#' });
+          if (b.dataset.a === 'up' && i > 0) [items[i - 1], items[i]] = [items[i], items[i - 1]];
+          drawItems(); queueSave();
+        });
+      });
+      $q('#nv-add').onclick = () => { items.push({ label: 'เมนูใหม่', href: '#', children: [] }); drawItems(); queueSave(); };
+      $q('#nv-from-pages').onclick = () => { items = r.pages.map(p => ({ label: p.title, href: p.href, children: [] })); drawItems(); queueSave(); };
+    }
+    m.el.querySelectorAll('#nv-mode button').forEach(b => b.onclick = () => {
+      m.el.querySelectorAll('#nv-mode button').forEach(x => x.classList.toggle('on', x === b));
+      if (b.dataset.v === 'custom' && !items.length) items = r.pages.map(p => ({ label: p.title, href: p.href, children: [] }));
+      drawItems(); queueSave();
+    });
+    drawItems();
+
+    // collect + save
+    function collect() {
+      const f = n => m.el.querySelector(`.nav-form [name=${n}]`);
+      return {
+        layout: (m.el.querySelector('[name=layout]:checked') || {}).value || 'split',
+        logo_text: f('logo_text').value, logo_image: f('logo_image').value, logo_height: f('logo_height').value,
+        sticky: f('sticky').checked, transparent: f('transparent').checked, autohide: f('autohide').checked, shadow: f('shadow').checked,
+        mobile: f('mobile').value, height: f('height').value, bg: f('bg').value.trim(), color: f('color').value.trim(),
+        menu_mode: $q('#nv-mode .on').dataset.v, items,
+        cta: { show: $q('#cta-show').checked, text: $q('#cta-text').value, href: $q('#cta-href').value },
+        topbar: { show: $q('#tb-show').checked, text: $q('#tb-text').value,
+          links: $q('#tb-links').value.split('\n').map(l => l.split('|')).filter(x => x[0] && x[0].trim()).map(([label, href]) => ({ label: label.trim(), href: (href || '#').trim() })) },
+      };
+    }
+    let timer = null;
+    const frame = $q('#nv-frame'), state = $q('#nv-state');
+    function queueSave() {
+      clearTimeout(timer);
+      state.textContent = 'กำลังบันทึก…';
+      timer = setTimeout(async () => {
+        try {
+          const res = await api(`/api/sites/${site.id}/navbar`, { settings: collect() });
+          st = res.settings; state.textContent = 'บันทึกแล้ว ✓';
+          const y = frame.contentWindow ? frame.contentWindow.scrollY : 0;
+          frame.onload = () => { try { frame.contentWindow.scrollTo(0, y); } catch (e) { } };
+          frame.src = `/preview/${site.slug}/?t=${Date.now()}`;
+        } catch (e) { state.textContent = e.message; }
+      }, 450);
+    }
+    m.el.querySelectorAll('.nav-form input, .nav-form select, .nav-form textarea').forEach(el => {
+      if (el.closest('#nv-items')) return;
+      el.addEventListener(el.type === 'checkbox' || el.type === 'radio' || el.tagName === 'SELECT' ? 'change' : 'input', queueSave);
+    });
+    m.el.querySelectorAll('[name=layout]').forEach(r2 => r2.addEventListener('change', () =>
+      m.el.querySelectorAll('.nav-layout').forEach(l => l.classList.toggle('sel', l.querySelector('input').checked))));
+    m.el.querySelectorAll('[data-color]').forEach(c => c.addEventListener('input', () => {
+      const t = m.el.querySelector(`.nav-form [name=${c.dataset.color}]`); t.value = c.value; queueSave();
+    }));
+    $q('#nv-logo').onclick = () => pickAsset(u => { m.el.querySelector('.nav-form [name=logo_image]').value = u; queueSave(); });
+    $q('#nv-logo-clear').onclick = () => { m.el.querySelector('.nav-form [name=logo_image]').value = ''; queueSave(); };
+    // Desktop preview renders at 1280px and is scaled to fit; mobile at real phone width.
+    const wrap = $q('.nav-frame-wrap');
+    function fit() {
+      const mobile = $q('#nv-dev .on').dataset.w !== '100%';
+      if (mobile) { frame.style.width = '390px'; frame.style.height = '100%'; frame.style.transform = ''; return; }
+      const k = wrap.clientWidth / 1280;
+      frame.style.width = '1280px'; frame.style.height = (wrap.clientHeight / k) + 'px';
+      frame.style.transform = `scale(${k})`; frame.style.transformOrigin = '0 0';
+    }
+    m.el.querySelectorAll('#nv-dev button').forEach(b => b.onclick = () => {
+      m.el.querySelectorAll('#nv-dev button').forEach(x => x.classList.toggle('on', x === b));
+      wrap.classList.toggle('mobile', b.dataset.w !== '100%');
+      fit();
+    });
+    setTimeout(fit, 30);
+    const sw = async (managed) => {
+      if (!managed && !await confirmBox('ออกแบบเอง', 'ส่วนหัวจะถูกแปลงเป็นบล็อกให้ลากวางแก้ไขเองในตัวออกแบบ (เมนูยังอัปเดตอัตโนมัติ) — กลับมาใช้ตัวตั้งค่าได้ภายหลัง', { ok: 'ออกแบบเอง' })) return;
+      try {
+        await api(`/api/sites/${site.id}/navbar`, { managed });
+        m.close();
+        if (managed) { toast('ใช้ตัวตั้งค่าแถบเมนูแล้ว', 'ok'); navbarModal(); }
+        else location.href = `/sites/${site.id}/edit-shared/header/`;
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    const fr = $q('#nv-free'); if (fr) fr.onclick = () => sw(false);
+    const mg = $q('#nv-managed'); if (mg) mg.onclick = () => sw(true);
+  }
+
   // ---------------------------------------------------------------- data (collections)
   const TYPES = { text: 'ข้อความ', longtext: 'ข้อความยาว', number: 'ตัวเลข', image: 'รูป', link: 'ลิงก์', date: 'วันที่', bool: 'ใช่/ไม่', html: 'HTML' };
   let DATA = { collections: [], connections: [] };
@@ -290,9 +473,10 @@
     const rows = site.shared || [];
     box.innerHTML = rows.map(x => `<div class="list-row" data-id="${x.id}">
         <span class="kind-icon">${BW_ICON(x.kind === 'header' ? 'panel-top' : 'panel-bottom')}</span>
-        <div style="flex:1"><b>${esc(x.label)}</b><div class="muted small">แก้ไข ${ago(x.updated_at)}</div></div>
+        <div style="flex:1"><b>${esc(x.label)}</b><div class="muted small">${x.kind === 'header' && x.managed ? 'สร้างจากตัวตั้งค่าแถบเมนู' : 'ออกแบบเอง'} · แก้ไข ${ago(x.updated_at)}</div></div>
         <label class="switch" title="เปิด/ปิดทุกหน้า"><input type="checkbox" ${x.enabled ? 'checked' : ''}><span></span></label>
-        <a class="btn sm" href="${x.edit_url}">ออกแบบ</a></div>`).join('') ||
+        ${x.kind === 'header' ? `<button class="btn sm ${x.managed ? 'primary' : ''}" data-navbar>${BW_ICON('settings')} ตั้งค่าแถบเมนู</button>` : ''}
+        ${x.kind === 'header' && x.managed ? '' : `<a class="btn sm" href="${x.edit_url}">ออกแบบ</a>`}</div>`).join('') ||
       `<div class="list-row muted">ยังไม่มีส่วนร่วม — <a href="/sites/${site.id}/edit-shared/header/">สร้างส่วนหัว</a> · <a href="/sites/${site.id}/edit-shared/footer/">สร้างส่วนท้าย</a></div>`;
     box.querySelectorAll('[data-id]').forEach(row => {
       row.querySelector('input').onchange = async e => {
@@ -300,6 +484,8 @@
         catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
       };
     });
+    box.querySelectorAll('[data-navbar]').forEach(b => b.onclick = navbarModal);
+    if (new URLSearchParams(location.search).get('navbar')) { history.replaceState(null, '', location.pathname); navbarModal(); }
     const sync = document.getElementById('sync-nav');
     if (rows.some(x => x.kind === 'header' && x.enabled)) sync.classList.add('hidden');
   }

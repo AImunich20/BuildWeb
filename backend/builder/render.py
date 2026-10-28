@@ -121,14 +121,30 @@ def shared_sections(site):
 
 
 def site_css(site):
-    shared = "\n".join(sec.css for sec in site.shared_sections.filter(enabled=True) if sec.css)
+    from .anim import ANIM_CSS
+    from .navbar import NAV_CSS
+
+    shared = "\n".join(sec.css for sec in site.shared_sections.filter(enabled=True) if sec.css and not sec.managed)
     base = BASE_CSS if site.use_base_styles else ""
-    return theme_css(site) + base + "\n" + shared + "\n" + (site.custom_css or "")
+    return theme_css(site) + base + NAV_CSS + ANIM_CSS + "\n" + shared + "\n" + (site.custom_css or "")
 
 
 def site_js(site):
-    shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js)
-    return SITE_JS + "\n" + shared + "\n" + (site.custom_js or "")
+    from .anim import ANIM_JS
+    from .navbar import NAV_JS
+
+    core = SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + "\n})();", 1)
+    shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
+    return core + "\n" + shared + "\n" + (site.custom_js or "")
+
+
+def header_html(sec, site, pages, page):
+    """The shared header for ``page``: generated from the navbar settings, or the freely designed one."""
+    if sec.managed:
+        from .navbar import render_header
+
+        return render_header(site, pages, page)
+    return strip_body(sec.html)
 
 
 def nav_html(pages, current=None):
@@ -177,7 +193,7 @@ def full_body(page, pages, shared=None):
     parts = []
     head, foot = shared.get(SharedSection.HEADER), shared.get(SharedSection.FOOTER)
     if head and page.use_header:
-        parts.append(strip_body(head.html))
+        parts.append(header_html(head, page.site, pages, page))
     parts.append(body_html(page))
     if foot and page.use_footer:
         parts.append(strip_body(foot.html))
@@ -199,9 +215,12 @@ def render_page(page, form_endpoint="", depth_prefix="", include_drafts=False, p
     e = htmllib.escape
     title = page.seo_title or (page.title if page.is_home and page.title == site.name else f"{page.title} | {site.name}")
     desc = page.seo_description or site.description
+    from .anim import ANIM_HEAD
+
     head = [
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        ANIM_HEAD,
         f"<title>{e(title)}</title>",
         '<meta name="generator" content="BuildWeb">',
     ]

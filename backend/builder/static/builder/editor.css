@@ -145,3 +145,14 @@ i[data-icon]{display:inline-flex;align-items:center;justify-content:center;font-
 .chip.ghost{border-style:dashed}
 
 .gjs-block .bw-bicon svg,.bw-bicon .ic{fill:none!important;width:20px;height:20px}
+
+/* animation panel */
+.anim-pane{padding:12px}
+.anim-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0 12px}
+.anim-opt{border:1px solid var(--line-2);background:var(--bg);color:var(--ink-2);border-radius:var(--radius-sm);padding:7px 4px;font:12px var(--font);cursor:pointer}
+.anim-opt:hover{border-color:var(--faint);color:var(--ink)}
+.anim-opt.on{border-color:var(--brand);background:var(--brand-soft);color:var(--ink)}
+.anim-ctl.dim{opacity:.45;pointer-events:none}
+.anim-row{display:grid;grid-template-columns:70px 1fr 56px;gap:8px;align-items:center;font-size:12.5px;margin-bottom:8px}
+.anim-row input[type=range]{accent-color:var(--brand)}
+.anim-row code{font-size:11px;text-align:right}

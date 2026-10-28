@@ -33,6 +33,7 @@ class Site(models.Model):
     description = models.TextField("คำอธิบาย", blank=True)
     language = models.CharField("ภาษา", max_length=10, default="th")
     theme = models.JSONField("ธีม", default=dict, blank=True)
+    nav = models.JSONField("ตั้งค่าแถบเมนู", default=dict, blank=True)
     favicon = models.CharField("ไอคอนเว็บ (favicon)", max_length=500, blank=True)
     head_code = models.TextField("โค้ดใน <head> ทุกหน้า", blank=True)
     custom_css = models.TextField("CSS ทุกหน้า", blank=True)
@@ -140,6 +141,8 @@ class SharedSection(models.Model):
     site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="shared_sections")
     kind = models.CharField(max_length=10, choices=KINDS)
     enabled = models.BooleanField("เปิดใช้", default=True)
+    # Header only: generated from Site.nav settings (True) or designed freely in the editor (False).
+    managed = models.BooleanField("สร้างจากตัวตั้งค่าแถบเมนู", default=False)
     project_data = models.JSONField(default=dict, blank=True)
     html = models.TextField(blank=True)
     css = models.TextField(blank=True)

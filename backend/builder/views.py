@@ -104,8 +104,10 @@ def editor(request, site_id, page_id):
                    "storage": f"/api/pages/{page.id}/project"},
         # Shared header/footer shown (read-only) around the page in the canvas.
         "shared_preview": {
-            kind: {"html": renderer.fill_nav(renderer.strip_body(sec.html), pages, page), "css": sec.css,
-                   "edit_url": f"/sites/{site.id}/edit-shared/{kind}/"}
+            kind: {"html": renderer.fill_nav(renderer.header_html(sec, site, pages, page) if kind == "header" else
+                                              renderer.strip_body(sec.html), pages, page),
+                   "css": "" if sec.managed else sec.css,
+                   "edit_url": f"/sites/{site.id}/pages/?navbar=1" if sec.managed else f"/sites/{site.id}/edit-shared/{kind}/"}
             for kind, sec in shared.items()
             if sec and (page.use_header if kind == "header" else page.use_footer)
         },
@@ -120,6 +122,8 @@ def editor_shared(request, site_id, kind):
         raise Http404
     services.create_shared(site, enabled=False)  # make sure both exist
     sec = site.shared_sections.get(kind=kind)
+    if sec.managed:  # generated from the navbar settings: edit those instead
+        return redirect(f"/sites/{site.id}/pages/?navbar=1")
     data = editor_page_data(site)
     styles, scripts = canvas_assets(site.head_code)
     home = site.home_page()
