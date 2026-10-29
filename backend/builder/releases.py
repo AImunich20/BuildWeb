@@ -100,7 +100,7 @@ def diff(old, new):
     if not _same(old.get("shared"), new.get("shared")):
         site_changes.append("ส่วนหัว/ส่วนท้าย")
     strip = lambda hooks: [{k: v for k, v in h.items() if k != "signing_secret"} for h in hooks or []]  # noqa: E731
-    for key, label in (("functions", "ฟังก์ชัน"), ("jobs", "งานตั้งเวลา"), ("connectors", "ตัวเชื่อม API")):
+    for key, label in (("functions", "ฟังก์ชัน"), ("jobs", "งานตั้งเวลา"), ("connectors", "ตัวเชื่อม API"), ("plugins", "ปลั๊กอิน")):
         if not _same(old.get(key), new.get(key)):
             site_changes.append(label)
     if not _same(strip(old.get("webhooks")), strip(new.get("webhooks"))):

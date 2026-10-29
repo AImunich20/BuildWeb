@@ -128,7 +128,7 @@
 
   // ------------------------------------------------------------------ blocks
   const bm = editor.BlockManager;
-  const CAT_ORDER = ['ส่วนหัว/ท้าย', 'เนื้อหา', 'ขาย', 'ข้อมูล', 'สื่อ', 'ฟอร์ม', 'พื้นฐาน', 'ส่วนประกอบ', 'ขั้นสูง'];
+  const CAT_ORDER = ['ส่วนหัว/ท้าย', 'เนื้อหา', 'ขาย', 'ข้อมูล', 'ปลั๊กอิน', 'สื่อ', 'ฟอร์ม', 'พื้นฐาน', 'ส่วนประกอบ', 'ขั้นสูง'];
   D.sections.forEach(s => bm.add('bw-' + s.id, {
     label: s.label, category: s.category, content: s.content, media: `<div class="bw-bicon">${BW_ICON(s.icon, 20)}</div>`,
     attributes: { title: 'ลากไปวางในหน้า' },
@@ -454,6 +454,18 @@
     mb('only-guests', 'กล่องที่เฉพาะคนยังไม่ล็อกอินเห็น', 'eye', `<div data-bw-if="!user" style="padding:24px;border:1px dashed #d9d9e3;border-radius:12px"><p>สมัครสมาชิกเพื่อดูเนื้อหาพิเศษ</p><a class="bw-btn" href="${P.register}">สมัครเลย</a></div>`);
     mb('mine', 'รายการของฉัน (แถวที่สมาชิกสร้าง)', 'list', `<div data-bw-repeat="${(COLS[0] || { slug: '' }).slug}" data-bw-mine data-bw-empty="ยังไม่มีรายการ" style="display:grid;gap:10px;padding:20px"><div style="padding:14px;border:1px solid #eee;border-radius:10px">{{_id}}</div></div>`);
   }
+
+  // ------------------------------------------------------------------ plugin forms (other programs, see plugins.py)
+  // The slot's inner content is replaced by the action's form at render time, so it is not editable here.
+  editor.DomComponents.addType('bw-plugin', {
+    isComponent: el => el && el.getAttribute && el.hasAttribute('data-bw-plugin') ? { type: 'bw-plugin' } : false,
+    model: { defaults: { name: 'ฟอร์มปลั๊กอิน', droppable: false, editable: false, stylable: true,
+      style: { padding: '18px', border: '1px dashed #a78bfa', 'border-radius': '12px' } } },
+  });
+  (D.plugins || []).forEach(p => p.actions.forEach(a => bm.add(`bw-plugin-${p.slug}-${a.key}`, {
+    label: `${p.name}: ${a.label}${a.access === 'off' ? ' (ยังไม่เปิดให้ผู้เข้าชม)' : ''}`, category: 'ปลั๊กอิน', content: a.block,
+    media: `<div class="bw-bicon">${BW_ICON('plug', 20)}</div>`,
+  })));
 
   function drawData() {
     const box = $('#data-panel');

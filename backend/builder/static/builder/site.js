@@ -1564,19 +1564,19 @@
   }
 
   // ---------------------------------------------------------------- logic: webhooks, functions, jobs, connectors, secrets
-  let LG = null, lgSub = 'functions';
+  let LG = null, lgSub = 'plugins';
   const EVENT_LABELS = { 'record.created': 'เพิ่มแถว', 'record.updated': 'แก้ไขแถว', 'record.deleted': 'ลบแถว', 'form.submitted': 'ส่งฟอร์ม', 'member.registered': 'สมาชิกใหม่' };
   const JOB_ACTIONS = { call_url: 'เรียก URL', sync_mysql: 'ซิงก์ชุดข้อมูลจาก MySQL', run_connector: 'ดึงข้อมูลจาก API ภายนอก', run_function: 'รันฟังก์ชัน', purge_rows: 'ลบแถวเก่า' };
   const ACCESS = { public: 'ทุกคน', user: 'สมาชิก', key: 'ต้องมี API key', off: 'ปิด (ทดสอบในแอปเท่านั้น)' };
   async function renderLogic() {
     root.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
     try { LG = await api(`/api/sites/${site.id}/logic`); } catch (e) { root.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
-    const subs = [['functions', 'ฟังก์ชัน', LG.functions.length], ['webhooks', 'Webhooks', LG.webhooks.length], ['jobs', 'งานตั้งเวลา', LG.jobs.length],
+    const subs = [['plugins', 'ปลั๊กอิน', LG.plugins], ['functions', 'ฟังก์ชัน', LG.functions.length], ['webhooks', 'Webhooks', LG.webhooks.length], ['jobs', 'งานตั้งเวลา', LG.jobs.length],
       ['connectors', 'ดึงข้อมูลจาก API', LG.connectors.length], ['secrets', 'ค่าลับ', LG.secrets.length], ['logs', 'บันทึกการทำงาน', '']];
     root.innerHTML = `<div class="row between" style="margin-bottom:14px"><div class="muted">ตรรกะฝั่งเซิร์ฟเวอร์ของเว็บ — ทำงานบนเซิร์ฟเวอร์ BuildWeb (เครื่องนี้หรือที่ deploy)</div>
       <div class="seg" id="lg-subs">${subs.map(([k, l, n]) => `<button data-v="${k}" class="${k === lgSub ? 'on' : ''}">${l}${n !== '' ? ` <span class="muted">${n}</span>` : ''}</button>`).join('')}</div></div><div id="lg-body"></div>`;
     root.querySelectorAll('#lg-subs button').forEach(b => b.onclick = () => { lgSub = b.dataset.v; renderLogic(); });
-    ({ functions: lgFunctions, webhooks: lgWebhooks, jobs: lgJobs, connectors: lgConnectors, secrets: lgSecrets, logs: lgLogs })[lgSub]();
+    ({ plugins: lgPlugins, functions: lgFunctions, webhooks: lgWebhooks, jobs: lgJobs, connectors: lgConnectors, secrets: lgSecrets, logs: lgLogs })[lgSub]();
   }
   const lgBox = () => document.getElementById('lg-body');
   const apiBase = () => ((site.base_url || (D.hosting.running ? siteUrls(D.hosting)[0] : '') || `${location.origin}/preview/${site.slug}/`).replace(/\/?$/, '/')) + 'api/v1/';
@@ -1775,6 +1775,167 @@ return {...}  หรือ  return 201, {...}</div></details>
     if (del) del.onclick = async () => { await api(`/api/logic/connector/${c.id}/delete`, {}); m.close(); renderLogic(); };
   }
 
+  // ---- plugins: other programs (HarmoMed, anything with a manifest or OpenAPI) — see plugins.py
+  const HOW = { preset: 'รู้จักโปรแกรมนี้', manifest: 'โปรแกรมส่งรายละเอียดมาเอง', openapi: 'อ่านจาก OpenAPI', web: 'เว็บแอป (ไม่มีรายละเอียดคำสั่ง)' };
+  const PL_ACCESS = { off: 'ปิด (ใช้ในแอปเท่านั้น)', public: 'ผู้เข้าชมทุกคน', user: 'สมาชิกที่เข้าสู่ระบบ' };
+  let PL = null;
+  async function lgPlugins() {
+    lgBox().innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    try { PL = await api(`/api/sites/${site.id}/plugins`); } catch (e) { lgBox().innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    const status = p => p.last_ok == null ? '<span class="badge">ยังไม่ตรวจ</span>' : p.last_ok ? '<span class="badge ok">ออนไลน์</span>' : '<span class="badge err">ติดต่อไม่ได้</span>';
+    lgBox().innerHTML = `<div class="card"><div class="card-head"><div><h2>เชื่อมต่อโปรแกรมอื่น</h2><div class="hint" style="margin:0">ค้นหาโปรแกรมที่เปิดอยู่ในเครื่องนี้ให้อัตโนมัติ หรือใส่ที่อยู่เอง · รู้จัก HarmoMed, โปรแกรมที่มี <code>/.well-known/buildweb-plugin.json</code> และ API ที่มี OpenAPI (FastAPI ฯลฯ)</div></div>
+        <button class="btn sm primary" id="pl-scan">${BW_ICON('search')} ค้นหาในเครื่องนี้</button></div>
+        <div class="row" style="padding:0 16px 14px;flex-wrap:nowrap"><input class="input mono" id="pl-url" placeholder="http://127.0.0.1:5060 หรือ https://api.example.com"><button class="btn" id="pl-probe">ตรวจที่อยู่นี้</button><button class="btn ghost" id="pl-manual">เขียน manifest เอง</button></div>
+        <div id="pl-found"></div></div>
+      ${listCard('ปลั๊กอินของเว็บนี้', 'ใช้คำสั่งของโปรแกรมบนหน้าเว็บ (บล็อกหมวด “ปลั๊กอิน” ในตัวออกแบบ), บันทึกผลลงชุดข้อมูล และดึงรายการเข้าชุดข้อมูลตามเวลา', '',
+        PL.plugins.map(p => `<div class="list-row" data-id="${p.id}"><span class="kind-icon">${BW_ICON('plug')}</span><div style="flex:1;min-width:0"><b>${esc(p.name)}</b> ${status(p)}${p.enabled ? '' : ' <span class="badge">ปิดอยู่</span>'}
+          <div class="small muted mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.base_url)}</div>
+          <div class="small muted">${p.actions.length} คำสั่ง · ${p.syncs.length} รายการดึงข้อมูล${p.actions.filter(a => a.access !== 'off').length ? ` · เปิดบนหน้าเว็บ ${p.actions.filter(a => a.access !== 'off').length}` : ''}${p.last_status ? ' · ' + esc(p.last_status) : ''}</div></div>
+          <button class="btn sm" data-check>ตรวจ</button><button class="btn sm primary" data-open>จัดการ</button></div>`), 'ยังไม่ได้เชื่อมโปรแกรมใด — กด “ค้นหาในเครื่องนี้”')}`;
+    const foundBox = document.getElementById('pl-found');
+    const showFound = list => {
+      foundBox.innerHTML = list.length ? list.map((f, i) => `<div class="list-row"><span class="kind-icon">${BW_ICON(f.how === 'web' ? 'site' : 'plug')}</span><div style="flex:1;min-width:0"><b>${esc(f.manifest.name)}</b> <span class="badge ${f.how === 'web' ? '' : 'ok'}">${HOW[f.how]}</span>
+          <div class="small muted mono">${esc(f.url)}</div><div class="small muted">${esc(f.manifest.description || '')} ${Object.keys(f.manifest.actions).length} คำสั่ง · ${Object.keys(f.manifest.syncs).length} รายการดึงข้อมูล</div></div>
+          ${PL.plugins.some(p => p.base_url === f.url) ? '<span class="badge">เชื่อมแล้ว</span>' : `<button class="btn sm primary" data-i="${i}">เชื่อมต่อ</button>`}</div>`).join('')
+        : '<div class="empty-state">ไม่พบโปรแกรมที่เปิดอยู่ — เปิดโปรแกรมก่อน หรือใส่ที่อยู่เอง</div>';
+      foundBox.querySelectorAll('[data-i]').forEach(b => b.onclick = () => connectModal(list[+b.dataset.i]));
+    };
+    const run = async (btn, payload) => {
+      btn.disabled = true; foundBox.innerHTML = '<div class="pad muted small">กำลังค้นหา…</div>';
+      try { showFound((await api(`/api/sites/${site.id}/plugins/discover`, payload)).found); } catch (e) { foundBox.innerHTML = `<div class="alert err" style="margin:0 16px 14px">${esc(e.message)}</div>`; }
+      btn.disabled = false;
+    };
+    document.getElementById('pl-scan').onclick = e => run(e.currentTarget, {});
+    document.getElementById('pl-probe').onclick = e => run(e.currentTarget, { url: document.getElementById('pl-url').value });
+    document.getElementById('pl-manual').onclick = () => manifestModal(document.getElementById('pl-url').value);
+    lgBox().querySelectorAll('.list-row[data-id]').forEach(r => {
+      const p = PL.plugins.find(x => x.id === +r.dataset.id);
+      r.querySelector('[data-open]').onclick = () => pluginModal(p);
+      r.querySelector('[data-check]').onclick = async e => { e.target.disabled = true; try { const x = await api(`/api/plugins/${p.id}/check`, {}); toast(x.message, x.ok_check ? 'ok' : 'err'); } catch (err) { toast(err.message, 'err'); } lgPlugins(); };
+    });
+  }
+
+  function connectModal(f) {
+    const m0 = f.manifest, acts = Object.entries(m0.actions).filter(([, a]) => a.method !== 'GET' || a.inputs.length), syncs = Object.entries(m0.syncs);
+    const m = modal(`<header><h2>เชื่อมต่อ ${esc(m0.name)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อในเว็บนี้</span><input class="input" name="name" value="${esc(m0.name)}"></label>
+        <label class="field"><span>ที่อยู่</span><input class="input mono" value="${esc(f.url)}" disabled></label></div>
+      <label class="field"><span>Headers <small>(ถ้าโปรแกรมต้องใช้ token — บรรทัดละ 1, ใช้ {{secret.NAME}} ได้)</small></span><textarea class="input code" name="headers" rows="2" placeholder="Authorization: Bearer {{secret.HARMOMED_TOKEN}}"></textarea></label>
+      ${syncs.length ? `<div class="sect-title">ดึงข้อมูลเข้าชุดข้อมูลอัตโนมัติ</div>${syncs.map(([k, s]) => `<label class="check"><input type="checkbox" data-sync="${esc(k)}" checked>${esc(s.label)} <span class="muted small">— ${esc(s.every || 'every 10 min')} (รูปจะถูกคัดลอกเข้าไฟล์ของเว็บ)</span></label>`).join('')}` : ''}
+      ${acts.length ? `<div class="sect-title">สร้างหน้าใช้งาน (ฉบับร่าง) ให้ผู้เข้าชมใช้คำสั่ง</div>${acts.map(([k, a]) => `<label class="check"><input type="checkbox" data-page="${esc(k)}">${esc(a.label)} <span class="muted small">— เปิดคำสั่งนี้ให้ผู้เข้าชมทุกคน</span></label>`).join('')}` : ''}
+      ${f.how === 'web' ? '<div class="alert warn">โปรแกรมนี้ไม่ได้บอกว่ามีคำสั่งอะไร — เชื่อมไว้แล้วแก้ manifest เองได้ในหน้า “จัดการ”</div>' : ''}
+      <div id="pl-report"></div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>เชื่อมต่อ</button></footer>`, { wide: true });
+    m.el.querySelector('[data-ok]').onclick = async e => {
+      e.target.disabled = true; e.target.textContent = 'กำลังเชื่อมต่อ…';
+      try {
+        const r = await api(`/api/sites/${site.id}/plugins`, { found: f, name: m.el.querySelector('[name=name]').value, headers: m.el.querySelector('[name=headers]').value,
+          syncs: [...m.el.querySelectorAll('[data-sync]:checked')].map(x => x.dataset.sync), pages: [...m.el.querySelectorAll('[data-page]:checked')].map(x => x.dataset.page) });
+        m.close(); toast(['เชื่อมต่อแล้ว', ...r.report].join(' · '), 'ok'); LG.plugins = r.plugins.length; lgPlugins();
+      } catch (err) { e.target.disabled = false; e.target.textContent = 'เชื่อมต่อ'; showFieldError(m.el, err); }
+    };
+  }
+
+  function manifestModal(url) {
+    const sample = JSON.stringify({ name: 'โปรแกรมของฉัน', health: { path: '/' }, actions: { check: { label: 'ตรวจข้อมูล', method: 'POST', path: '/api/check', inputs: [{ name: 'text', label: 'ข้อความ', type: 'text', required: true }], result: { show: [{ label: 'ผล', path: 'result' }] } } },
+      syncs: { items: { label: 'รายการทั้งหมด', path: '/api/items', key: 'id' } } }, null, 2);
+    const m = modal(`<header><h2>เพิ่มโปรแกรมด้วย manifest</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <label class="field"><span>ที่อยู่ของโปรแกรม</span><input class="input mono" name="base_url" value="${esc(url || '')}" placeholder="http://127.0.0.1:5060"></label>
+      <label class="field"><span>manifest (JSON)</span><textarea class="input code fn-code" name="manifest" spellcheck="false" style="min-height:300px">${esc(sample)}</textarea></label>
+      <div class="small muted">ให้โปรแกรมส่งไฟล์นี้ที่ <code>/.well-known/buildweb-plugin.json</code> แล้ว BuildWeb จะเจอเองตอนค้นหา</div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>เพิ่ม</button></footer>`, { wide: true });
+    m.el.querySelector('[data-ok]').onclick = async () => {
+      try { const r = await api(`/api/sites/${site.id}/plugins`, formData(m.el)); m.close(); toast('เพิ่มแล้ว', 'ok'); LG.plugins = r.plugins.length; lgPlugins(); }
+      catch (e) { showFieldError(m.el, e); }
+    };
+  }
+
+  function pluginModal(p) {
+    const cols = PL.collections;
+    const m = modal(`<header><h2>${esc(p.name)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      ${p.description ? `<p class="muted" style="margin-top:0">${esc(p.description)}</p>` : ''}
+      <div class="row" style="margin-bottom:10px">${p.links.map(l => `<a class="btn sm" href="${esc(p.base_url + l.path)}" target="_blank" rel="noopener">${BW_ICON('external')} ${esc(l.label)}</a>`).join('')}</div>
+      <div class="grid g3" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(p.name)}"></label>
+        <label class="field" style="grid-column:span 2"><span>ที่อยู่</span><input class="input mono" name="base_url" value="${esc(p.base_url)}"></label></div>
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>Headers</span><textarea class="input code" name="headers" rows="2">${esc(Object.entries(p.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n'))}</textarea></label>
+        <label class="check" style="align-self:center"><input type="checkbox" name="enabled" ${p.enabled ? 'checked' : ''}>เปิดใช้ปลั๊กอินนี้</label></div>
+      <div class="sect-title">คำสั่ง</div>
+      ${p.actions.length ? `<div class="data-table-wrap"><table class="table"><thead><tr><th>คำสั่ง</th><th>ใช้บนหน้าเว็บได้</th><th>บันทึกผลลงชุดข้อมูล</th><th></th></tr></thead><tbody>
+        ${p.actions.map(a => `<tr data-k="${esc(a.key)}"><td><b>${esc(a.label)}</b><div class="small muted mono">${esc(a.method)} ${esc(a.path)}</div></td>
+          <td><select class="input" data-access>${Object.entries(PL_ACCESS).map(([v, l]) => `<option value="${v}" ${a.access === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+          <td><select class="input" data-save><option value="">ไม่บันทึก</option><option value="new" ${a.save === 'new' ? 'selected' : ''}>สร้างชุดข้อมูลใหม่</option>${cols.map(c => `<option value="${esc(c.slug)}" ${a.save === c.slug ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+          <td style="white-space:nowrap"><button class="btn sm" data-try>ทดลอง</button> <button class="btn sm ghost" data-page title="สร้างหน้าที่มีฟอร์มนี้">สร้างหน้า</button></td></tr>`).join('')}</tbody></table></div>
+        <div class="small muted" style="margin-top:6px">ใส่ฟอร์มลงหน้าไหนก็ได้: ตัวออกแบบ › บล็อก › หมวด “ปลั๊กอิน” · ใช้ได้เมื่อเว็บเปิดผ่านเซิร์ฟเวอร์ BuildWeb (เครื่องนี้หรือเซิร์ฟเวอร์ที่เข้าถึงโปรแกรมได้) ไม่ใช่ไฟล์ static</div>`
+        : '<div class="empty-state">ยังไม่มีคำสั่ง — แก้ manifest ด้านล่าง</div>'}
+      ${p.syncs.length ? `<div class="sect-title">ดึงรายการเข้าชุดข้อมูล</div>${p.syncs.map(s => `<div class="list-row" data-s="${esc(s.key)}" style="padding:8px 0"><span class="kind-icon">${BW_ICON('cloud')}</span><div style="flex:1"><b>${esc(s.label)}</b>
+          <div class="small muted">${s.collection ? `→ <code>${esc(s.collection)}</code>` : 'ยังไม่เคยดึง'}${s.last_run ? ' · ' + ago(s.last_run) + ' · ' + esc(s.last_status) : ''}</div></div>
+          <button class="btn sm" data-sync>ดึงเลย</button>${s.connector ? '' : ' <button class="btn sm ghost" data-sched>ดึง + ตั้งเวลา</button>'}</div>`).join('')}` : ''}
+      <details style="margin-top:12px"><summary class="small">manifest (ขั้นสูง)</summary><textarea class="input code fn-code" name="manifest" spellcheck="false" style="min-height:240px;margin-top:8px">${esc(JSON.stringify(p.manifest, null, 2))}</textarea>
+        <button class="btn sm" id="pl-refresh" style="margin-top:6px">${BW_ICON('refresh')} อ่านใหม่จากโปรแกรม</button></details></div>
+      <footer><button class="btn danger" data-del style="margin-right:auto">ลบ</button><button class="btn" data-close>ปิด</button><button class="btn primary" data-ok>บันทึก</button></footer>`, { wide: true });
+    const settings = () => {
+      const access = {}, saveTo = {};
+      m.el.querySelectorAll('tr[data-k]').forEach(tr => { access[tr.dataset.k] = tr.querySelector('[data-access]').value; saveTo[tr.dataset.k] = tr.querySelector('[data-save]').value; });
+      const d = { name: m.el.querySelector('[name=name]').value, base_url: m.el.querySelector('[name=base_url]').value, headers: m.el.querySelector('[name=headers]').value,
+        enabled: m.el.querySelector('[name=enabled]').checked, access, save: saveTo };
+      const man = m.el.querySelector('[name=manifest]').value;
+      if (man.trim() !== JSON.stringify(p.manifest, null, 2)) d.manifest = man;
+      return d;
+    };
+    const saveNow = async () => { p = (await api(`/api/plugins/${p.id}/save`, settings())).plugin; return p; };
+    m.el.querySelector('[data-ok]').onclick = async () => { try { await saveNow(); m.close(); toast('บันทึกแล้ว', 'ok'); lgPlugins(); } catch (e) { showFieldError(m.el, e); } };
+    m.el.querySelector('[data-del]').onclick = async () => {
+      if (!await confirmBox('ลบปลั๊กอิน', `ลบ ${esc(p.name)}? การดึงข้อมูลตามเวลาจะหยุด (ชุดข้อมูลที่ดึงมาแล้วยังอยู่) และฟอร์มบนหน้าเว็บจะใช้ไม่ได้`, { ok: 'ลบ', danger: true })) return;
+      await api(`/api/plugins/${p.id}/delete`, {}); m.close(); LG.plugins = Math.max(0, LG.plugins - 1); lgPlugins();
+    };
+    m.el.querySelector('#pl-refresh').onclick = async () => { try { p = (await api(`/api/plugins/${p.id}/refresh`, {})).plugin; m.close(); toast('อ่านรายละเอียดใหม่แล้ว', 'ok'); pluginModal(p); } catch (e) { toast(e.message, 'err'); } };
+    m.el.querySelectorAll('tr[data-k]').forEach(tr => {
+      tr.querySelector('[data-try]').onclick = async () => { try { await saveNow(); tryModal(p, p.actions.find(a => a.key === tr.dataset.k)); } catch (e) { showFieldError(m.el, e); } };
+      tr.querySelector('[data-page]').onclick = async e => {
+        e.target.disabled = true;
+        try { await saveNow(); const r = await api(`/api/plugins/${p.id}/page?key=${encodeURIComponent(tr.dataset.k)}`, {}); toast(`สร้างหน้า “${r.page.title}” (ฉบับร่าง) แล้ว — เปิดคำสั่งนี้ให้ผู้เข้าชมแล้ว`, 'ok'); m.close(); lgPlugins(); }
+        catch (err) { e.target.disabled = false; toast(err.message, 'err'); }
+      };
+    });
+    m.el.querySelectorAll('[data-s]').forEach(row => {
+      const go = schedule => async e => {
+        e.target.disabled = true;
+        try { const r = await api(`/api/plugins/${p.id}/sync?key=${encodeURIComponent(row.dataset.s)}`, { schedule }); toast(r.message, 'ok'); m.close(); pluginModal(r.plugin); }
+        catch (err) { e.target.disabled = false; toast(err.message, 'err'); }
+      };
+      row.querySelector('[data-sync]').onclick = go(false);
+      const sc = row.querySelector('[data-sched]'); if (sc) sc.onclick = go(true);
+    });
+  }
+
+  function tryModal(p, a) {
+    const input = i => {
+      const req = i.required ? ' required' : '', lab = `${esc(i.label)}${i.required ? ' *' : ''}`;
+      if (i.type === 'file') return `<label class="field"><span>${lab}</span><input class="input" type="file" name="${esc(i.name)}" ${i.accept ? `accept="${esc(i.accept)}"` : ''}${req}></label>`;
+      if (i.type === 'select') return `<label class="field"><span>${lab}</span><select class="input" name="${esc(i.name)}">${i.default ? '' : `<option value="">${esc(i.placeholder || '— เลือก —')}</option>`}${(i.choices || []).map(([v, l]) => `<option value="${esc(v)}" ${v === i.default ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+      if (i.type === 'bool') return `<label class="check"><input type="checkbox" name="${esc(i.name)}" value="true">${lab}</label>`;
+      if (i.type === 'longtext' || i.type === 'json') return `<label class="field"><span>${lab}</span><textarea class="input${i.type === 'json' ? ' code' : ''}" name="${esc(i.name)}" rows="3">${esc(i.default || '')}</textarea></label>`;
+      return `<label class="field"><span>${lab}</span><input class="input" type="${i.type === 'number' ? 'number" step="any' : i.type === 'date' ? 'date' : 'text'}" name="${esc(i.name)}" value="${esc(i.default || '')}"></label>`;
+    };
+    const m = modal(`<header><h2>ทดลอง: ${esc(a.label)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <form id="pl-form"><div class="grid g2" style="gap:0 12px">${a.inputs.map(input).join('') || '<div class="muted small">คำสั่งนี้ไม่ต้องกรอกอะไร</div>'}</div>
+      ${a.save ? '<label class="check"><input type="checkbox" name="_save" value="1">บันทึกผลลงชุดข้อมูลด้วย</label>' : ''}</form>
+      <div id="pl-out" style="margin-top:12px"></div></div>
+      <footer><button class="btn" data-close>ปิด</button><button class="btn primary" data-ok>${BW_ICON('play')} เรียกคำสั่ง</button></footer>`, { wide: true });
+    m.el.querySelector('[data-ok]').onclick = async e => {
+      const out = m.el.querySelector('#pl-out'), btn = e.currentTarget;
+      btn.disabled = true; out.innerHTML = '<div class="muted">กำลังเรียก…</div>';
+      try {
+        const r = await api(`/api/plugins/${p.id}/call?key=${encodeURIComponent(a.key)}`, new FormData(m.el.querySelector('#pl-form')));
+        out.innerHTML = (r.show.length ? `<table class="table small"><tbody>${r.show.map(s => `<tr><td class="muted" style="width:38%">${esc(s.label)}</td><td>${s.format === 'color' && s.value ? `<span style="display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:6px;background:${esc(s.value)};border:1px solid var(--line)"></span>` : ''}${esc(String(s.value ?? '')) || '—'}</td></tr>`).join('')}</tbody></table>` : '')
+          + (r.images.length ? `<div class="grid g2" style="margin-top:10px">${r.images.filter(i => /^data:image\//.test(i.src)).map(i => `<figure style="margin:0"><img src="${esc(i.src)}" style="width:100%;border-radius:10px;border:1px solid var(--line)"><figcaption class="small muted">${esc(i.label)}</figcaption></figure>`).join('')}</div>` : '')
+          + (r.saved ? `<div class="alert ok" style="margin-top:10px">บันทึกลงชุดข้อมูล <code>${esc(r.saved.collection)}</code> แล้ว</div>` : '')
+          + `<details style="margin-top:10px"><summary class="small">ผลลัพธ์ทั้งหมด (JSON)</summary><div class="log" style="max-height:300px;overflow:auto">${esc(JSON.stringify(r.data, null, 2))}</div></details>`;
+      } catch (err) { out.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+      btn.disabled = false;
+    };
+  }
+
   function lgSecrets() {
     lgBox().innerHTML = `<div class="card"><div class="card-head"><div><h2>ค่าลับ (Secrets)</h2><div class="hint" style="margin:0">token / API key ของบริการภายนอก — ใช้ในเซิร์ฟเวอร์เท่านั้น ไม่ถูกส่งไปที่หน้าเว็บ · อ้างถึงด้วย <code>{{secret.ชื่อ}}</code> หรือ <code>bw.secret("ชื่อ")</code></div></div></div>
       ${LG.secrets.map(x => `<div class="list-row"><span class="kind-icon">${BW_ICON('shield')}</span><div style="flex:1"><b class="mono">${esc(x.name)}</b> <span class="muted mono">${esc(x.preview)}</span></div>
@@ -1793,7 +1954,7 @@ return {...}  หรือ  return 201, {...}</div></details>
   async function lgLogs() {
     lgBox().innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
     const r = await api(`/api/sites/${site.id}/logic/logs`);
-    const kinds = { webhook: 'Webhook', job: 'งานตั้งเวลา', connector: 'ดึงข้อมูล', function: 'ฟังก์ชัน' };
+    const kinds = { plugin: 'ปลั๊กอิน', webhook: 'Webhook', job: 'งานตั้งเวลา', connector: 'ดึงข้อมูล', function: 'ฟังก์ชัน' };
     lgBox().innerHTML = `<div class="card"><div class="card-head"><h2>บันทึกการทำงาน</h2><button class="btn sm" id="lg-refresh">${BW_ICON('refresh')} รีเฟรช</button></div>
       ${r.logs.length ? `<div class="data-table-wrap"><table class="table"><thead><tr><th>เวลา</th><th>ประเภท</th><th>ชื่อ</th><th>ผล</th><th>รายละเอียด</th><th class="num">ms</th></tr></thead><tbody>
       ${r.logs.map(x => `<tr data-id="${x.id}" style="cursor:pointer"><td class="small muted" style="white-space:nowrap">${when(x.at)}</td><td>${kinds[x.kind] || x.kind}</td><td><b>${esc(x.ref)}</b></td>

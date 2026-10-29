@@ -150,6 +150,10 @@ def site_js(site):
 
     core = (SITE_JS.replace("\n})();", NAV_JS + ANIM_JS + DATA_JS + "\n})();", 1) + SDK_JS + AUTH_JS
             + (SHOP_JS if (site.shop or {}).get("enabled") else ""))
+    from .plugins import PLUGIN_JS, has_public
+
+    if has_public(site):
+        core += PLUGIN_JS
     shared = "\n".join(sec.js for sec in site.shared_sections.filter(enabled=True) if sec.js and not sec.managed)
     return core + "\n" + shared + "\n" + (site.custom_js or "")
 
@@ -260,7 +264,10 @@ def full_body(page, pages, shared=None, row=None, include_drafts=False, user=Non
     from .data import render_html
 
     out = render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts, user)
-    return fill_member_fields(out, page.site, user)  # after the binder: member values are never read as {{…}}
+    out = fill_member_fields(out, page.site, user)  # after the binder: member values are never read as {{…}}
+    from .plugins import fill_plugins
+
+    return fill_plugins(out, page.site)
 
 
 def visible_pages(site, include_drafts):

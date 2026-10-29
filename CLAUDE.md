@@ -76,6 +76,15 @@ user in Thai. The UI copy is in Thai.
   - `cloudflare.py`: DNS through the Cloudflare API (calls go through `publish.http`, mocked in tests); token encrypted
     in config `publish.cloudflare_token`. Server-side domains: `/__bw/config` stores host→slug in the server's config
     (`server_api.saved_domains`, used by `public.domain_site` in server mode); Caddy on-demand TLS asks `/__bw/domain-check`.
+  - `plugins.py` + `Plugin`: other programs (e.g. HarmoMed_lir). A manifest (actions with inputs/result paths, syncs,
+    links) comes from `/.well-known/buildweb-plugin.json`, a built-in preset (`PRESETS`, detected by probing), or
+    OpenAPI (`from_openapi`). `discover()` scans common 127.0.0.1 ports (excluding BuildWeb's own). Actions run from
+    the app (`/api/plugins/<id>/call`) or from pages: `<div data-bw-plugin="slug/action">` is filled with a form at
+    render time (`fill_plugins`, after member fields) and posts to `<site>/api/v1/plugins/<slug>/<action>`
+    (`restapi.route_plugin`; `Plugin.settings["access"]` off/public/user, visitors get shown values + images as
+    data: URIs only). Results can be saved as rows (`settings["save"]`). Syncs are `Connector`s with
+    `plugin`/`plugin_sync` that `logic.run_connector` routes to `plugins.sync_rows` (images copied into Assets once).
+    Tests use a real local fake program (`tests._FakeProgram`), not mocks.
   - `team.py`: team access. `TeamServer` serves the app on 0.0.0.0:<team port> with `TEAM_ENV_KEY`; there
     `LocalAdminMiddleware` requires login and `team.check()` applies roles (admin/developer/editor; regex path
     rules + `site_of()` to scope by site). `audit()` logs every write. `TeamMember`, `AuditLog`, `SavedBlock`.

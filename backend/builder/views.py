@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from buildweb import config
 
-from . import dbtools, generate, members, render as renderer, sections, services, stats
+from . import dbtools, generate, members, plugins, render as renderer, sections, services, stats
 from .render import fonts_url
 from .api import page_json, site_json
 from .hosting import server as hosting
@@ -149,6 +149,11 @@ def editor_page_data(site):
                          "has_detail": c.detail_pages.exists()}
                         for c in site.collections.all()],
         "members": {"enabled": members.settings(site)["enabled"], "pages": members.settings(site)["pages"]},
+        "plugins": [{"slug": p.slug, "name": p.name,
+                     "actions": [{"key": k, "label": a["label"], "block": plugins.block_html(p, k),
+                                  "access": plugins.plugin_setting(p, "access", k, "off")}
+                                 for k, a in (p.manifest.get("actions") or {}).items() if a["method"] != "GET" or a["inputs"]]}
+                    for p in site.plugins.filter(enabled=True)],
         "sections": [{"id": s["id"], "label": s["label"], "category": s["category"], "icon": s["icon"],
                       "content": sections.block_content(s)} for s in sections.SECTIONS],
     }

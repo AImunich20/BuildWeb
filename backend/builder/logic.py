@@ -244,7 +244,12 @@ def store_rows(conn, rows):
 def run_connector(conn):
     started = time.time()
     try:
-        rows = fetch_connector(conn)
+        if conn.plugin:
+            from .plugins import sync_rows
+
+            rows = sync_rows(conn)
+        else:
+            rows = fetch_connector(conn)
         n = store_rows(conn, rows)
         msg, ok = f"นำเข้า {n} แถว → {conn.collection.name if conn.collection else '-'}", True
     except (RuntimeError, ValueError) as e:

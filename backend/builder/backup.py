@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from . import services
-from .models import (ApiKey, Asset, AssetFolder, Collection, Connector, FormSubmission, Function, Job, Page, Record,
+from .models import (ApiKey, Asset, AssetFolder, Collection, Connector, FormSubmission, Function, Job, Page, Plugin, Record,
                      SharedSection, Site, SiteUser, Stat, Webhook)
 
 FORMAT = "buildweb-site"
@@ -92,7 +92,10 @@ def site_dict(site, include_secrets=True):
                      for h in site.webhooks.all()]
     d["connectors"] = [{"name": c.name, "url": c.url, "method": c.method, "headers": c.headers, "body": c.body,
                         "items_path": c.items_path, "collection": c.collection.slug if c.collection else None,
-                        "key_field": c.key_field} for c in site.connectors.select_related("collection")]
+                        "key_field": c.key_field, "plugin": c.plugin, "plugin_sync": c.plugin_sync}
+                       for c in site.connectors.select_related("collection")]
+    d["plugins"] = [{"name": p.name, "slug": p.slug, "kind": p.kind, "base_url": p.base_url, "headers": p.headers,
+                     "manifest": p.manifest, "settings": p.settings, "enabled": p.enabled} for p in site.plugins.all()]
     d["functions"] = [{"slug": f.slug, "name": f.name, "code": f.code, "access": f.access, "timeout": f.timeout,
                        "enabled": f.enabled} for f in site.functions.all()]
     d["jobs"] = [{"name": j.name, "schedule": j.schedule, "action": j.action, "params": j.params, "enabled": j.enabled}
@@ -282,6 +285,8 @@ def import_site(src, mode="new", slug=None):
     site.connectors.all().delete()
     Connector.objects.bulk_create([Connector(site=site, collection=cols.get(c.pop("collection", None)), **c)
                                    for c in [dict(x) for x in d.get("connectors", [])]])
+    site.plugins.all().delete()
+    Plugin.objects.bulk_create([Plugin(site=site, **p) for p in d.get("plugins", [])])
     site.functions.all().delete()
     Function.objects.bulk_create([Function(site=site, **f) for f in d.get("functions", [])])
     site.jobs.all().delete()

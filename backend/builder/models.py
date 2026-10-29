@@ -490,12 +490,40 @@ class Connector(models.Model):
     items_path = models.CharField(max_length=200, blank=True)  # e.g. "data.items"; empty = the response itself
     collection = models.ForeignKey("Collection", null=True, blank=True, on_delete=models.SET_NULL, related_name="connectors")
     key_field = models.CharField(max_length=100, blank=True)  # update rows with the same key instead of replacing all
+    plugin = models.CharField(max_length=60, blank=True)  # slug of the Plugin whose sync this is (url/headers come from it)
+    plugin_sync = models.CharField(max_length=60, blank=True)
     last_run = models.DateTimeField(null=True, blank=True)
     last_status = models.CharField(max_length=300, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["name"]
+
+
+class Plugin(models.Model):
+    """Another program the site is connected to (see plugins.py): its address, what it can do (manifest) and
+    which of its actions visitors may use."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="plugins")
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=60)
+    kind = models.CharField(max_length=20, default="manifest")  # preset id, "manifest" or "openapi"
+    base_url = models.CharField(max_length=500)
+    headers = models.JSONField(default=dict, blank=True)  # may use {{secret.NAME}}
+    manifest = models.JSONField(default=dict, blank=True)
+    settings = models.JSONField(default=dict, blank=True)  # {"access": {action: off|public|user}, "save": {action: collection}}
+    enabled = models.BooleanField(default=True)
+    last_check = models.DateTimeField(null=True, blank=True)
+    last_ok = models.BooleanField(null=True)
+    last_status = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [models.UniqueConstraint(fields=["site", "slug"], name="unique_plugin_slug")]
+
+    def __str__(self):
+        return self.name
 
 
 class Function(models.Model):

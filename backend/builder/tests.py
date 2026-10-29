@@ -1,9 +1,11 @@
 import json
+import re
 import shutil
 import tempfile
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
@@ -2220,3 +2222,225 @@ class MemberFormTests(TestCase):
         u = self.site.members.get(email="c@x.io")
         self.assertEqual(u.profile, {"city": "BKK"})  # "plan" decides a special page: members can't set it
         self.assertFalse(access.evaluate(page, u)[0])
+
+
+class _FakeProgram:
+    """A small HarmoMed-like program on a random local port (real HTTP, so plugins.http is exercised as is)."""
+
+    JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
+
+    def __init__(self, openapi=False, manifest=None):
+        import http.server
+        import threading
+
+        outer = self
+        self.calls = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def send(self, code, body, ctype="application/json"):
+                data = body if isinstance(body, bytes) else json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                p = self.path
+                if p == "/" and not openapi:
+                    return self.send(200, b"<html><title>HarmoMed Grading</title></html>", "text/html")
+                if p == "/.well-known/buildweb-plugin.json" and manifest:
+                    return self.send(200, manifest)
+                if p == "/openapi.json" and openapi:
+                    return self.send(200, {"openapi": "3.0.0", "info": {"title": "Echo API"}, "paths": {
+                        "/echo/{word}": {"get": {"operationId": "echoWord", "summary": "ทวนคำ",
+                                                 "parameters": [{"name": "word", "in": "path", "required": True, "schema": {"type": "string"}},
+                                                                {"name": "times", "in": "query", "schema": {"type": "integer"}}]}},
+                        "/sum": {"post": {"operationId": "sum", "requestBody": {"content": {"application/json": {"schema": {
+                            "type": "object", "required": ["a"], "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}}}}}}}})
+                if p.startswith("/echo/"):
+                    return self.send(200, {"word": p.split("/")[2].split("?")[0], "query": p.partition("?")[2]})
+                if p == "/api/indicators" and not openapi:
+                    return self.send(200, [{"name": "pink", "path": "indicators/pink.jpg"}])
+                if p == "/api/runs" and not openapi:
+                    return self.send(200, [{"filename": "7", "time": "10:00", "status": "ok", "full": "results/7_full.jpg",
+                                            "plot": "results/7_plot.jpg",
+                                            "report": {"metrics": {"quality": "ok", "signal": {"hex": "#ed8272", "L": 65.74}},
+                                                       "study": {"sample_id": "S-1"}}}])
+                if p.startswith("/files/results/"):
+                    return self.send(200, outer.JPEG, "image/jpeg")
+                return self.send(404, {"error": "not found"})
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(n)
+                outer.calls.append((self.path, self.headers.get("Content-Type", ""), raw))
+                if self.path == "/sum":
+                    d = json.loads(raw)
+                    return self.send(200, {"total": d["a"] + d.get("b", 0)})
+                if self.path == "/api/grade":
+                    if b'name="target"; filename=' not in raw:
+                        return self.send(400, {"error": "กรุณาเลือกภาพ target"})
+                    return self.send(200, {"filename": "8", "report": {
+                        "metrics": {"quality": "warn", "indicator": "pink", "signal": {"hex": "#ed8272", "L": 65.7409, "a": 39.5, "b": 26.7},
+                                    "deltaE_before": 19.789, "deltaE_after": 8.67, "issues": [{"level": "warn", "message": "แสงน้อย"}]},
+                        "full_result": "results/8_full.jpg", "plot": "results/8_plot.jpg"}})
+                return self.send(404, {"error": "not found"})
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class PluginTests(TestCase):
+    """v0.10: plugins — connect a site to another program (HarmoMed preset, manifest, OpenAPI)."""
+
+    def setUp(self):
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Lab", "blank")
+        self.prog = _FakeProgram()
+        self.addCleanup(self.prog.close)
+        self.root = f"/{self.site.slug}/"
+        self.pub = {"buildweb.public": True}
+
+    def connect(self, **extra):
+        from . import plugins
+
+        found = plugins.probe(self.prog.url)
+        r = self.c.post(f"/api/sites/{self.site.id}/plugins", json.dumps({"found": found, **extra}), content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json(), self.site.plugins.get()
+
+    def test_probe_recognises_harmomed_and_syncs_runs_with_images(self):
+        from . import plugins
+
+        found = plugins.probe(self.prog.url)
+        self.assertEqual((found["how"], found["kind"]), ("preset", "harmomed"))
+        self.assertIn("grade", found["manifest"]["actions"])
+        d, p = self.connect(syncs=["runs"])
+        self.assertTrue(any("1 แถว" in x for x in d["report"]), d["report"])
+        conn = self.site.connectors.get(plugin=p.slug)
+        row = conn.collection.records.get().data
+        self.assertEqual((row["filename"], row["quality"], row["signal_hex"], row["sample_id"]), ("7", "ok", "#ed8272", "S-1"))
+        self.assertTrue(row["image"].startswith("/media/sites/") and row["image"].endswith(".jpg"), row)
+        self.assertTrue(self.site.jobs.filter(action="run_connector", params__connector=conn.id).exists())
+        self.assertTrue(p.last_ok)
+        # a second run reuses the copied images and updates by key
+        n_assets = self.site.assets.count()
+        from . import logic
+
+        self.assertEqual(logic.run_connector(conn), 1)
+        self.assertEqual((self.site.assets.count(), conn.collection.records.count()), (n_assets, 1))
+
+    def test_call_action_from_app_with_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        _, p = self.connect()
+        r = self.c.post(f"/api/plugins/{p.id}/call?key=grade", {"target": SimpleUploadedFile("a.jpg", b"img", "image/jpeg"),
+                                                                 "white_point": "standard", "concentration": "2.5"})
+        self.assertEqual(r.status_code, 200, r.content)
+        out = r.json()
+        show = {s["label"]: s["value"] for s in out["show"]}
+        self.assertEqual((show["L*"], show["ข้อควรระวัง"], show["สีสัญญาณ (หลังปรับ)"]), (65.74, "แสงน้อย", "#ed8272"))
+        self.assertEqual(len(out["images"]), 2)
+        self.assertTrue(out["images"][0]["src"].startswith("data:image/jpeg;base64,"))
+        path, ctype, raw = self.prog.calls[-1]
+        self.assertTrue(ctype.startswith("multipart/form-data"))
+        self.assertIn(b'name="concentration"\r\n\r\n2.5', raw)
+        self.assertIn(b'filename="a.jpg"', raw)
+        # required file / bad select / program errors come back as messages
+        r = self.c.post(f"/api/plugins/{p.id}/call?key=grade", {"white_point": "nope"})
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(self.site.run_logs.filter(kind="plugin", ok=True).exists())
+
+    def test_public_form_access_save_and_render(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        _, p = self.connect()
+        url = f"{self.root}api/v1/plugins/{p.slug}/grade"
+        img = lambda: SimpleUploadedFile("a.jpg", b"img", "image/jpeg")  # noqa: E731
+        self.assertEqual(Client().post(url, {"target": img()}, **self.pub).status_code, 403)
+        page = self.site.pages.create(title="ตรวจ", slug="check", html=f'<section>{plugins_block(p)}</section>')
+        html = Client().get(f"{self.root}check.html", **self.pub).content.decode()
+        self.assertIn("ยังไม่เปิดให้ผู้เข้าชมใช้", html)
+        r = self.c.post(f"/api/plugins/{p.id}/save", json.dumps({"access": {"grade": "public"}, "save": {"grade": "new"}}),
+                        content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        html = Client().get(f"{self.root}check.html", **self.pub).content.decode()
+        self.assertIn(f'data-bw-plugin-form="{p.slug}/grade"', html)
+        self.assertIn('<option value="pink">pink</option>', html)  # choices read from the program
+        self.assertIn('type="file" name="target"', html)
+        js = Client().get(f"{self.root}js/site.js", **self.pub).content.decode()
+        self.assertIn("data-bw-plugin-form", js)
+        bad = Client().post(url, {"target": SimpleUploadedFile("a.exe", b"x")}, **self.pub)
+        self.assertEqual(bad.status_code, 400)
+        r = Client().post(url, {"target": img(), "sample_id": "<b>S</b>"}, **self.pub)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn("data", r.json())  # visitors get the shown values only
+        p.refresh_from_db()
+        col = self.site.collections.get(slug=p.settings["save"]["grade"])
+        row = col.records.get().data
+        self.assertIn("<b>S</b>", row.values())
+        self.assertTrue(any(str(v).startswith("/media/") for v in row.values()))
+        # members only
+        self.c.post(f"/api/plugins/{p.id}/save", json.dumps({"access": {"grade": "user"}}), content_type="application/json")
+        self.assertEqual(Client().post(url, {"target": img()}, **self.pub).status_code, 401)
+
+    def test_openapi_and_well_known_manifest(self):
+        from . import plugins
+
+        api_prog = _FakeProgram(openapi=True)
+        self.addCleanup(api_prog.close)
+        found = plugins.probe(api_prog.url)
+        self.assertEqual(found["how"], "openapi")
+        acts = found["manifest"]["actions"]
+        self.assertEqual(acts["echoword"]["inputs"][0]["in"], "path")
+        p, _ = plugins.setup(self.site, found)
+        out = plugins.call(p, "echoword", {"word": "สวัสดี", "times": "3"})
+        self.assertEqual(out["data"]["word"], "%E0%B8%AA%E0%B8%A7%E0%B8%B1%E0%B8%AA%E0%B8%94%E0%B8%B5")
+        self.assertEqual(out["data"]["query"], "times=3")
+        self.assertEqual(plugins.call(p, "sum", {"a": "2", "b": "3.5"})["data"]["total"], 5.5)
+        with self.assertRaises(plugins.PluginError):
+            plugins.call(p, "sum", {"b": "1"})
+        own = _FakeProgram(manifest={"name": "Mine", "actions": {"ping": {"path": "/api/indicators"}}})
+        self.addCleanup(own.close)
+        self.assertIsNone(plugins._safe_probe("not a url ://"))
+        found = plugins.probe(own.url)
+        self.assertEqual((found["how"], found["manifest"]["name"]), ("manifest", "Mine"))  # its own manifest wins over a preset
+        with self.assertRaises(plugins.PluginError):
+            plugins.clean_manifest({"syncs": {"bad": {"path": "http://evil/x"}}})
+        self.assertIsNone(plugins.fill("/files/{a}", {"a": "../../etc/passwd"}))
+        self.assertEqual(plugins.fill("/files/{a}", {"a": "results/1 x.jpg"}), "/files/results/1%20x.jpg")
+
+    def test_discover_backup_and_team_rules(self):
+        from . import backup, plugins, team
+
+        port = int(self.prog.url.rsplit(":", 1)[1])
+        with mock.patch.object(plugins, "SCAN_PORTS", (port, 1)):
+            found = plugins.discover()
+        self.assertEqual([f["kind"] for f in found], ["harmomed"])
+        _, p = self.connect(syncs=["runs"], pages=["grade"])
+        self.assertEqual(p.settings["access"]["grade"], "public")
+        self.assertTrue(self.site.pages.filter(html__contains=f'data-bw-plugin="{p.slug}/grade"').exists())
+        d = backup.site_dict(self.site)
+        self.assertEqual(d["plugins"][0]["slug"], p.slug)
+        self.assertEqual(d["connectors"][0]["plugin"], p.slug)
+        self.assertTrue(any(re.search(rx, f"/api/plugins/{p.id}/save") for rx in team.EDITOR_DENY))
+        self.assertTrue(any(re.search(rx, f"/api/sites/{self.site.id}/plugins") for rx in team.EDITOR_DENY))
+        r = self.c.post(f"/api/plugins/{p.id}/delete", json.dumps({}), content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(self.site.connectors.exists() or self.site.jobs.exists())
+
+
+def plugins_block(p):
+    from . import plugins
+
+    return plugins.block_html(p, "grade")

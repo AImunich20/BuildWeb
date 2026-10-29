@@ -1559,6 +1559,7 @@ def logic_state(site):
         "jobs": [{"id": j.id, "name": j.name, "schedule": j.schedule, "action": j.action, "params": j.params,
                   "enabled": j.enabled, "last_run": j.last_run.isoformat() if j.last_run else None,
                   "next_run": j.next_run.isoformat() if j.next_run else None, "last_ok": j.last_ok} for j in site.jobs.all()],
+        "plugins": site.plugins.count(),
         "events": logic.EVENTS, "template": logic.FN_TEMPLATE,
         "collections": [{"slug": c.slug, "name": c.name, "fields": c.field_names, "mode": c.mode} for c in site.collections.all()],
     }
@@ -1650,7 +1651,12 @@ def logic_item_action(request, kind, item_id, action):
         return {"ok_delivery": ok, "message": last.message if last else ""}
     if kind == "connector" and action == "preview":
         try:
-            rows = logic.fetch_connector(obj)
+            if obj.plugin:
+                from .plugins import sync_rows
+
+                rows = sync_rows(obj)
+            else:
+                rows = logic.fetch_connector(obj)
         except RuntimeError as e:
             raise ApiError(str(e))
         return {"rows": rows[:20], "total": len(rows), "columns": list(dict.fromkeys(k for r in rows[:200] for k in r))}
@@ -2319,3 +2325,160 @@ def timezone_now_of(dt):
 def _csv_safe(v):
     s = str(v)
     return "'" + s if s[:1] in ("=", "+", "-", "@") else s  # no formulas when opened in Excel
+
+
+# --- plugins (other programs) ---------------------------------------------------------------------
+
+def _plugin_err(e):
+    field = next(iter(e.fields), None) if getattr(e, "fields", None) else None
+    return ApiError(str(e), status=e.status if e.status < 500 else 400, field=field)
+
+
+def _own_ports(request):
+    from buildweb import config
+
+    cfg = config.load()
+    ports = {int(request.get_port() or 0), int((cfg.get("hosting") or {}).get("port") or 0),
+             int((cfg.get("team") or {}).get("port") or 0)}
+    ports |= set(Site.objects.exclude(host_port=None).values_list("host_port", flat=True))
+    return ports
+
+
+@api
+def site_plugins(request, site_id):
+    """GET the site's plugins · POST {"found": {...from discover}, "name", "syncs": [...], "pages": [...]} connects one,
+    or {"manifest": {...}, "base_url"} adds one from a hand-written manifest."""
+    from . import plugins
+
+    site = get_object_or_404(Site, pk=site_id)
+    report = []
+    if request.method == "POST":
+        d = body(request)
+        try:
+            if d.get("manifest"):
+                m = d["manifest"]
+                if isinstance(m, str):
+                    try:
+                        m = json.loads(m)
+                    except ValueError as e:
+                        raise ApiError(f"manifest ไม่ใช่ JSON ที่ถูกต้อง: {e}", field="manifest")
+                found = {"url": d.get("base_url"), "kind": "manifest", "manifest": m}
+            elif d.get("found"):
+                found = d["found"]
+                if found.get("kind") in plugins.PRESETS:  # presets come from this app, not from the request
+                    found = {**found, "manifest": plugins.PRESETS[found["kind"]]}
+            else:
+                raise ApiError("ไม่มีข้อมูลโปรแกรม")
+            headers = _clean_headers(d.get("headers")) if d.get("headers") else {}
+            p, report = plugins.setup(site, found, name=(d.get("name") or "").strip(), headers=headers,
+                                      syncs=d.get("syncs") or [], pages=d.get("pages") or [])
+        except plugins.PluginError as e:
+            raise _plugin_err(e)
+    return {"plugins": [plugins.to_json(p) for p in site.plugins.all()], "report": report,
+            "presets": [{"id": k, "name": v["name"], "description": v["description"]} for k, v in plugins.PRESETS.items()],
+            "collections": [{"slug": c.slug, "name": c.name} for c in site.collections.all()]}
+
+
+@require_POST
+@api
+def plugins_discover(request, site_id):
+    from . import plugins
+
+    get_object_or_404(Site, pk=site_id)
+    url = (body(request).get("url") or "").strip()
+    try:
+        if url:
+            found = plugins.probe(url)
+            if not found:
+                raise ApiError(f"ไม่มีโปรแกรมตอบที่ {url} — เปิดโปรแกรมนั้นอยู่หรือเปล่า", field="url")
+            return {"found": [found]}
+        return {"found": plugins.discover(exclude_ports=_own_ports(request))}
+    except plugins.PluginError as e:
+        raise _plugin_err(e)
+
+
+@require_POST
+@api
+def plugin_action(request, plugin_id, action):
+    """POST /api/plugins/<id>/<save|check|delete|refresh|page|call|sync> (call/sync/page take ?key=)."""
+    from . import logic, plugins
+    from .models import Connector, Plugin
+
+    p = get_object_or_404(Plugin, pk=plugin_id)
+    site, d, key = p.site, body(request), request.GET.get("key", "")
+    try:
+        if action == "delete":
+            for c in Connector.objects.filter(site=site, plugin=p.slug):
+                site.jobs.filter(action="run_connector", params__connector=c.id).delete()
+                c.delete()
+            p.delete()
+            return {"plugins": [plugins.to_json(x) for x in site.plugins.all()]}
+        if action == "save":
+            if "name" in d:
+                p.name = (d.get("name") or "").strip()[:100] or p.name
+            if "base_url" in d:
+                p.base_url = plugins.clean_base(d.get("base_url"))
+            if "headers" in d:
+                p.headers = _clean_headers(d.get("headers"))
+            if "enabled" in d:
+                p.enabled = as_bool(d.get("enabled"))
+            if d.get("manifest"):
+                m = d["manifest"]
+                p.manifest = plugins.clean_manifest(json.loads(m) if isinstance(m, str) else m)
+            s = dict(p.settings or {})
+            for group, allowed in (("access", plugins.ACCESS), ("save", None)):
+                vals = d.get(group)
+                if isinstance(vals, dict):
+                    cur = dict(s.get(group) or {})
+                    for k, v in vals.items():
+                        if k not in p.manifest.get("actions", {}):
+                            continue
+                        v = str(v or "")
+                        if allowed and v not in allowed:
+                            raise ApiError("สิทธิ์ต้องเป็น off / public / user")
+                        if group == "save" and v not in ("", "new") and not site.collections.filter(slug=v).exists():
+                            raise ApiError("ไม่พบชุดข้อมูลที่เลือก")
+                        cur[k] = v
+                    s[group] = cur
+            p.settings = s
+            p.save()
+            for c in Connector.objects.filter(site=site, plugin=p.slug):  # keep the shown URL in step with the address
+                spec = p.manifest.get("syncs", {}).get(c.plugin_sync)
+                if spec:
+                    c.url = p.base_url + spec["path"]
+                    c.save(update_fields=["url"])
+            return {"plugin": plugins.to_json(p)}
+        if action == "check":
+            ok, msg = plugins.check(p)
+            return {"ok_check": ok, "message": msg, "plugin": plugins.to_json(p)}
+        if action == "refresh":  # read the manifest again from the program (or the preset)
+            if p.kind in plugins.PRESETS:
+                p.manifest = plugins.clean_manifest(plugins.PRESETS[p.kind])
+            else:
+                found = plugins.probe(p.base_url)
+                if not found or found["how"] == "web":
+                    raise ApiError("โปรแกรมนี้ไม่ได้ส่งรายละเอียด (manifest / OpenAPI) — แก้ manifest เองได้")
+                p.manifest = found["manifest"]
+            p.save(update_fields=["manifest"])
+            return {"plugin": plugins.to_json(p)}
+        if action == "call":
+            files = {k: (f.name, f.content_type or "application/octet-stream", f.read()) for k, f in request.FILES.items()}
+            values = d.get("values") if isinstance(d.get("values"), dict) else {k: v for k, v in d.items() if k != "_save"}
+            return plugins.call(p, key, values, files, save=as_bool(d.get("_save")), owner=True)
+        if action == "sync":
+            if key not in p.manifest.get("syncs", {}):
+                raise ApiError("ไม่พบรายการนี้", status=404)
+            conn = plugins.ensure_sync(p, key, (p.manifest["syncs"][key]["every"] or "every 10 min") if as_bool(d.get("schedule")) else None)
+            try:
+                n = logic.run_connector(conn)
+            except RuntimeError as e:
+                raise ApiError(str(e))
+            return {"message": f"ดึงข้อมูล {n} แถว", "plugin": plugins.to_json(p)}
+        if action == "page":
+            if key not in p.manifest.get("actions", {}):
+                raise ApiError("ไม่พบคำสั่งนี้", status=404)
+            page = plugins.make_page(p, key)
+            return {"page": page_json(page), "plugin": plugins.to_json(p)}
+    except plugins.PluginError as e:
+        raise _plugin_err(e)
+    raise ApiError("unknown action", status=404)

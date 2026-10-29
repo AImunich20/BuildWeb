@@ -159,13 +159,14 @@ def handle(request, site, path, base_url="", root_path="/"):
     segs = path.strip("/").split("/")
     is_auth = segs[:2] == ["v1", "auth"]
     is_shop = segs[:2] == ["v1", "shop"]
+    is_plugin = segs[:2] == ["v1", "plugins"]
     try:
         if request.method == "OPTIONS":
             resp = HttpResponse(status=204)
             status = 204
             return cors(resp, site, request)
         cfg = site_settings(site)
-        if not cfg["enabled"] and not owner and not is_auth and not is_shop:
+        if not cfg["enabled"] and not owner and not is_auth and not is_shop and not is_plugin:
             raise ApiError(404, "api_disabled", "API ของเว็บนี้ยังไม่ได้เปิดใช้งาน")
         key = find_key(request, site)
         if not owner:
@@ -176,6 +177,8 @@ def handle(request, site, path, base_url="", root_path="/"):
             resp = route_auth(request, site, rest)
         elif is_shop:
             resp = route_shop(request, site, rest)
+        elif is_plugin:
+            resp = route_plugin(request, site, rest, owner)
         else:
             resp = route(request, site, path.strip("/"), key, owner, base_url)
         status = resp.status_code
@@ -325,6 +328,24 @@ def call_fn(request, site, slug, key, owner, user):
                "user": members.user_json(user) if user else None}
     status, out, _ = logic.call_function(fn, payload)
     return JsonResponse(out, status=int(status), safe=False, json_dumps_params={"ensure_ascii": False})
+
+
+# --- plugins --------------------------------------------------------------------------------------
+
+def route_plugin(request, site, rest, owner):
+    """POST plugins/<slug>/<action> — a page form calling another program (see plugins.py)."""
+    from . import plugins
+
+    parts = [p for p in rest.split("/") if p]
+    if len(parts) != 2:
+        raise ApiError(404, "not_found", "ใช้ /api/v1/plugins/<ปลั๊กอิน>/<คำสั่ง>")
+    if request.method != "POST":
+        raise ApiError(405, "method_not_allowed", "ใช้ POST")
+    plugin = site.plugins.filter(slug=parts[0], enabled=True).first()
+    try:
+        return ok(plugins.public_call(plugin, parts[1], request, getattr(request, "_bw_user", None), owner))
+    except plugins.PluginError as e:
+        raise ApiError(e.status, e.code, str(e), e.fields)
 
 
 # --- shop -----------------------------------------------------------------------------------------
