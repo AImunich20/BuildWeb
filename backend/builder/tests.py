@@ -1951,3 +1951,150 @@ class ReleaseTests(TestCase):
         self.assertEqual(c.get(f"/api/sites/{self.site.id}/releases", **{"buildweb.team": True}).status_code, 403)
         self.assertEqual(c.get(f"/api/releases/{v.id}/file.bwsite", **{"buildweb.team": True}).status_code, 403)
         self.assertEqual(c.post(f"/api/sites/{self.site.id}/domain", "{}", content_type="application/json", **{"buildweb.team": True}).status_code, 403)
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class SpecialPageTests(TestCase):
+    """v0.9: pages only members who meet conditions may open (Page.access == "rules")."""
+
+    def setUp(self):
+        from . import generate, members
+
+        members._attempts.clear()
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Club", "blank")
+        self.site.auth = {"enabled": True, "roles": ["member", "vip", "gold"]}
+        self.site.save()
+        generate.create_member_pages(self.site)
+        self.page = self.site.pages.create(title="Pro", slug="pro", html="<h1>PRO {{user.name}}</h1>")
+        self.pricing = self.site.pages.create(title="แพ็กเกจ", slug="pricing", html="<h1>pricing</h1>")
+        self.root = f"/{self.site.slug}/"
+        self.pub = {"buildweb.public": True}
+        self.user = members.create_user(self.site, "ann@corp.co.th", "secret123", "Ann", role="member", verified=True)
+
+    def set_rules(self, rules):
+        r = self.c.post(f"/api/pages/{self.page.id}/update", json.dumps({"access": "rules", "access_rules": rules}),
+                        content_type="application/json")
+        self.page.refresh_from_db()
+        return r
+
+    def login(self, client, email="ann@corp.co.th"):
+        client.post(f"{self.root}api/v1/auth/login", json.dumps({"email": email, "password": "secret123"}),
+                    content_type="application/json", **self.pub)
+
+    def test_conditions_all_any_and_deny(self):
+        from . import access
+
+        r = self.set_rules({"match": "all", "conditions": [
+            {"type": "role", "values": ["vip", "gold"]}, {"type": "field", "field": "plan", "op": "eq", "value": "pro"}],
+            "deny": {"message": "สำหรับ VIP <b>เท่านั้น</b>"}})
+        self.assertEqual(r.status_code, 200, r.content)
+        anon = Client().get(f"{self.root}pro.html", **self.pub)
+        self.assertEqual(anon.status_code, 302)
+        self.assertIn("login.html?next=pro.html", anon["Location"])
+        cl = Client()
+        self.login(cl)
+        denied = cl.get(f"{self.root}pro.html", **self.pub)
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn("สำหรับ VIP &lt;b&gt;เท่านั้น&lt;/b&gt;", denied.content.decode())  # owner text is escaped
+        self.user.role = "vip"
+        self.user.save()
+        self.assertEqual(cl.get(f"{self.root}pro.html", **self.pub).status_code, 403)  # plan still missing
+        self.user.profile = {"plan": "PRO"}
+        self.user.save()
+        self.assertContains(cl.get(f"{self.root}pro.html", **self.pub), "PRO Ann")
+        # "any" + redirect for those who don't qualify
+        self.set_rules({"match": "any", "conditions": [{"type": "email_domain", "values": ["@school.ac.th"]},
+                                                       {"type": "member_days", "value": 30}], "deny": {"redirect": "pricing"}})
+        r = cl.get(f"{self.root}pro.html", **self.pub)
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r["Location"].endswith("/pricing.html"))
+        self.user.created_at = self.user.created_at - __import__("datetime").timedelta(days=31)
+        self.user.save()
+        self.assertEqual(cl.get(f"{self.root}pro.html", **self.pub).status_code, 200)
+        # menu: hidden for those who can't open it, admins see everything
+        self.assertTrue(access.evaluate(self.page, self.user)[0])
+        self.user.role = "admin"
+        self.user.created_at = __import__("django.utils.timezone", fromlist=["now"]).now()
+        self.user.save()
+        self.assertTrue(access.evaluate(self.page, self.user)[0])
+        files, _ = render.build_files(self.site)
+        self.assertNotIn("pro.html", files)  # never in static exports
+        self.assertIn("pricing.html", files)
+
+    def test_purchase_list_date_and_profile_expiry(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import access, shop
+
+        prod, orders = shop.ensure_collections(self.site)
+        course = Record.objects.create(collection=prod, data={"name": "คอร์ส A", "price": 990, "active": True})
+        other = Record.objects.create(collection=prod, data={"name": "เสื้อ", "price": 200, "active": True})
+        page = self.page
+        page.access = "rules"
+        page.access_rules = access.clean({"conditions": [{"type": "purchased", "product": str(course.id)}]}, self.site)
+        self.assertFalse(access.evaluate(page, self.user)[0])
+        Record.objects.create(collection=orders, data={"number": "1", "status": "pending", "email": "ANN@corp.co.th",
+                                                       "items": [{"id": course.id, "qty": 1}]})
+        self.assertFalse(access.evaluate(page, self.user)[0])  # not paid yet
+        Record.objects.create(collection=orders, data={"number": "2", "status": "paid", "items": [{"id": other.id, "qty": 1}]},
+                              owner=self.user)
+        self.assertFalse(access.evaluate(page, self.user)[0])  # paid, but another product
+        Record.objects.create(collection=orders, data={"number": "3", "status": "paid", "items": [{"id": course.id, "qty": 1}]},
+                              owner=self.user)
+        self.assertTrue(access.evaluate(page, self.user)[0])
+        # an email list kept as a collection
+        vip = Collection.objects.create(site=self.site, name="VIP", slug="vip-list", fields=[{"name": "email", "type": "email"}])
+        page.access_rules = access.clean({"conditions": [{"type": "in_collection", "collection": "vip-list", "field": "email"}]}, self.site)
+        self.assertFalse(access.evaluate(page, self.user)[0])
+        Record.objects.create(collection=vip, data={"email": "Ann@Corp.co.th"})
+        self.assertTrue(access.evaluate(page, self.user)[0])
+        # subscription that expires: profile date in the future
+        page.access_rules = access.clean({"conditions": [{"type": "field", "field": "expires", "op": "future"}]}, self.site)
+        self.user.profile = {"expires": (timezone.localdate() - timedelta(days=1)).isoformat()}
+        self.assertFalse(access.evaluate(page, self.user)[0])
+        self.user.profile = {"expires": (timezone.localdate() + timedelta(days=10)).isoformat()}
+        self.assertTrue(access.evaluate(page, self.user)[0])
+        # a page open only during a period needs no login
+        now = timezone.localtime()
+        page.access_rules = access.clean({"conditions": [{"type": "date_between", "from": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+                                                          "to": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")}]}, self.site)
+        self.assertTrue(access.evaluate(page, None)[0])
+        self.assertFalse(access.needs_login(page))
+        page.save()
+        self.assertEqual(Client().get(f"{self.root}pro.html", **self.pub).status_code, 200)
+        page.access_rules = access.clean({"conditions": [{"type": "date_between", "from": (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")}],
+                                          "deny": {"message": "เปิดพรุ่งนี้"}}, self.site)
+        page.save()
+        r = Client().get(f"{self.root}pro.html", **self.pub)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("เปิดพรุ่งนี้", r.content.decode())
+
+    def test_validation_tester_and_backup(self):
+        from io import BytesIO
+
+        from . import backup
+
+        self.assertEqual(self.set_rules({"conditions": []}).status_code, 400)
+        self.assertEqual(self.set_rules({"conditions": [{"type": "field", "field": "a b", "op": "eq"}]}).status_code, 400)
+        self.assertEqual(self.set_rules({"conditions": [{"type": "in_collection", "collection": "nope"}]}).status_code, 400)
+        self.assertEqual(self.set_rules({"conditions": [{"type": "hack"}]}).status_code, 400)
+        self.assertEqual(self.set_rules({"conditions": [{"type": "verified"}], "deny": {"redirect": "missing"}}).status_code, 400)
+        home = self.site.home_page()
+        r = self.c.post(f"/api/pages/{home.id}/update", json.dumps({"access": "rules", "access_rules": {"conditions": [{"type": "verified"}]}}),
+                        content_type="application/json")
+        self.assertEqual(r.status_code, 400)  # the home page stays open to everyone
+        self.assertEqual(self.set_rules({"conditions": [{"type": "role", "values": ["vip"]}]}).status_code, 200)
+        info = self.c.get(f"/api/pages/{self.page.id}/access").json()
+        self.assertIn("purchased", info["types"])
+        t = self.c.post(f"/api/pages/{self.page.id}/access", json.dumps({"email": "ann@corp.co.th"}), content_type="application/json").json()
+        self.assertFalse(t["allowed"])
+        self.assertEqual(t["results"][0]["text"], "บทบาท vip")
+        t = self.c.post(f"/api/pages/{self.page.id}/access", json.dumps({"email": "ann@corp.co.th", "access_rules": {
+            "conditions": [{"type": "verified"}]}}), content_type="application/json").json()
+        self.assertTrue(t["allowed"])  # try rules before saving them
+        copy = backup.import_site(BytesIO(backup.export_bytes(self.site)), mode="new")
+        self.assertEqual(copy.pages.get(slug="pro").access_rules["conditions"], [{"type": "role", "values": ["vip"]}])

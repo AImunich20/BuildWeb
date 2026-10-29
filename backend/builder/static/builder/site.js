@@ -669,7 +669,7 @@
         <td><div class="page-title">${p.is_home ? '<span class="badge" style="height:18px;margin-right:6px">หน้าแรก</span>' : ''}${p.parent ? '<span class="muted">↳ </span>' : ''}${esc(p.title)}
           <small>${p.parent && byId[p.parent] ? 'อยู่ใต้ ' + esc(byId[p.parent].title) + ' · ' : ''}${p.seo_description ? esc(p.seo_description.slice(0, 70)) : 'ยังไม่มีคำอธิบาย SEO'}</small></div></td>
         <td class="mono small">${p.collection ? `${esc(p.slug)}/…html<div><span class="badge brand" title="สร้างหนึ่งหน้าต่อหนึ่งแถวของชุดข้อมูล">รายละเอียด: ${esc(p.collection_name)}</span></div>` : esc(p.filename)}</td>
-        <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}${p.access ? `<div><span class="badge brand" title="หน้านี้ไม่ถูกส่งออกเป็นไฟล์">${p.access === 'members' ? 'สมาชิก' : esc(p.access.slice(5))}</span></div>` : ''}</td>
+        <td>${p.status === 'published' ? '<span class="badge ok">เผยแพร่</span>' : '<span class="badge warn">ฉบับร่าง</span>'}${p.access ? `<div><span class="badge brand" title="หน้านี้ไม่ถูกส่งออกเป็นไฟล์">${p.access === 'members' ? 'สมาชิก' : p.access === 'rules' ? 'หน้าพิเศษ · ' + ((p.access_rules || {}).conditions || []).length + ' เงื่อนไข' : esc(p.access.slice(5))}</span></div>` : ''}</td>
         <td>${p.show_in_nav && !p.collection ? esc(p.nav_label || p.title) : '<span class="muted">ซ่อน</span>'}</td>
         <td><button class="seo-score sm" data-seo="${p.id}" title="ดูรายละเอียด SEO">…</button></td>
         <td class="muted small">${ago(p.updated_at)}</td>
@@ -791,13 +791,15 @@
         <div class="grid g2" style="gap:0 16px"><label class="field"><span>ชื่อในเมนู <small>(เว้นว่าง = ใช้ชื่อหน้า)</small></span><input class="input" name="nav_label" value="${esc(p.nav_label)}" maxlength="100"></label>
           <label class="field"><span>ใครเปิดหน้านี้ได้</span><select class="input" name="access" ${p.is_home ? 'disabled' : ''}>
             <option value="">ทุกคน</option><option value="members" ${p.access === 'members' ? 'selected' : ''}>เฉพาะสมาชิกที่ล็อกอิน</option>
-            ${(D.roles || []).map(r => `<option value="role:${esc(r)}" ${p.access === 'role:' + r ? 'selected' : ''}>เฉพาะบทบาท ${esc(r)}</option>`).join('')}</select>
+            ${(D.roles || []).map(r => `<option value="role:${esc(r)}" ${p.access === 'role:' + r ? 'selected' : ''}>เฉพาะบทบาท ${esc(r)}</option>`).join('')}
+            ${isNew ? '' : `<option value="rules" ${p.access === 'rules' ? 'selected' : ''}>หน้าพิเศษ: ตามเงื่อนไขที่กำหนด…</option>`}</select>
             ${D.members_on ? '' : `<small>ต้อง<a href="/sites/${site.id}/members/">เปิดระบบสมาชิก</a>ก่อน</small>`}</label></div>
         ${(D.collections || []).length ? `<div class="grid g2" style="gap:0 16px">
           <label class="field"><span>หน้ารายละเอียดของชุดข้อมูล <small>(หนึ่งหน้าต่อหนึ่งแถว)</small></span><select class="input" name="collection" ${p.is_home ? 'disabled' : ''}>
             <option value="">— หน้าปกติ —</option>${D.collections.map(c => `<option value="${c.id}" ${c.id === p.collection ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
             <small>ลิงก์จะเป็น <code>${esc(p.slug || 'ชื่อหน้า')}/ชื่อแถว.html</code> · ใช้ <code>{{ฟิลด์}}</code> ในหน้าและในชื่อเรื่อง/คำอธิบายได้</small></label>
           <label class="field" id="df-wrap"><span>ใช้ฟิลด์ไหนตั้งชื่อลิงก์</span><select class="input" name="detail_field"></select></label></div>` : ''}
+        <div id="rules-box"></div>
         ${isNew ? `<div class="sect-title">รูปแบบเริ่มต้น</div><div class="grid g3" style="gap:10px" id="layouts">${layouts}</div>` : ''}
         <div class="sect-title">SEO & การแชร์</div>
         <label class="field"><span>ชื่อเรื่องบน Google <small>(เว้นว่าง = “ชื่อหน้า | ชื่อเว็บ”)</small></span><input class="input" name="seo_title" value="${esc(p.seo_title)}" maxlength="200"></label>
@@ -828,6 +830,14 @@
       m.el.querySelector('#share-live').innerHTML = sharePreview({ title: t, description: desc.value || site.description, image: m.el.querySelector('[name=og_image]').value });
     };
     ['seo_title', 'seo_description', 'og_image', 'title'].forEach(n => m.el.querySelector(`[name=${n}]`).addEventListener('input', live)); live();
+    const accSel = m.el.querySelector('[name=access]');
+    let rulesUI = null;
+    const syncRules = async () => {
+      const box = m.el.querySelector('#rules-box');
+      if (accSel.value !== 'rules') { box.innerHTML = ''; rulesUI = null; return; }
+      if (!rulesUI) rulesUI = await rulesBuilder(box, p);
+    };
+    accSel.addEventListener('change', syncRules); syncRules();
     const colSel = m.el.querySelector('[name=collection]'), dfSel = m.el.querySelector('[name=detail_field]');
     const drawDf = () => {
       const c = (D.collections || []).find(x => x.id === +colSel.value);
@@ -844,6 +854,7 @@
       if (!p.is_home && !d.is_home) delete d.is_home;
       if (colSel && colSel.disabled) { delete d.collection; delete d.detail_field; }
       if (p.is_home) delete d.access;
+      if (d.access === 'rules') { if (!rulesUI) return; d.access_rules = rulesUI(); }
       try {
         const r = isNew ? await api(`/api/sites/${site.id}/pages/create`, d) : await api(`/api/pages/${p.id}/update`, d);
         if (isNew) {
@@ -853,6 +864,73 @@
         } else location.reload();
       } catch (e) { showFieldError(m.el, e); }
     };
+  }
+
+  // ---------------------------------------------------------------- special pages: access conditions
+  async function rulesBuilder(box, p) {
+    box.innerHTML = '<div class="muted small">กำลังโหลด…</div>';
+    let A;
+    try { A = await api(`/api/pages/${p.id}/access`); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return null; }
+    const R = JSON.parse(JSON.stringify(A.rules && A.rules.conditions ? A.rules : { match: 'all', conditions: [{ type: 'role', values: [] }], deny: {} }));
+    const opt = (list, cur) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const roles = (D.roles || []).filter(r => r !== 'admin');
+    const params = c => {
+      const inp = (k, ph, extra = '') => `<input class="input" data-k="${k}" value="${esc(Array.isArray(c[k]) ? c[k].join(', ') : (c[k] ?? ''))}" placeholder="${esc(ph)}" ${extra}>`;
+      switch (c.type) {
+        case 'role': return `<div class="row" style="gap:12px">${roles.map(r => `<label class="check"><input type="checkbox" data-role="${esc(r)}" ${(c.values || []).includes(r) ? 'checked' : ''}>${esc(r)}</label>`).join('') || '<span class="small muted">ยังไม่มีบทบาท — เพิ่มที่แท็บสมาชิก</span>'}</div>`;
+        case 'verified': return '<span class="small muted">สมาชิกที่กดยืนยันอีเมลแล้ว</span>';
+        case 'field': return `<div class="row" style="gap:6px;flex-wrap:nowrap">${inp('field', 'ชื่อฟิลด์ เช่น plan', 'list="rb-fields" style="max-width:150px"')}<select class="input" data-k="op" style="max-width:220px">${opt(Object.entries(A.ops), c.op || 'eq')}</select>${inp('value', 'ค่า เช่น pro หรือ 2026-12-31')}</div>`;
+        case 'email_domain': return inp('values', 'company.co.th, school.ac.th');
+        case 'member_days': return `<div class="row" style="gap:6px;flex-wrap:nowrap">${inp('value', '30', 'type="number" min="0" style="max-width:120px"')}<span class="small muted">วันขึ้นไป</span></div>`;
+        case 'purchased': return `<div class="row" style="gap:6px;flex-wrap:nowrap"><select class="input" data-k="product"><option value="">สินค้าใดก็ได้</option>${opt(A.products.map(x => [x.id, x.name]), c.product)}</select>
+          <span class="small muted" style="white-space:nowrap">ภายใน</span>${inp('since_days', 'ไม่จำกัด', 'type="number" min="0" style="max-width:110px"')}<span class="small muted">วัน</span></div>
+          ${A.products.length ? '' : '<div class="small muted">ยังไม่มีร้านค้า — เปิดที่แท็บร้านค้า</div>'}<div class="small muted">นับเฉพาะคำสั่งซื้อที่ชำระแล้ว/จัดส่ง/สำเร็จ ของบัญชีนี้หรืออีเมลเดียวกัน</div>`;
+        case 'in_collection': { const col = A.collections.find(x => x.slug === c.collection) || A.collections[0];
+          return `<div class="row" style="gap:6px;flex-wrap:nowrap"><select class="input" data-k="collection">${opt(A.collections.map(x => [x.slug, x.name]), c.collection)}</select>
+          <span class="small muted" style="white-space:nowrap">ฟิลด์อีเมล</span><select class="input" data-k="field" style="max-width:160px">${opt(((col && col.fields) || []).map(f => [f, f]), c.field || 'email')}</select></div>
+          <div class="small muted">เช่น ชุดข้อมูล “รายชื่อ VIP” หรือ “นักเรียนคอร์ส A” — มีอีเมลของสมาชิกอยู่ = เข้าได้</div>`; }
+        case 'date_between': return `<div class="row" style="gap:6px;flex-wrap:nowrap">${inp('from', '', 'type="datetime-local"')}<span class="small muted">ถึง</span>${inp('to', '', 'type="datetime-local"')}</div>`;
+      }
+      return '';
+    };
+    const read = () => {
+      box.querySelectorAll('[data-cond]').forEach((row, i) => {
+        const c = { type: row.querySelector('[data-type]').value };
+        row.querySelectorAll('[data-k]').forEach(x => c[x.dataset.k] = x.value);
+        if (c.type === 'role') c.values = [...row.querySelectorAll('[data-role]:checked')].map(x => x.dataset.role);
+        if (c.type === 'email_domain') c.values = (c.values || '').split(',').map(x => x.trim()).filter(Boolean);
+        R.conditions[i] = c;
+      });
+      R.match = box.querySelector('[data-match]').value;
+      R.deny = { message: box.querySelector('[data-deny=message]').value, redirect: box.querySelector('[data-deny=redirect]').value };
+      return R;
+    };
+    const draw = () => {
+      box.innerHTML = `<div class="pub-form" style="margin:4px 0 14px"><div class="row between" style="margin-bottom:8px"><b>เงื่อนไขของหน้าพิเศษ</b>
+          <label class="row small" style="gap:6px">เข้าได้เมื่อ<select class="input" data-match style="width:auto"><option value="all" ${R.match !== 'any' ? 'selected' : ''}>ตรงครบทุกข้อ</option><option value="any" ${R.match === 'any' ? 'selected' : ''}>ตรงข้อใดข้อหนึ่ง</option></select></label></div>
+        <datalist id="rb-fields">${A.profile_fields.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+        ${R.conditions.map((c, i) => `<div data-cond="${i}" style="display:grid;grid-template-columns:200px 1fr auto;gap:8px;align-items:start;padding:8px 0;border-top:1px solid var(--line)">
+          <select class="input" data-type>${opt(Object.entries(A.types), c.type)}</select><div>${params(c)}</div><button class="btn ghost icon sm" data-rm="${i}" title="ลบเงื่อนไข">${BW_ICON('trash')}</button></div>`).join('')}
+        <button class="btn sm" type="button" data-add>${BW_ICON('plus')} เพิ่มเงื่อนไข</button>
+        <div class="grid g2" style="gap:0 14px;margin-top:12px"><label class="field"><span>คนที่ไม่ผ่านเงื่อนไขเห็นข้อความ</span><input class="input" data-deny="message" value="${esc((R.deny || {}).message || '')}" placeholder="หน้านี้สำหรับสมาชิก VIP — อัปเกรดได้ที่หน้าแพ็กเกจ"></label>
+          <label class="field"><span>หรือพาไปหน้า</span><select class="input" data-deny="redirect"><option value="">— แสดงข้อความ —</option>${opt(A.pages.map(x => [x.slug, x.title]), (R.deny || {}).redirect)}</select></label></div>
+        <div class="small muted">ผู้ที่ยังไม่ล็อกอินจะถูกพาไปหน้าเข้าสู่ระบบ · สมาชิกบทบาท admin เข้าได้ทุกหน้า · หน้าพิเศษไม่ถูกส่งออกเป็นไฟล์ static (ต้องโฮสต์ด้วย BuildWeb หรือเซิร์ฟเวอร์ของฉัน)</div>
+        <div class="row" style="gap:6px;margin-top:10px;flex-wrap:nowrap"><input class="input" data-test placeholder="ทดสอบด้วยอีเมลสมาชิก (${A.members} คน)" style="max-width:300px"><button class="btn sm" type="button" data-try>ทดสอบ</button></div><div data-result></div></div>`;
+      box.querySelectorAll('[data-type]').forEach((sel, i) => sel.onchange = () => { read(); R.conditions[i] = { type: sel.value }; draw(); });
+      box.querySelectorAll('[data-k=collection]').forEach(sel => sel.onchange = () => { read(); draw(); });
+      box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { read(); R.conditions.splice(+b.dataset.rm, 1); draw(); });
+      box.querySelector('[data-add]').onclick = () => { read(); R.conditions.push({ type: 'verified' }); draw(); };
+      box.querySelector('[data-try]').onclick = async () => {
+        const out = box.querySelector('[data-result]');
+        try {
+          const r = await api(`/api/pages/${p.id}/access`, { email: box.querySelector('[data-test]').value, access_rules: read() });
+          out.innerHTML = `<div class="alert ${r.allowed ? 'ok' : 'warn'}" style="margin-top:8px"><div><b>${r.allowed ? 'เข้าได้' : 'เข้าไม่ได้'}</b>${r.admin ? ' (บทบาท admin เข้าได้ทุกหน้า)' : ''}
+            <ul class="small" style="margin:4px 0 0;padding-left:18px">${r.results.map(x => `<li>${x.ok ? '✓' : '✗'} ${esc(x.text)}</li>`).join('')}</ul></div></div>`;
+        } catch (e) { out.innerHTML = `<div class="alert err" style="margin-top:8px">${esc(e.message)}</div>`; }
+      };
+    };
+    draw();
+    return read;
   }
 
   // ---------------------------------------------------------------- files

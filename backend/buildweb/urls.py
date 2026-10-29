@@ -112,6 +112,7 @@ urlpatterns = [
     path("api/releases/<int:release_id>/diff", api.release_diff),
     path("api/releases/<int:release_id>/file.bwsite", api.release_file),
     path("api/sites/<int:site_id>/domain", api.site_domain),
+    path("api/pages/<int:page_id>/access", api.page_access),
     path("api/team", api.team_settings),
     path("api/team/members", api.team_member_save),
     path("api/team/members/<int:user_id>/delete", api.team_member_delete),

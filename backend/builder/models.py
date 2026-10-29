@@ -116,7 +116,8 @@ class Page(models.Model):
                                    related_name="detail_pages", verbose_name="หน้ารายละเอียดของชุดข้อมูล")
     detail_field = models.CharField("ฟิลด์ที่ใช้ตั้งชื่อลิงก์", max_length=60, blank=True)
     # "" = everyone · "members" = signed-in site users · "role:vip,staff" = those roles only
-    access = models.CharField("ใครเปิดหน้านี้ได้", max_length=200, blank=True, default="")
+    access = models.CharField("ใครเปิดหน้านี้ได้", max_length=200, blank=True, default="")  # "" | members | role:a,b | rules
+    access_rules = models.JSONField("เงื่อนไขการเข้าหน้า", default=dict, blank=True)  # see access.py
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

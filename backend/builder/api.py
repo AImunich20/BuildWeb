@@ -186,6 +186,7 @@ def page_json(p):
         "seo_keywords": p.seo_keywords, "og_image": p.og_image, "noindex": p.noindex, "head_code": p.head_code,
         "custom_css": p.custom_css, "custom_js": p.custom_js, "filename": p.filename,
         "collection": p.collection_id, "detail_field": p.detail_field, "access": p.access,
+        "access_rules": p.access_rules or {},
         "collection_slug": p.collection.slug if p.collection_id else "",
         "collection_name": p.collection.name if p.collection_id else "",
         "updated_at": p.updated_at.isoformat(), "edit_url": f"/sites/{p.site_id}/edit/{p.id}/",
@@ -212,8 +213,15 @@ def apply_page_fields(page, d):
         page.detail_field = (d["detail_field"] or "")[:60]
     if "access" in d:
         a = (d["access"] or "").strip()
-        if a and a != "members" and not re.fullmatch(r"role:[a-z0-9_,-]+", a):
+        if a and a not in ("members", "rules") and not re.fullmatch(r"role:[a-z0-9_,-]+", a):
             raise ApiError("ตั้งค่าการเข้าถึงไม่ถูกต้อง", field="access")
+        if a == "rules":
+            from . import access
+
+            try:
+                page.access_rules = access.clean(d.get("access_rules") or page.access_rules or {}, page.site)
+            except (access.RuleError, ValueError, TypeError) as e:
+                raise ApiError(str(e) if isinstance(e, access.RuleError) else "ค่าของเงื่อนไขไม่ถูกต้อง", field="access")
         page.access = a
         if a and page.is_home:
             raise ApiError("หน้าแรกต้องเปิดให้ทุกคน — สร้างหน้าแยกสำหรับสมาชิก", field="access")
@@ -248,7 +256,7 @@ def page_create(request, site_id):
     probe = Page(site=site, title=title)
     apply_page_fields(probe, d)
     fields = {f: getattr(probe, f) for f in PAGE_FIELDS + ("show_in_nav", "noindex", "use_header", "use_footer", "status", "parent_id",
-                                                           "collection_id", "detail_field", "access")
+                                                           "collection_id", "detail_field", "access", "access_rules")
               if f != "title"}
     page = services.create_page(site, title, slug, d.get("layout") or "basic", **fields)
     if as_bool(d.get("is_home")):
@@ -2225,3 +2233,37 @@ def site_domain(request, site_id):
         raise ApiError(str(e))
     return {**out, "token_set": bool(cloudflare.token()), "domain": (site.publish or {}).get("domain"),
             "targets": {t: publish.LABELS[t] for t in publish.RUNNERS}}
+
+
+# --- special pages: access conditions -------------------------------------------------------------
+
+@api
+def page_access(request, page_id):
+    """GET: what the condition builder needs · POST {email, access_rules?}: would this member get in?"""
+    from . import access, shop
+
+    page = get_object_or_404(Page, pk=page_id)
+    site = page.site
+    if request.method == "POST":
+        d = body(request)
+        user = site.members.filter(email__iexact=(d.get("email") or "").strip()).first()
+        if not user:
+            raise ApiError("ไม่พบสมาชิกอีเมลนี้", field="email")
+        probe = Page(site=site, access="rules", access_rules=page.access_rules)
+        if d.get("access_rules"):
+            try:
+                probe.access_rules = access.clean(d["access_rules"], site)
+            except (access.RuleError, ValueError, TypeError) as e:
+                raise ApiError(str(e) if isinstance(e, access.RuleError) else "ค่าของเงื่อนไขไม่ถูกต้อง")
+        ok, results = access.evaluate(probe, user)
+        return {"allowed": ok, "admin": user.role == "admin",
+                "results": [{"text": access.describe(c), "ok": r} for c, r in results]}
+    prod = shop.products_col(site)
+    keys = set()
+    for prof in site.members.values_list("profile", flat=True)[:500]:
+        keys |= {k for k in (prof or {}) if access.NAME_RE.match(str(k))}
+    return {"rules": page.access_rules or {}, "types": access.TYPES, "ops": access.OPS,
+            "products": [{"id": r.id, "name": str(r.data.get("name") or r.id)} for r in prod.records.all()[:300]] if prod else [],
+            "collections": [{"slug": c.slug, "name": c.name, "fields": c.field_names} for c in site.collections.all()],
+            "profile_fields": sorted(keys | {"name"}), "pages": [{"slug": p.slug, "title": p.title} for p in site.pages.all() if p.pk != page.pk],
+            "members": site.members.count()}

@@ -141,6 +141,10 @@ def can_view(page, user):
     a = (page.access or "").strip()
     if not a:
         return True
+    if a == "rules":
+        from . import access
+
+        return access.evaluate(page, user)[0]
     if user is None:
         return False
     if a == "members" or user.role == "admin":

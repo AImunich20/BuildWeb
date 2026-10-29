@@ -61,6 +61,8 @@ user in Thai. The UI copy is in Thai.
     `BUILDWEB_DATABASE_URL`, `BUILDWEB_DOMAINS` host→site). `server_api.py` = /__bw/health|deploy|pull (Bearer
     `BUILDWEB_DEPLOY_TOKEN`); `serverkit.py` builds the Docker kit. Desktop deploys through publish target "server".
     Docker itself is not available on the dev Mac: the kit is tested by running server.py directly.
+  - `access.py`: special pages, `Page.access == "rules"` + `Page.access_rules` (conditions, match all/any, deny message
+    or redirect). `members.can_view()` calls `access.evaluate()`; `public.members_only()` applies deny/login.
   - `clock.py`: time zone (config `app.timezone` > `BUILDWEB_TZ` > Asia/Bangkok) applied live via `clock.apply()`
     (clears Django's default-zone cache, sets TZ, reschedules jobs). Servers set it through `/__bw/config`.
   - `releases.py` + `Release`: versions = .bwsite snapshots in `<data>/releases/<site id>/`. `publish.run(..., release=)`

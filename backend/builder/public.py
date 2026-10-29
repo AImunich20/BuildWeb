@@ -1,4 +1,5 @@
 """Serving sites: in-app preview (drafts included) and the hosting server (published only)."""
+import html as htmllib
 import mimetypes
 
 from django.conf import settings
@@ -43,7 +44,7 @@ def serve(request, site, path, include_drafts):
         owner = not getattr(request, "is_public", False)  # the in-app preview sees every page
         user = members.current_user(request, site)
         if not owner and not members.can_view(page, user):
-            return members_only(request, site, user, root)
+            return members_only(request, site, user, root, page)
         resp = HttpResponse(render.render_page(page, "__form", include_drafts=include_drafts, row=found[2],
                                                user=user, owner_view=owner),
                             content_type="text/html; charset=utf-8")
@@ -108,18 +109,26 @@ def receive_form(request, site):
     return cors(resp)
 
 
-def members_only(request, site, user, root):
+def members_only(request, site, user, root, page):
     """A members-only page: send visitors to the login page, show members without the role a polite 403."""
     s = members.settings(site)
-    if user is None:
+    rules = page.access_rules if page.access == "rules" else {}
+    from . import access
+
+    if user is None and (not rules or access.needs_login(page)):
         from urllib.parse import quote
 
         here = request.path[len(root):] if root and request.path.startswith(root) else request.path.lstrip("/")
         return HttpResponseRedirect(f"{root.rstrip('/')}/{s['pages']['login']}?next={quote(here)}")
+    deny = (rules or {}).get("deny") or {}
+    target = site.pages.filter(slug=deny.get("redirect")).first() if deny.get("redirect") else None
+    if target and target.pk != page.pk:
+        return HttpResponseRedirect(f"{root.rstrip('/')}/{target.filename}")
     body = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>ไม่มีสิทธิ์เข้าถึง</title><body style="font-family:system-ui;display:grid;place-items:center;min-height:90vh;'
             'color:#374151;text-align:center"><div><h1 style="font-size:56px;margin:0">403</h1>'
-            f'<p>หน้านี้สำหรับสมาชิกบางกลุ่มเท่านั้น</p><a href="{root}" style="color:#7c3aed">กลับหน้าแรก</a></div>')
+            f'<p>{htmllib.escape(deny.get("message") or "หน้านี้สำหรับสมาชิกบางกลุ่มเท่านั้น")}</p>'
+            f'<a href="{root}" style="color:#7c3aed">กลับหน้าแรก</a></div>')
     resp = HttpResponse(body, status=403)
     resp["Cache-Control"] = "private, no-store"
     return resp

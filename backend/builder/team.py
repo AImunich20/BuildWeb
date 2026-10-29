@@ -27,7 +27,7 @@ EDITOR_DENY = [
     r"^/api/releases/",
     r"^/api/sites/\d+/(collections/(create|import-file|import-mysql)|pages/(create|reorder|sync-nav)|shared/extract)",
     r"^/api/collections/\d+/(update|delete|resync|pages)$",
-    r"^/api/pages/\d+/(update|delete|duplicate|home)$",
+    r"^/api/pages/\d+/(update|delete|duplicate|home|access)$",
     r"^/api/shared/\d+/update$",
     r"^/api/(apikeys|logic|members)/",
     r"^/api/data/",

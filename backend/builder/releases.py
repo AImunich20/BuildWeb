@@ -21,7 +21,7 @@ from .models import Release
 VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+][\w.]+)?$")
 NAME_RE = re.compile(r"^[\w.+-]{1,40}$")
 PAGE_KEYS = ("title", "status", "html", "css", "js", "seo_title", "seo_description", "seo_keywords", "og_image", "noindex",
-             "head_code", "custom_css", "custom_js", "show_in_nav", "nav_label", "nav_order", "access", "is_home", "detail_field")
+             "head_code", "custom_css", "custom_js", "show_in_nav", "nav_label", "nav_order", "access", "access_rules", "is_home", "detail_field")
 SITE_KEYS = [f for f in backup.SITE_FIELDS if f != "slug"]
 
 
