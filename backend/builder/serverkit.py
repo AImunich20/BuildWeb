@@ -65,9 +65,26 @@ volumes:
   # pg-data:
 """
 
-CADDYFILE = """# Caddy gets and renews HTTPS certificates for the domains in SITE_DOMAINS automatically.
-# Without a domain (testing by IP) change the first line to  :80
+CADDYFILE = """# Caddy gets and renews HTTPS certificates automatically.
+# - domains in SITE_DOMAINS (.env): at start
+# - domains connected later from the app (เผยแพร่ › โดเมน / Cloudflare): on their first visit, after BuildWeb
+#   confirms the domain belongs to one of its sites (/__bw/domain-check), so nobody else can make Caddy ask for certificates
+# Without a domain (testing by IP) change the SITE_DOMAINS line in .env to  :80
+{
+\ton_demand_tls {
+\t\task http://buildweb:8090/__bw/domain-check
+\t}
+}
+
 {$SITE_DOMAINS} {
+\tencode zstd gzip
+\treverse_proxy buildweb:8090
+}
+
+https:// {
+\ttls {
+\t\ton_demand
+\t}
 \tencode zstd gzip
 \treverse_proxy buildweb:8090
 }
@@ -112,12 +129,17 @@ docker compose logs -f buildweb          # ดู log
 docker compose pull && docker compose up -d --build   # อัปเดต
 docker compose exec buildweb ls /data/backups         # สำรองอัตโนมัติวันละครั้ง (เก็บ 14 ชุดต่อเว็บ)
 ```
+## เวลาเซิร์ฟเวอร์และโดเมนเพิ่ม
+- เขตเวลา: ตั้งจากแอป (เผยแพร่ › เซิร์ฟเวอร์ของฉัน › เวลา & โดเมน) หรือค่า `BUILDWEB_TZ` ใน .env ({tz})
+- โดเมนเพิ่ม: เชื่อมจากแอปผ่าน Cloudflare ได้เลย ไม่ต้องแก้ไฟล์บนเซิร์ฟเวอร์ (Caddy ขอ HTTPS ให้ตอนมีคนเปิดครั้งแรก)
+- ใช้ proxy ของ Cloudflare (เมฆสีส้ม): ตั้ง SSL/TLS เป็น Full (strict) — แอปตั้งให้เมื่อ token มีสิทธิ์
+
 ใช้ PostgreSQL: เปิดบริการ `db` ใน docker-compose.yml แล้วตั้ง
 `BUILDWEB_DATABASE_URL=postgres://buildweb:<POSTGRES_PASSWORD>@db:5432/buildweb` ใน .env
 """
 
 
-def env_file(site, domain):
+def env_file(site, domain, tz="Asia/Bangkok"):
     return "\n".join([
         "# ตั้งค่าเซิร์ฟเวอร์ BuildWeb — เก็บไฟล์นี้เป็นความลับ",
         f"SITE_DOMAINS={domain or ':80'}",
@@ -126,6 +148,8 @@ def env_file(site, domain):
         f"BUILDWEB_DEPLOY_TOKEN={secrets.token_urlsafe(32)}",
         f"BUILDWEB_ADMIN_PASSWORD={secrets.token_urlsafe(12)}",
         f"BUILDWEB_HTTPS={'1' if domain else '0'}",
+        f"BUILDWEB_TZ={tz}",
+        f"TZ={tz}",
         "# BUILDWEB_DATABASE_URL=postgres://buildweb:CHANGE_ME@db:5432/buildweb",
         f"POSTGRES_PASSWORD={secrets.token_urlsafe(18)}",
         "",
@@ -148,8 +172,11 @@ def build_kit(site, domain=""):
         z.writestr(root + "Dockerfile", DOCKERFILE)
         z.writestr(root + "docker-compose.yml", COMPOSE)
         z.writestr(root + "Caddyfile", CADDYFILE)
-        z.writestr(root + ".env", env_file(site, domain))
+        from django.conf import settings
+
+        tz = settings.TIME_ZONE
+        z.writestr(root + ".env", env_file(site, domain, tz))
         z.writestr(root + ".dockerignore", ".env\n")
-        z.writestr(root + "README.md", README.format(name=site.name, domain=domain.split()[0] if domain else "<โดเมน>"))
+        z.writestr(root + "README.md", README.format(name=site.name, domain=domain.split()[0] if domain else "<โดเมน>", tz=tz))
         z.writestr(root + f"seed/{site.slug}.bwsite", backup.export_bytes(site))
     return buf.getvalue()

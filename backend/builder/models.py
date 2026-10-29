@@ -588,3 +588,24 @@ class SavedBlock(models.Model):
 
     class Meta:
         ordering = ["category", "name"]
+
+
+class Release(models.Model):
+    """A named version of a site ("1.4.0"): a .bwsite snapshot that can be deployed to any target, scheduled for a
+    time, compared with other versions, restored in the app, or redeployed later (rollback)."""
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="releases")
+    version = models.CharField(max_length=40)
+    notes = models.TextField(blank=True)
+    file = models.CharField(max_length=300)
+    size = models.PositiveIntegerField(default=0)
+    summary = models.JSONField(default=dict, blank=True)  # changes since the previous version (releases.diff)
+    created_by = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    scheduled_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    scheduled_targets = models.JSONField(default=list, blank=True)
+    deploys = models.JSONField(default=list, blank=True)  # [{"target", "at", "ok", "message"}]
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        unique_together = [("site", "version")]

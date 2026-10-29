@@ -1849,7 +1849,9 @@ return {...}  หรือ  return 201, {...}</div></details>
     ['netlify', 'Netlify', 'ฟรี · ได้ลิงก์ ชื่อ.netlify.app · ผูกโดเมนเองได้', 'cloud'],
     ['ftp', 'FTP / โฮสติ้งที่เช่า', 'cPanel, Plesk, DirectAdmin หรือโฮสต์ใดก็ได้', 'folder'],
     ['server', 'เซิร์ฟเวอร์ของฉัน', 'VPS + Docker · backend ครบ (API, สมาชิก, ฟังก์ชัน)', 'server'],
+    ['staging', 'เซิร์ฟเวอร์ทดสอบ', 'staging · ลองเวอร์ชันใหม่ก่อนขึ้นเว็บจริง', 'eye'],
   ];
+  const SERVERISH = t => t === 'server' || t === 'staging';
   let pubSel = null;
   async function drawPublish() {
     const box = document.getElementById('pub-card');
@@ -1860,9 +1862,9 @@ return {...}  หรือ  return 201, {...}</div></details>
     box.innerHTML = `<div class="row between"><div><h2>เผยแพร่ขึ้นอินเทอร์เน็ตด้วยปุ่มเดียว</h2>
         <div class="hint" style="margin:0">อัปโหลดเว็บไปโฮสต์ฟรีหรือโฮสต์ที่เช่าไว้ — เว็บออนไลน์ตลอดโดยไม่ต้องเปิดเครื่องนี้ทิ้งไว้</div></div>
         ${P.base_url ? `<a class="btn sm" href="${esc(P.base_url)}" target="_blank">${BW_ICON('external')} ${esc(P.base_url)}</a>` : ''}</div>
-      <div class="pub-tiles" style="grid-template-columns:repeat(4,1fr)">${PUB_TARGETS.map(([k, l, d, ic]) => { const last = (P.publish[k] || {}).last;
+      <div class="pub-tiles" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">${PUB_TARGETS.map(([k, l, d, ic]) => { const last = (P.publish[k] || {}).last;
         return `<button class="pub-tile ${k === pubSel ? 'sel' : ''}" data-t="${k}">${BW_ICON(ic, 20)}<div><b>${l}</b><span>${d}</span>
-          ${last ? `<span class="badge ok" style="margin-top:6px">เผยแพร่ ${ago(last.at)}</span>` : ''}</div></button>`; }).join('')}</div>
+          ${last ? `<span class="badge ok" style="margin-top:6px">${last.version ? 'v' + esc(last.version) + ' · ' : ''}เผยแพร่ ${ago(last.at)}</span>` : ''}</div></button>`; }).join('')}</div>
       <div id="pub-form"></div><div id="pub-log"></div>`;
     box.querySelectorAll('.pub-tile').forEach(b => b.onclick = () => {
       pubSel = b.dataset.t; try { localStorage.setItem('bw-pub-' + site.id, pubSel); } catch (e) { }
@@ -1892,30 +1894,32 @@ return {...}  หรือ  return 201, {...}</div></details>
         <label class="field"><span>รหัสผ่าน ${cfg.password_set ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span><input class="input mono" type="password" name="password" placeholder="${cfg.password_set ? 'เว้นว่าง = ใช้รหัสเดิม' : ''}" autocomplete="off"></label>
         <label class="field"><span>ที่อยู่เว็บ</span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://www.myshop.com/"></label></div>
       <label class="check"><input type="checkbox" name="tls" ${cfg.tls ? 'checked' : ''}>ใช้ FTPS (เข้ารหัส) — แนะนำถ้าโฮสต์รองรับ</label>`;
-    if (t === 'server') html = `<div class="alert info" style="margin-bottom:10px"><div>เว็บแบบมี backend: REST API, สมาชิก, ฟอร์ม, ฟังก์ชัน และงานตั้งเวลา ทำงานบนเซิร์ฟเวอร์ของคุณตลอด 24 ชม. · Deploy แล้วข้อมูลที่เกิดบนเซิร์ฟเวอร์ (คำสั่งซื้อ สมาชิก ข้อความฟอร์ม) ไม่ถูกทับ</div></div>
+    if (t === 'staging') html = `<div class="alert info" style="margin-bottom:10px"><div>เซิร์ฟเวอร์แยกสำหรับลองเวอร์ชันใหม่ (ใช้ชุดติดตั้งเดียวกับ “เซิร์ฟเวอร์ของฉัน” บน VPS อีกเครื่อง หรือโดเมนย่อย เช่น test.myshop.com) — ทดสอบจนพอใจแล้วค่อยปล่อยเวอร์ชันเดียวกันขึ้นเว็บจริงที่การ์ด “เวอร์ชันของเว็บ”</div></div>`;
+    if (SERVERISH(t)) html += `${t === 'server' ? `<div class="alert info" style="margin-bottom:10px"><div>เว็บแบบมี backend: REST API, สมาชิก, ฟอร์ม, ฟังก์ชัน และงานตั้งเวลา ทำงานบนเซิร์ฟเวอร์ของคุณตลอด 24 ชม. · Deploy แล้วข้อมูลที่เกิดบนเซิร์ฟเวอร์ (คำสั่งซื้อ สมาชิก ข้อความฟอร์ม) ไม่ถูกทับ</div></div>
       <div class="row" style="margin-bottom:12px;flex-wrap:nowrap;gap:8px"><input class="input mono" id="kit-domain" placeholder="โดเมน เช่น myshop.com (ไม่บังคับ)" style="max-width:320px">
-        <a class="btn" id="kit-dl" href="#">${BW_ICON('download')} ดาวน์โหลดชุดติดตั้งเซิร์ฟเวอร์</a><span class="small muted">Docker + HTTPS อัตโนมัติ · มีคู่มือภาษาไทยในไฟล์</span></div>
+        <a class="btn" id="kit-dl" href="#">${BW_ICON('download')} ดาวน์โหลดชุดติดตั้งเซิร์ฟเวอร์</a><span class="small muted">Docker + HTTPS อัตโนมัติ · มีคู่มือภาษาไทยในไฟล์</span></div>` : ''}
       <div class="grid g3" style="gap:0 14px"><label class="field"><span>ที่อยู่เซิร์ฟเวอร์</span><input class="input mono" name="url" value="${esc(cfg.url || '')}" placeholder="https://myshop.com"></label>
         <label class="field"><span>Deploy token ${cfg.token_set ? '<span class="badge ok">บันทึกแล้ว</span>' : ''}</span><input class="input mono" type="password" name="token" placeholder="${cfg.token_set ? 'เว้นว่าง = ใช้ค่าเดิม' : 'BUILDWEB_DEPLOY_TOKEN จากไฟล์ .env'}" autocomplete="off"></label>
         <label class="field"><span>ที่อยู่ของเว็บนี้ <small>(ถ้าต่างจากเซิร์ฟเวอร์)</small></span><input class="input mono" name="site_url" value="${esc(cfg.site_url || '')}" placeholder="https://myshop.com/"></label></div>
-      <div class="row" style="gap:8px"><button class="btn sm" type="button" id="srv-test">ทดสอบการเชื่อมต่อ</button><button class="btn sm" type="button" id="srv-pull">${BW_ICON('import')} ดึงข้อมูลจากเซิร์ฟเวอร์</button>
+      <div class="row" style="gap:8px"><button class="btn sm" type="button" id="srv-test">ทดสอบการเชื่อมต่อ</button><button class="btn sm" type="button" id="srv-cfg">เวลา & โดเมนบนเซิร์ฟเวอร์</button><button class="btn sm" type="button" id="srv-pull">${BW_ICON('import')} ดึงข้อมูลจากเซิร์ฟเวอร์</button>
         ${cfg.url ? `<a class="btn sm" href="${esc(cfg.url.replace(/\/$/, ''))}/__bw/admin/" target="_blank">หลังบ้านบนเซิร์ฟเวอร์</a>` : ''}</div>`;
     const last = cfg.last;
     f.innerHTML = `<div class="pub-form">${html}
-      ${site.form_endpoint || t === 'server' ? '' : '<div class="alert info" style="margin-top:10px">ฟอร์มบนเว็บที่เผยแพร่จะส่งข้อมูลได้เมื่อตั้ง “ที่ส่งฟอร์ม” ในแท็บตั้งค่าเว็บ (เช่นลิงก์ Tailscale Funnel ของเครื่องนี้) — หรือใช้ “เซิร์ฟเวอร์ของฉัน” ที่มี backend ในตัว</div>'}
+      ${site.form_endpoint || SERVERISH(t) ? '' : '<div class="alert info" style="margin-top:10px">ฟอร์มบนเว็บที่เผยแพร่จะส่งข้อมูลได้เมื่อตั้ง “ที่ส่งฟอร์ม” ในแท็บตั้งค่าเว็บ (เช่นลิงก์ Tailscale Funnel ของเครื่องนี้) — หรือใช้ “เซิร์ฟเวอร์ของฉัน” ที่มี backend ในตัว</div>'}
       <div class="row" style="margin-top:12px"><button class="btn primary" id="pub-go">${BW_ICON('cloud')} เผยแพร่เลย</button><button class="btn" id="pub-save">บันทึกการตั้งค่า</button>
         ${t === 'ftp' ? '<button class="btn" id="pub-test">ทดสอบการเชื่อมต่อ</button>' : ''}
         ${last ? `<span class="small muted" style="margin-left:auto">ล่าสุด ${when(last.at)} · ${last.files} ไฟล์ ${last.url ? `· <a href="${esc(last.url)}" target="_blank">${esc(last.url)}</a>` : ''}</span>` : ''}</div></div>`;
     const collect = () => { const d = formData(f); d.target = t; return d; };
     const save = async () => { const r = await api(`/api/sites/${site.id}/publish`, collect()); Object.assign(P, r); return r; };
     document.getElementById('pub-save').onclick = async () => { try { await save(); toast('บันทึกแล้ว', 'ok'); drawPublish(); } catch (e) { showFieldError(f, e); } };
-    if (t === 'server') {
+    if (SERVERISH(t)) {
       const kd = document.getElementById('kit-dl');
-      kd.onclick = e => { e.preventDefault(); location.href = `/api/sites/${site.id}/server/kit.zip?domain=${encodeURIComponent(document.getElementById('kit-domain').value)}`; };
-      document.getElementById('srv-test').onclick = async () => { try { await save(); const r = await api(`/api/sites/${site.id}/server/test`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); } };
+      if (kd) kd.onclick = e => { e.preventDefault(); location.href = `/api/sites/${site.id}/server/kit.zip?domain=${encodeURIComponent(document.getElementById('kit-domain').value)}`; };
+      document.getElementById('srv-test').onclick = async () => { try { await save(); const r = await api(`/api/sites/${site.id}/server/test`, { target: t }); toast(r.message, r.drift != null && Math.abs(r.drift) > 60 ? 'err' : 'ok'); } catch (e) { toast(e.message, 'err'); } };
+      document.getElementById('srv-cfg').onclick = async () => { try { await save(); serverConfigModal(t); } catch (e) { toast(e.message, 'err'); } };
       document.getElementById('srv-pull').onclick = async () => {
         if (!await confirmBox('ดึงข้อมูลจากเซิร์ฟเวอร์', 'แทนที่ข้อมูลในเครื่องนี้ด้วยข้อมูลที่เกิดบนเซิร์ฟเวอร์: แถวของชุดข้อมูลฝั่งเซิร์ฟเวอร์, สมาชิก, ข้อความจากฟอร์ม และสถิติ', { ok: 'ดึงข้อมูล' })) return;
-        try { await save(); const r = await api(`/api/sites/${site.id}/server/pull`, {}); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); }
+        try { await save(); const r = await api(`/api/sites/${site.id}/server/pull`, { target: t }); toast(r.message, 'ok'); } catch (e) { toast(e.message, 'err'); }
       };
     }
     const test = document.getElementById('pub-test');
@@ -1926,6 +1930,250 @@ return {...}  หรือ  return 201, {...}</div></details>
       catch (err) { showFieldError(f, err); btn.disabled = false; }
     };
   }
+  async function serverConfigModal(t) {
+    let C;
+    try { C = await api(`/api/sites/${site.id}/server/config?target=${t}`); } catch (e) { toast(e.message, 'err'); return; }
+    const m = modal(`<header><h2>เวลา & โดเมนบน${t === 'staging' ? 'เซิร์ฟเวอร์ทดสอบ' : 'เซิร์ฟเวอร์'}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 14px"><div><div class="small muted">เวลาบนเซิร์ฟเวอร์ตอนนี้</div><div style="font-size:22px;font-weight:600" class="mono">${esc(C.now.slice(11, 19))}</div>
+        <div class="small muted">${esc(C.now.slice(0, 10))} · ${esc(C.timezone)} (${esc(C.utc_offset)})</div>
+        ${C.drift != null ? (Math.abs(C.drift) > 60 ? `<div class="alert warn" style="margin-top:8px">นาฬิกาเซิร์ฟเวอร์คลาดจากเครื่องนี้ ${Math.abs(C.drift).toFixed(0)} วินาที — เปิด NTP บนเซิร์ฟเวอร์ (<code>timedatectl set-ntp true</code>)</div>` : `<div class="small" style="color:var(--ok);margin-top:4px">${BW_ICON('check')} นาฬิกาตรงกับเครื่องนี้ (ต่างกัน ${Math.abs(C.drift).toFixed(1)} วินาที)</div>`) : ''}</div>
+      <label class="field"><span>เขตเวลา</span><select class="input" name="timezone">${C.zones.map(z => `<option ${z === C.timezone ? 'selected' : ''}>${esc(z)}</option>`).join('')}</select>
+        <small>ใช้กับงานตั้งเวลา (daily 09:00), เวลาคำสั่งซื้อ, สถิติรายวัน และสำรองอัตโนมัติ บนเซิร์ฟเวอร์</small></label></div>
+      <div class="sect-title">โดเมน → เว็บ</div>
+      ${Object.keys(C.domains).length ? `<table class="table"><tbody>${Object.entries(C.domains).map(([d, slug]) => `<tr><td class="mono">${esc(d)}</td><td class="mono small">${esc(slug)}</td>
+        <td class="num">${C.env_domains[d] ? '<span class="small muted">ตั้งใน .env</span>' : `<button class="btn sm" data-rm="${esc(d)}">เอาออก</button>`}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="small muted">ยังไม่มีโดเมน — เชื่อมได้ที่การ์ด “โดเมนของคุณ (Cloudflare)”</div>'}</div>
+      <footer><button class="btn" data-close>ปิด</button><button class="btn primary" data-save>บันทึกเขตเวลา</button></footer>`, { wide: true });
+    m.el.querySelector('[data-save]').onclick = async () => {
+      try { await api(`/api/sites/${site.id}/server/config`, { target: t, timezone: m.el.querySelector('[name=timezone]').value }); toast('ตั้งเขตเวลาบนเซิร์ฟเวอร์แล้ว', 'ok'); m.close(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    m.el.querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
+      try { await api(`/api/sites/${site.id}/server/config`, { target: t, remove_domain: b.dataset.rm }); m.close(); serverConfigModal(t); } catch (e) { toast(e.message, 'err'); }
+    });
+  }
+
+  // ---------------------------------------------------------------- versions (releases)
+  const diffHtml = d => {
+    if (d && d.first) return `<div class="small muted">เวอร์ชันแรก · ${d.pages_count} หน้า · ${d.collections_count} ชุดข้อมูล</div>`;
+    if (!d || !d.total) return '<div class="small muted">ไม่มีอะไรเปลี่ยน</div>';
+    const li = [], names = a => a.map(x => esc(x.title || x.name || x.slug)).join(', ');
+    if (d.pages.added.length) li.push(`<li><b style="color:var(--ok)">+ หน้าใหม่</b> ${names(d.pages.added)}</li>`);
+    if (d.pages.changed.length) li.push(`<li><b>แก้หน้า</b> ${names(d.pages.changed)}</li>`);
+    if (d.pages.removed.length) li.push(`<li><b style="color:var(--danger)">− ลบหน้า</b> ${names(d.pages.removed)}</li>`);
+    if (d.collections.added.length) li.push(`<li><b style="color:var(--ok)">+ ชุดข้อมูล</b> ${names(d.collections.added)}</li>`);
+    if (d.collections.changed.length) li.push(`<li><b>ชุดข้อมูล</b> ${d.collections.changed.map(c => `${esc(c.name)} <span class="muted">(${c.what.map(esc).join(', ')})</span>`).join(', ')}</li>`);
+    if (d.collections.removed.length) li.push(`<li><b style="color:var(--danger)">− ชุดข้อมูล</b> ${names(d.collections.removed)}</li>`);
+    if (d.settings.length) li.push(`<li><b>ตั้งค่า</b> ${d.settings.map(esc).join(', ')}</li>`);
+    if (d.assets.added || d.assets.removed) li.push(`<li><b>ไฟล์</b> ${d.assets.added ? '+' + d.assets.added : ''} ${d.assets.removed ? '−' + d.assets.removed : ''}</li>`);
+    return `<ul class="small" style="margin:4px 0 0;padding-left:18px;line-height:1.8">${li.join('')}</ul>`;
+  };
+  const localInput = iso => { const d = iso ? new Date(iso) : new Date(Date.now() + 3600e3); d.setSeconds(0, 0); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16); };
+  async function drawReleases() {
+    const box = document.getElementById('rel-card');
+    let R;
+    try { R = await api(`/api/sites/${site.id}/releases`); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    const tl = t => R.targets[t] || t;
+    const liveBadges = Object.entries(R.live).map(([t, v]) => `<span class="badge ${t === 'staging' ? '' : 'ok'}">${esc(tl(t))}: ${v ? 'v' + esc(v) : 'ฉบับแก้ล่าสุด'}</span>`).join(' ');
+    box.innerHTML = `<div class="row between"><div><h2>เวอร์ชันของเว็บ</h2>
+        <div class="hint" style="margin:0">เก็บเว็บเป็นเวอร์ชัน (เช่น 1.2.0) พร้อมบันทึกว่าเปลี่ยนอะไร · ปล่อยไปเว็บจริงหรือเซิร์ฟเวอร์ทดสอบ ตอนนี้หรือตั้งเวลา · ย้อนกลับเวอร์ชันเก่าได้ในคลิกเดียว</div></div>
+        <button class="btn primary" id="rel-new">${BW_ICON('plus')} สร้างเวอร์ชันใหม่</button></div>
+      ${liveBadges ? `<div class="row" style="gap:6px;margin-top:10px"><span class="small muted">ที่ออนไลน์อยู่:</span>${liveBadges}</div>` : ''}
+      <div id="rel-log"></div>
+      ${R.releases.length ? `<table class="table" style="margin-top:12px"><thead><tr><th>เวอร์ชัน</th><th>เปลี่ยนอะไร</th><th>สถานะ</th><th></th></tr></thead><tbody>
+        ${R.releases.map(r => { const lastOk = [...r.deploys].reverse().filter(x => x.ok);
+          const on = Object.entries(R.live).filter(([, v]) => v === r.version).map(([t]) => `<span class="badge ok">${esc(tl(t))}</span>`).join(' ');
+          return `<tr><td style="white-space:nowrap"><b class="mono">v${esc(r.version)}</b><div class="small muted">${when(r.created_at)}${r.created_by ? ' · ' + esc(r.created_by) : ''}</div></td>
+          <td style="min-width:240px">${r.notes ? `<div style="white-space:pre-wrap">${esc(r.notes)}</div>` : ''}${diffHtml(r.summary)}</td>
+          <td class="small">${on}${r.scheduled_at ? `<div class="badge warn" style="margin-top:4px">${BW_ICON('history')} ${when(r.scheduled_at)} → ${r.scheduled_targets.map(tl).map(esc).join(', ')}</div>` : ''}
+            ${lastOk.length ? `<div class="muted">ปล่อยล่าสุด ${ago(lastOk[0].at)} (${esc(tl(lastOk[0].target))})</div>` : ''}
+            ${r.deploys.length && !r.deploys[r.deploys.length - 1].ok ? `<div style="color:var(--danger)">ล่าสุดไม่สำเร็จ: ${esc(r.deploys[r.deploys.length - 1].message)}</div>` : ''}</td>
+          <td><div class="row" style="justify-content:flex-end;gap:6px;flex-wrap:nowrap"><button class="btn sm primary" data-deploy="${r.id}">ปล่อย</button><button class="btn sm" data-menu="${r.id}">${BW_ICON('more')}</button></div></td></tr>`; }).join('')}</tbody></table>`
+        : '<div class="small muted" style="margin-top:12px">ยังไม่มีเวอร์ชัน — กด “สร้างเวอร์ชันใหม่” เมื่อเว็บพร้อมปล่อย</div>'}
+      <div class="small muted" style="margin-top:8px">เวลาที่ตั้งใช้เขตเวลาของแอป: ${esc(R.clock.timezone)} (${esc(R.clock.utc_offset)}) — เปลี่ยนได้ที่หน้าโฮสติ้ง & ตั้งค่า · แอปต้องเปิดอยู่ตอนถึงเวลา</div>`;
+    document.getElementById('rel-new').onclick = () => releaseModal(R);
+    box.querySelectorAll('[data-deploy]').forEach(b => b.onclick = () => deployModal(R, R.releases.find(r => r.id == b.dataset.deploy)));
+    box.querySelectorAll('[data-menu]').forEach(b => b.onclick = () => releaseMenu(R, R.releases.find(r => r.id == b.dataset.menu), b));
+  }
+  const targetChecks = (R, picked) => {
+    const list = R.configured.length ? R.configured : [];
+    if (!list.length) return '<div class="small muted">ยังไม่ได้ตั้งค่าปลายทาง — ตั้งที่การ์ด “เผยแพร่ขึ้นอินเทอร์เน็ต” ด้านบนก่อน</div>';
+    return `<div class="row" style="gap:16px">${list.map(t => `<label class="check"><input type="checkbox" data-target="${t}" ${(picked || []).includes(t) ? 'checked' : ''}>${esc(R.targets[t] || t)}</label>`).join('')}</div>`;
+  };
+  const pickedTargets = el => [...el.querySelectorAll('[data-target]:checked')].map(x => x.dataset.target);
+  async function releaseModal(R) {
+    let preview = '<div class="muted small">กำลังเทียบกับเวอร์ชันก่อน…</div>';
+    const m = modal(`<header><h2>สร้างเวอร์ชันใหม่</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 14px"><label class="field"><span>เลขเวอร์ชัน</span><input class="input mono" name="version" value="${esc(R.suggest.minor)}">
+        <small>${R.suggest.latest ? `ล่าสุด v${esc(R.suggest.latest)} · ` : ''}<a href="#" data-v="${esc(R.suggest.patch)}">${esc(R.suggest.patch)} แก้เล็กน้อย</a> · <a href="#" data-v="${esc(R.suggest.minor)}">${esc(R.suggest.minor)} ฟีเจอร์ใหม่</a> · <a href="#" data-v="${esc(R.suggest.major)}">${esc(R.suggest.major)} เปลี่ยนใหญ่</a></small></label>
+      <div><div class="small muted" style="margin-bottom:4px">เปลี่ยนจากเวอร์ชันก่อน</div><div id="rel-preview">${preview}</div></div></div>
+      <label class="field"><span>บันทึกการเปลี่ยนแปลง <small>(ไม่บังคับ)</small></span><textarea class="input" name="notes" rows="3" placeholder="เช่น เพิ่มหน้าโปรโมชันเดือนพฤศจิกายน แก้ราคาสินค้า"></textarea></label>
+      <div class="sect-title">ปล่อยเวอร์ชันนี้</div>
+      <div class="row" style="gap:16px;margin-bottom:8px"><label class="check"><input type="radio" name="when" value="none" checked>เก็บไว้ก่อน</label><label class="check"><input type="radio" name="when" value="now">ปล่อยเลย</label><label class="check"><input type="radio" name="when" value="at">ตั้งเวลา</label>
+        <input class="input mono" type="datetime-local" name="at" value="${localInput()}" style="max-width:220px;display:none"></div>
+      <div id="rel-targets" style="display:none">${targetChecks(R, R.configured.filter(t => t !== 'staging').slice(0, 1))}</div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-save>สร้างเวอร์ชัน</button></footer>`, { wide: true });
+    m.el.querySelectorAll('[data-v]').forEach(a => a.onclick = e => { e.preventDefault(); m.el.querySelector('[name=version]').value = a.dataset.v; });
+    const sync = () => { const w = m.el.querySelector('[name=when]:checked').value; m.el.querySelector('[name=at]').style.display = w === 'at' ? '' : 'none'; m.el.querySelector('#rel-targets').style.display = w === 'none' ? 'none' : ''; };
+    m.el.querySelectorAll('[name=when]').forEach(x => x.onchange = sync);
+    if (R.releases.length) api(`/api/releases/${R.releases[0].id}/diff?against=current`).then(x => { const el = m.el.querySelector('#rel-preview'); if (el) el.innerHTML = diffHtml(x.diff); }).catch(() => { });
+    else m.el.querySelector('#rel-preview').innerHTML = '<div class="small muted">เวอร์ชันแรกของเว็บนี้</div>';
+    m.el.querySelector('[data-save]').onclick = async e => {
+      const w = m.el.querySelector('[name=when]:checked').value, targets = pickedTargets(m.el);
+      if (w !== 'none' && !targets.length) { toast('เลือกปลายทาง', 'err'); return; }
+      const d = { action: 'create', version: m.el.querySelector('[name=version]').value, notes: m.el.querySelector('[name=notes]').value };
+      if (w === 'at') { d.at = m.el.querySelector('[name=at]').value; d.targets = targets; }
+      e.currentTarget.disabled = true;
+      try {
+        const r = await api(`/api/sites/${site.id}/releases`, d); m.close();
+        toast(w === 'at' ? 'สร้างเวอร์ชันและตั้งเวลาแล้ว' : 'สร้างเวอร์ชันแล้ว', 'ok');
+        await drawReleases();
+        if (w === 'now') runDeploys(r.releases.find(x => x.version === d.version), targets);
+      } catch (err) { showFieldError(m.el, err); e.currentTarget.disabled = false; }
+    };
+  }
+  function deployModal(R, r) {
+    const m = modal(`<header><h2>ปล่อย v${esc(r.version)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      ${Object.entries(R.live).some(([t, v]) => t !== 'staging' && v && v !== r.version) ? `<div class="alert info" style="margin-bottom:10px">ปล่อยเวอร์ชันเก่ากว่าที่ออนไลน์อยู่ = ย้อนเวอร์ชัน (rollback) · ข้อมูลที่เกิดบนเซิร์ฟเวอร์ (คำสั่งซื้อ สมาชิก ข้อความฟอร์ม) ไม่ถูกทับ</div>` : ''}
+      <div class="sect-title" style="margin-top:0">ไปที่</div>${targetChecks(R, R.configured.filter(t => t !== 'staging').slice(0, 1))}
+      <div class="row" style="gap:16px;margin-top:14px"><label class="check"><input type="radio" name="when" value="now" checked>ตอนนี้</label><label class="check"><input type="radio" name="when" value="at">ตั้งเวลา</label>
+        <input class="input mono" type="datetime-local" name="at" value="${localInput(r.scheduled_at)}" style="max-width:220px;display:none"></div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-go>ปล่อย</button></footer>`);
+    m.el.querySelectorAll('[name=when]').forEach(x => x.onchange = () => m.el.querySelector('[name=at]').style.display = m.el.querySelector('[name=when]:checked').value === 'at' ? '' : 'none');
+    m.el.querySelector('[data-go]').onclick = async () => {
+      const targets = pickedTargets(m.el);
+      if (!targets.length) { toast('เลือกปลายทาง', 'err'); return; }
+      if (m.el.querySelector('[name=when]:checked').value === 'at') {
+        try { await api(`/api/sites/${site.id}/releases`, { action: 'schedule', id: r.id, at: m.el.querySelector('[name=at]').value, targets }); m.close(); toast('ตั้งเวลาแล้ว', 'ok'); drawReleases(); }
+        catch (e) { toast(e.message, 'err'); }
+        return;
+      }
+      m.close(); runDeploys(r, targets);
+    };
+  }
+  async function runDeploys(r, targets) {
+    const out = document.getElementById('rel-log');
+    for (const t of targets) {
+      let job;
+      try { job = (await api(`/api/sites/${site.id}/publish/${t}`, { release: r.id })).job; } catch (e) { toast(e.message, 'err'); continue; }
+      job = await new Promise(resolve => {
+        const tick = async () => {
+          try { const x = (await api(`/api/publish/jobs/${job.id}`)).job;
+            out.innerHTML = `<div class="log" style="margin-top:12px;max-height:180px;overflow:auto">${x.log.map(esc).join('\n')}</div>`;
+            if (x.state === 'running') setTimeout(tick, 1000); else resolve(x);
+          } catch (e) { resolve({ state: 'error', error: e.message }); }
+        };
+        tick();
+      });
+      toast(job.state === 'done' ? `ปล่อย v${r.version} แล้ว` : `ไม่สำเร็จ: ${job.error}`, job.state === 'done' ? 'ok' : 'err');
+    }
+    const keep = out.innerHTML; await drawReleases(); document.getElementById('rel-log').innerHTML = keep;
+  }
+  function releaseMenu(R, r, anchor) {
+    document.querySelectorAll('.rel-pop').forEach(x => x.remove());
+    const pop = document.createElement('div');
+    pop.className = 'menu-pop rel-pop';
+    const rect = anchor.getBoundingClientRect();
+    pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;right:${innerWidth - rect.right}px;z-index:50;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg, 0 8px 30px rgba(0,0,0,.15));padding:6px;min-width:220px`;
+    const items = [['diff', 'เทียบกับเว็บตอนนี้'], ['notes', 'แก้บันทึก'], ...(r.scheduled_at ? [['unschedule', 'ยกเลิกเวลาที่ตั้ง']] : []),
+      ['restore', 'คืนค่าในแอปเป็นเวอร์ชันนี้'], ['file', 'ดาวน์โหลด .bwsite'], ['delete', 'ลบเวอร์ชัน']];
+    pop.innerHTML = items.map(([k, l]) => `<button class="btn ghost sm" data-a="${k}" style="display:block;width:100%;text-align:left;${k === 'delete' ? 'color:var(--danger)' : ''}">${l}</button>`).join('');
+    document.body.appendChild(pop);
+    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', off); } }), 0);
+    pop.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
+      pop.remove();
+      const a = b.dataset.a, post = d => api(`/api/sites/${site.id}/releases`, { id: r.id, ...d });
+      try {
+        if (a === 'diff') {
+          const x = await api(`/api/releases/${r.id}/diff?against=current`);
+          modal(`<header><h2>v${esc(r.version)} → เว็บตอนนี้</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">${diffHtml(x.diff)}</div><footer><button class="btn" data-close>ปิด</button></footer>`);
+        } else if (a === 'notes') {
+          const m = modal(`<header><h2>บันทึกของ v${esc(r.version)}</h2></header><div class="body"><textarea class="input" rows="5" name="notes">${esc(r.notes)}</textarea></div>
+            <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>บันทึก</button></footer>`);
+          m.el.querySelector('[data-ok]').onclick = async () => { await post({ action: 'notes', notes: m.el.querySelector('textarea').value }); m.close(); drawReleases(); };
+        } else if (a === 'unschedule') { await post({ action: 'unschedule' }); drawReleases(); }
+        else if (a === 'restore') {
+          if (!await confirmBox('คืนค่าเวอร์ชัน', `เปลี่ยนหน้า ธีม และเนื้อหาในแอปกลับเป็น v${esc(r.version)}? ข้อมูลจากผู้ใช้ (คำสั่งซื้อ สมาชิก ข้อความฟอร์ม) ยังอยู่ และระบบสำรองสภาพปัจจุบันไว้ก่อน`, { ok: 'คืนค่า' })) return;
+          await post({ action: 'restore' }); toast(`คืนค่าเป็น v${r.version} แล้ว`, 'ok'); setTimeout(() => location.reload(), 600);
+        } else if (a === 'file') location.href = `/api/releases/${r.id}/file.bwsite`;
+        else if (a === 'delete') {
+          if (!await confirmBox('ลบเวอร์ชัน', `ลบ v${esc(r.version)}? เว็บที่ออนไลน์อยู่ไม่เปลี่ยน แต่จะย้อนกลับมาเวอร์ชันนี้ไม่ได้อีก`, { ok: 'ลบ', danger: true })) return;
+          await post({ action: 'delete' }); drawReleases();
+        }
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  }
+
+  // ---------------------------------------------------------------- own domain (Cloudflare)
+  async function drawDomain() {
+    const box = document.getElementById('dom-card');
+    let D2;
+    try { D2 = await api(`/api/sites/${site.id}/domain?zones=1`); } catch (e) { D2 = await api(`/api/sites/${site.id}/domain`).catch(() => ({ token_set: false, targets: {} })); D2.error = e.message; }
+    const dom = D2.domain;
+    const head = `<div class="row between"><div><h2>โดเมนของคุณ (Cloudflare)</h2><div class="hint" style="margin:0">ชี้โดเมนมาที่เว็บนี้อัตโนมัติ: ตั้ง DNS ใน Cloudflare และตั้งค่าฝั่งปลายทาง (เซิร์ฟเวอร์ / GitHub Pages / Netlify) ให้ครบ</div></div>
+      ${dom ? `<a class="btn sm" href="https://${esc(dom.domain)}/" target="_blank">${BW_ICON('external')} ${esc(dom.domain)}</a>` : ''}</div>`;
+    if (!D2.token_set) {
+      box.innerHTML = `${head}<div class="pub-form" style="margin-top:12px"><label class="field"><span>Cloudflare API token</span><input class="input mono" type="password" name="token" placeholder="วาง token ที่นี่" autocomplete="off">
+        <small>dash.cloudflare.com › My Profile › API Tokens › Create Token › แม่แบบ <b>Edit zone DNS</b> (เพิ่มสิทธิ์ Zone Settings:Edit ถ้าจะใช้ proxy) — <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">สร้าง token</a> · เก็บเข้ารหัสในเครื่องนี้</small></label>
+        <button class="btn primary" id="cf-save">เชื่อมบัญชี Cloudflare</button></div>`;
+      document.getElementById('cf-save').onclick = async e => {
+        e.currentTarget.disabled = true;
+        try { const r = await api(`/api/sites/${site.id}/domain`, { action: 'token', token: box.querySelector('[name=token]').value }); toast(`เชื่อมแล้ว · พบ ${r.zones.length} โดเมน`, 'ok'); drawDomain(); }
+        catch (err) { toast(err.message, 'err'); e.currentTarget.disabled = false; }
+      };
+      return;
+    }
+    const zones = D2.zones || [];
+    const pubTargets = Object.entries(D2.targets);
+    const defTarget = (dom && dom.target) || (PUB_TARGETS.find(([k]) => k !== 'staging' && site_publish_last(k)) || ['server'])[0];
+    box.innerHTML = `${head}
+      ${D2.error ? `<div class="alert err" style="margin-top:10px">${esc(D2.error)}</div>` : ''}
+      ${dom ? `<div class="alert ok" style="margin-top:12px"><div><b>${esc(dom.domain)}</b> → ${esc(D2.targets[dom.target] || dom.target)} ${dom.proxied ? '<span class="badge">ผ่าน proxy Cloudflare</span>' : '<span class="badge">DNS only</span>'}
+          <div class="small mono" style="margin-top:4px">${(dom.records || []).map(r => `${esc(r.name)} ${esc(r.type)} ${esc(r.content)}`).join(' · ')}</div><div id="cf-check" class="small" style="margin-top:6px"></div></div></div>
+        <div class="row" style="gap:8px"><button class="btn sm" id="cf-check-btn">${BW_ICON('refresh')} ตรวจสถานะ</button><button class="btn sm" id="cf-off">ยกเลิกการเชื่อม</button></div>` : ''}
+      <div class="pub-form" style="margin-top:12px"><div class="grid g3" style="gap:0 14px">
+        <label class="field"><span>โดเมน</span><input class="input mono" name="domain" list="cf-zones" value="${esc(dom ? dom.domain : (zones[0] ? zones[0].name : ''))}" placeholder="myshop.com หรือ shop.myshop.com">
+          <datalist id="cf-zones">${zones.map(z => `<option value="${esc(z.name)}">`).join('')}</datalist><small>${zones.length ? `ในบัญชี: ${zones.map(z => esc(z.name) + (z.status !== 'active' ? ' (รอ name server)' : '')).join(', ')}` : 'ยังไม่มีโดเมนในบัญชี Cloudflare'}</small></label>
+        <label class="field"><span>ชี้ไปที่</span><select class="input" name="target">${pubTargets.map(([k, l]) => `<option value="${k}" ${k === defTarget ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small id="cf-hint"></small></label>
+        <label class="field" id="cf-content-f"><span>IP / โฮสต์ปลายทาง</span><input class="input mono" name="content" placeholder="เว้นว่าง = หาให้จากที่ตั้งไว้"></label></div>
+        <div class="row" style="gap:18px"><label class="check"><input type="checkbox" name="www" checked>เพิ่ม www ด้วย</label>
+          <label class="check"><input type="checkbox" name="proxied">ผ่าน proxy ของ Cloudflare (เมฆสีส้ม · ซ่อน IP, CDN, กัน DDoS)</label>
+          <label class="check"><input type="checkbox" name="replace">แทนที่ record เดิมที่ชื่อซ้ำ</label></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" id="cf-go">${BW_ICON('link')} เชื่อมโดเมน</button><button class="btn sm ghost" id="cf-token" style="margin-left:auto">เปลี่ยน token</button></div>
+        <div id="cf-result"></div></div>`;
+    const hint = { server: 'A record → IP ของเซิร์ฟเวอร์ · HTTPS อัตโนมัติ (ต้องใช้ชุดติดตั้ง v0.9 ขึ้นไป)', staging: 'เช่น test.myshop.com → เซิร์ฟเวอร์ทดสอบ', github: 'CNAME → ชื่อ.github.io + ตั้ง custom domain ให้', netlify: 'CNAME → ชื่อ.netlify.app + ตั้งโดเมนใน Netlify ให้', ftp: 'ใส่ IP ของโฮสติ้ง (ดูในแผง cPanel)' };
+    const sync = () => { const t = box.querySelector('[name=target]').value; box.querySelector('#cf-hint').textContent = hint[t] || '';
+      box.querySelector('#cf-content-f').style.display = ['github', 'netlify'].includes(t) ? 'none' : '';
+      if (['github', 'netlify'].includes(t)) box.querySelector('[name=proxied]').checked = false; };
+    box.querySelector('[name=target]').onchange = sync; sync();
+    document.getElementById('cf-token').onclick = async () => { if (!await confirmBox('เปลี่ยน token', 'ลบ Cloudflare token ที่บันทึกไว้ แล้วใส่ใหม่?', { ok: 'ลบ token' })) return; await api(`/api/sites/${site.id}/domain`, { action: 'token', token: '' }); drawDomain(); };
+    document.getElementById('cf-go').onclick = async e => {
+      const btn = e.currentTarget; btn.disabled = true;
+      const d = formData(box.querySelector('.pub-form')); d.action = 'connect';
+      try {
+        const r = await api(`/api/sites/${site.id}/domain`, d);
+        await drawDomain();
+        document.getElementById('cf-result').innerHTML = `<div class="alert ok" style="margin-top:10px"><div><b>เชื่อม ${esc(r.result.url)} แล้ว</b><ul class="small" style="margin:6px 0 0;padding-left:18px">${[...r.result.changes, ...r.result.notes].map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+          <div class="small muted">DNS ของ Cloudflare มีผลภายในไม่กี่นาที</div></div></div>`;
+      } catch (err) { document.getElementById('cf-result').innerHTML = `<div class="alert err" style="margin-top:10px">${esc(err.message)}</div>`; btn.disabled = false; }
+    };
+    if (dom) {
+      const check = async () => {
+        const el = document.getElementById('cf-check'); el.textContent = 'กำลังตรวจ…';
+        try { const c = (await api(`/api/sites/${site.id}/domain`, { action: 'check' })).check;
+          el.innerHTML = `DNS ใน Cloudflare: ${c.records_now.length ? c.records_now.map(r => esc(`${r.type} ${r.content}`)).join(', ') : '<b style="color:var(--danger)">ไม่พบ record</b>'} · HTTPS: ${c.https && c.https.ok ? `<b style="color:var(--ok)">เปิดได้ (${c.https.status})</b>` : `<b style="color:var(--warn, #b45309)">ยังเปิดไม่ได้</b> ${esc((c.https && (c.https.error || c.https.status)) || '')} <span class="muted">(ใบรับรองอาจใช้เวลาสักครู่)</span>`}`;
+        } catch (e) { el.textContent = e.message; }
+      };
+      document.getElementById('cf-check-btn').onclick = check;
+      document.getElementById('cf-off').onclick = async () => {
+        const m = modal(`<header><h2>ยกเลิกการเชื่อม ${esc(dom.domain)}</h2></header><div class="body"><label class="check"><input type="checkbox" name="rm">ลบ DNS record ที่ BuildWeb สร้างใน Cloudflare ด้วย</label></div>
+          <footer><button class="btn" data-close>ยกเลิก</button><button class="btn danger" data-ok>ยกเลิกการเชื่อม</button></footer>`);
+        m.el.querySelector('[data-ok]').onclick = async () => { try { await api(`/api/sites/${site.id}/domain`, { action: 'disconnect', remove_records: m.el.querySelector('[name=rm]').checked }); m.close(); toast('ยกเลิกแล้ว', 'ok'); drawDomain(); } catch (e) { toast(e.message, 'err'); } };
+      };
+    }
+  }
+  const site_publish_last = k => ((site.publish || {})[k] || {}).last;
+
   async function drawBackups() {
     const box = document.getElementById('bk-card');
     const r = await api(`/api/sites/${site.id}/backups`);
@@ -1980,7 +2228,9 @@ return {...}  หรือ  return 201, {...}</div></details>
     const h = D.hosting;
     const target = ex.last_target || 'downloads';
     const opt = (val, title, desc, disabled) => `<label class="opt ${val === target ? 'sel' : ''}" ${disabled ? 'style="opacity:.5"' : ''}><input type="radio" name="target" value="${val}" ${val === target ? 'checked' : ''} ${disabled ? 'disabled' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`;
-    root.innerHTML = `<div class="card pad" id="pub-card" style="margin-bottom:16px"><div class="muted">กำลังโหลด…</div></div><div class="grid g2">
+    root.innerHTML = `<div class="card pad" id="pub-card" style="margin-bottom:16px"><div class="muted">กำลังโหลด…</div></div>
+      <div class="card pad" id="rel-card" style="margin-bottom:16px"><div class="muted">กำลังโหลด…</div></div>
+      <div class="card pad" id="dom-card" style="margin-bottom:16px"><div class="muted">กำลังโหลด…</div></div><div class="grid g2">
       <div class="card pad"><h2>ส่งออกเป็นไฟล์ HTML / CSS / JS</h2><div class="hint">ได้โฟลเดอร์เว็บที่ใช้งานได้ทันที เปิดจากเครื่อง อัปขึ้นโฮสต์ใดก็ได้</div>
         ${opt('downloads', 'โฟลเดอร์ดาวน์โหลด', '~/Downloads/BuildWeb/' + esc(site.slug))}
         ${opt('xampp', 'XAMPP htdocs', D.xampp.htdocs ? `${esc(D.xampp.htdocs)}/${esc(site.slug)} → เปิดที่ http://localhost/${esc(site.slug)}/` : 'ไม่พบ XAMPP ในเครื่อง', !D.xampp.htdocs)}
@@ -2005,6 +2255,8 @@ return {...}  หรือ  return 201, {...}</div></details>
         <div class="muted small" style="margin-top:6px">หน้าตัวอย่างแสดงหน้าฉบับร่างด้วย และเปิดได้เฉพาะเครื่องนี้</div>
       </div></div>`;
     drawPublish();
+    drawReleases();
+    drawDomain();
     drawBackups();
     const custom = root.querySelector('[name=custom_path]');
     root.querySelectorAll('[name=target]').forEach(r => r.addEventListener('change', () => {

@@ -14,6 +14,8 @@ if settings.SERVER_MODE:
         path("__bw/health", server_api.health),
         path("__bw/deploy", server_api.deploy),
         path("__bw/pull", server_api.pull),
+        path("__bw/config", server_api.server_config),
+        path("__bw/domain-check", server_api.domain_check),
         path("__bw/admin/", admin.site.urls),
         re_path(r"^__bw/static/(?P<path>.*)$", static_serve, {"insecure": True}),
     ]

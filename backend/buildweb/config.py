@@ -58,9 +58,10 @@ DEFAULTS = {
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "", "from": "", "to": "", "tls": True},
     },
     "app": {
-        "auto_update": True,
-        "auto_backup": True,
-        "optimize_images": True,  # scale uploads down to 2000 px and store them as WebP   # one .bwsite copy of every site per day in <data>/backups (14 kept)  # read by the desktop shell: install patches without asking (then offer a restart)
+        "auto_update": True,  # read by the desktop shell: install patches without asking (then offer a restart)
+        "auto_backup": True,  # one .bwsite copy of every site per day in <data>/backups (14 kept)
+        "optimize_images": True,  # scale uploads down to 2000 px and store them as WebP
+        "timezone": "",  # IANA name (Asia/Bangkok...); "" = BUILDWEB_TZ or Asia/Bangkok
     },
     "export": {
         "last_target": "downloads",
@@ -73,6 +74,7 @@ DEFAULTS = {
     "publish": {
         "github_token": "",   # personal access token (repo scope) for GitHub Pages
         "netlify_token": "",  # personal access token from app.netlify.com/user/applications
+        "cloudflare_token": "",  # API token (Zone:DNS:Edit, Zone:Read) for connecting domains
     },
 }
 

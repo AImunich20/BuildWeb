@@ -16,6 +16,12 @@
         <span class="switch"><input type="checkbox" data-app="optimize_images"><span></span></span></div>
       <div class="row" style="margin-top:12px"><span class="badge brand mono">v{{ app_version }}</span><button class="btn primary sm" onclick="BW.checkUpdates()">ตรวจสอบอัพเดทตอนนี้</button></div>
     </div>
+    <div class="card pad" id="clock-card">
+      <h2>เวลาเซิร์ฟเวอร์</h2>
+      <div class="hint">เขตเวลาของแอปนี้: ใช้กับงานตั้งเวลา (daily 09:00), การปล่อยเวอร์ชันตามเวลา, เวลาคำสั่งซื้อ, สถิติรายวัน และสำรองอัตโนมัติ · เซิร์ฟเวอร์บน VPS ตั้งแยกได้ที่แท็บเผยแพร่ของแต่ละเว็บ</div>
+      <div class="row" style="gap:14px;flex-wrap:nowrap"><div><div class="mono" id="clock-now" style="font-size:22px;font-weight:600">--:--:--</div><div class="small muted" id="clock-off"></div></div>
+        <select class="input" id="clock-tz" style="flex:1"></select></div>
+    </div>
     <div class="card pad" id="desktop-card">
       <h2>แอปบน Mac</h2>
       <div class="hint">ปิดหน้าต่างแล้ว BuildWeb ยังทำงานต่อบนแถบเมนู (◆) — เว็บที่โฮสต์อยู่ยังเปิดได้ เลือก “ออกจาก BuildWeb” จากไอคอนเพื่อปิดจริง</div>
@@ -116,6 +122,19 @@ api('/api/settings/app').then(r => {
   document.getElementById('auto-update').checked = r.app.auto_update;
   document.querySelectorAll('[data-app]').forEach(x => { x.checked = r.app[x.dataset.app] !== false;
     x.onchange = () => api('/api/settings/app', { [x.dataset.app]: x.checked }).then(() => toast('บันทึกแล้ว', 'ok')).catch(e => toast(e.message, 'err')); });
+});
+api('/api/settings/app?zones=1').then(r => {
+  const sel = document.getElementById('clock-tz');
+  sel.innerHTML = r.zones.map(z => `<option ${z === r.clock.timezone ? 'selected' : ''}>${esc(z)}</option>`).join('');
+  let base = r.clock;
+  const fmt = c => { const at = new Date((c.epoch + (Date.now() / 1000 - c.at0)) * 1000);
+    document.getElementById('clock-now').textContent = at.toLocaleTimeString('th-TH', { timeZone: c.timezone, hour12: false });
+    document.getElementById('clock-off').textContent = `${at.toLocaleDateString('th-TH', { timeZone: c.timezone, dateStyle: 'medium' })} · ${c.timezone} (${c.utc_offset})`; };
+  base.at0 = Date.now() / 1000; fmt(base); setInterval(() => fmt(base), 1000);
+  sel.onchange = async () => {
+    try { const x = await api('/api/settings/app', { timezone: sel.value }); base = x.clock; base.at0 = Date.now() / 1000; fmt(base); toast(`ตั้งเขตเวลาเป็น ${sel.value} แล้ว (งานตั้งเวลาคำนวณรอบใหม่ให้)`, 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
 });
 document.getElementById('auto-update').onchange = async e => {
   try { await api('/api/settings/app', { auto_update: e.target.checked }); toast(e.target.checked ? 'จะติดตั้งอัพเดทอัตโนมัติ' : 'จะถามก่อนอัพเดท', 'ok'); }

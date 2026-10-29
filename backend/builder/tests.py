@@ -732,7 +732,7 @@ class V014Tests(TestCase):
 
         from . import publish
 
-        calls = []
+        calls, blobs = [], []
 
         def fake(method, url, token, data=None, raw=None, content_type=None, timeout=60):
             calls.append((method, url.replace(publish.GITHUB_API, "").replace(publish.NETLIFY_API, "")))
@@ -746,6 +746,7 @@ class V014Tests(TestCase):
             if "/git/ref/heads/" in u:
                 return 404, {}
             if u.endswith("/git/blobs"):
+                blobs.append(base64.b64decode(data["content"]))
                 return 201, {"sha": publish.git_blob_sha(base64.b64decode(data["content"]))}
             if u.endswith("/git/trees"):
                 return 201, {"sha": "tree1"}
@@ -775,6 +776,11 @@ class V014Tests(TestCase):
             self.site.refresh_from_db()
             self.assertEqual(self.site.base_url, "https://me.github.io/shop/")
             self.assertIn(("POST", "/repos/me/shop/pages"), calls)
+            self.assertNotIn(b"www.shop.example\n", blobs)
+            self.site.publish["github"]["domain"] = "www.shop.example"  # connected through Cloudflare
+            self.site.save()
+            publish.run(self.site, "github")
+            self.assertIn(b"www.shop.example\n", blobs)  # the CNAME file keeps the GitHub Pages custom domain
             res = publish.run(self.site, "netlify")
             self.assertEqual(res["site_id"], "n1")
         self.site.refresh_from_db()
@@ -1689,3 +1695,259 @@ class ShopReuseTests(TestCase):
         self.assertIn("data-bw-add-to-cart", detail.html)
         files, _ = render.build_files(site)
         self.assertIn('data-bw-add-to-cart="', files["product/latte.html"])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class ReleaseTests(TestCase):
+    """v0.9: server time zone, site versions (releases, staging, scheduled deploys, rollback), Cloudflare domains."""
+
+    def setUp(self):
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Version Shop", "business")
+        self.orders = Collection.objects.create(site=self.site, name="Orders", slug="orders", fields=[{"name": "item", "type": "text"}],
+                                                options={"forms": True})
+        self.home = self.site.home_page()
+        self.home.html = "<h1>VERSION ONE</h1>"
+        self.home.save()
+
+    def tearDown(self):
+        from . import clock
+
+        clock.apply("Asia/Bangkok")
+
+    def post(self, url, d):
+        return self.c.post(url, json.dumps(d), content_type="application/json")
+
+    def test_time_zone_applies_at_once_and_reschedules_jobs(self):
+        from django.utils import timezone
+
+        from . import clock
+        from .models import Job
+
+        job = Job.objects.create(site=self.site, name="morning", schedule="daily 09:00", action="call_url", params={}, enabled=True,
+                                 next_run=timezone.now())
+        r = self.post("/api/settings/app", {"timezone": "Asia/Tokyo"}).json()
+        self.assertEqual(r["clock"]["timezone"], "Asia/Tokyo")
+        self.assertEqual(r["clock"]["utc_offset"], "UTC+09:00")
+        job.refresh_from_db()
+        self.assertEqual(timezone.localtime(job.next_run).hour, 9)
+        self.assertEqual(str(timezone.localtime(job.next_run).tzinfo), "Asia/Tokyo")
+        self.assertEqual(self.post("/api/settings/app", {"timezone": "Mars/Base"}).status_code, 400)
+        self.assertIn("Asia/Bangkok", self.c.get("/api/settings/app?zones=1").json()["zones"])
+        self.assertAlmostEqual(clock.drift(timezone.now().isoformat(), __import__("time").time() - 1, __import__("time").time() + 1), 0, delta=2)
+
+    def test_versions_diff_restore_and_static_deploy_from_snapshot(self):
+        from unittest import mock
+
+        from . import publish, releases
+
+        r1 = self.post(f"/api/sites/{self.site.id}/releases", {"action": "create", "version": "1.0.0", "notes": "first"}).json()
+        self.assertEqual(r1["suggest"], {"patch": "1.0.1", "minor": "1.1.0", "major": "2.0.0", "latest": "1.0.0"})
+        v1 = self.site.releases.get(version="1.0.0")
+        self.assertEqual(self.post(f"/api/sites/{self.site.id}/releases", {"action": "create", "version": "1.0.0"}).status_code, 400)
+        # edit the site, then version 1.1.0
+        self.home.html = "<h1>VERSION TWO</h1>"
+        self.home.save()
+        services.create_page(self.site, "โปรโมชัน", slug="promo") if hasattr(services, "create_page") else Page.objects.create(
+            site=self.site, title="โปรโมชัน", slug="promo", html="<p>promo</p>")
+        Record.objects.create(collection=self.orders, data={"item": "order from a visitor"})
+        cur = self.c.get(f"/api/releases/{v1.id}/diff?against=current").json()["diff"]
+        self.assertIn("promo", [p["slug"] for p in cur["pages"]["added"]])
+        self.assertIn(self.home.slug, [p["slug"] for p in cur["pages"]["changed"]])
+        self.assertFalse(cur["collections"]["changed"])  # server-data rows are not part of a version
+        v2 = releases.create(self.site, "1.1.0", "promo page")
+        self.assertTrue(v2.summary["total"] >= 2)
+        # static deploy of the OLD version builds files from its snapshot
+        stored = {}
+
+        class FakeFTP:
+            def __init__(self, timeout=None):
+                pass
+
+            def connect(self, host, port):
+                pass
+
+            def login(self, user, pw):
+                pass
+
+            def mkd(self, path):
+                pass
+
+            def storbinary(self, cmd, f):
+                stored[cmd[5:]] = f.read()
+
+            def quit(self):
+                pass
+
+        self.site.publish = {"ftp": {"host": "ftp.example", "user": "u", "password": "p", "path": "www"}}
+        self.site.save()
+        n_sites = Site.objects.count()
+        with mock.patch.object(publish, "FTP", FakeFTP):
+            publish.run(self.site, "ftp", release=v1)
+        self.assertIn(b"VERSION ONE", stored["/www/index.html"])
+        self.assertNotIn("/www/promo.html", stored)
+        self.assertEqual(Site.objects.count(), n_sites)  # the temporary copy left nothing behind
+        v1.refresh_from_db()
+        self.assertTrue(v1.deploys[-1]["ok"])
+        self.site.refresh_from_db()
+        self.assertEqual(self.site.publish["ftp"]["last"]["version"], "1.0.0")
+        self.assertEqual(releases.live_versions(self.site), {"ftp": "1.0.0"})
+        # restore v1 in the app: design back, visitor data and publish settings stay
+        site = releases.restore(v1)
+        self.assertIn("VERSION ONE", site.home_page().html)
+        self.assertFalse(site.pages.filter(slug="promo").exists())
+        self.assertEqual(site.collections.get(slug="orders").records.count(), 1)
+        self.assertEqual(site.publish["ftp"]["host"], "ftp.example")
+        self.assertEqual(site.releases.count(), 2)
+
+    def test_staging_scheduled_deploy_and_rollback_to_server(self):
+        from datetime import timedelta
+        from unittest import mock
+
+        from django.utils import timezone
+
+        from . import publish, releases
+
+        for t, url in (("server", "https://shop.example"), ("staging", "https://test.shop.example")):
+            self.post(f"/api/sites/{self.site.id}/publish", {"target": t, "url": url, "token": "t" * 32})
+        self.site.refresh_from_db()
+        v1 = releases.create(self.site, "1.0.0")
+        sent = []
+
+        def fake(method, url, token, data=None, raw=None, content_type=None, timeout=60):
+            if url.endswith("/health"):
+                return 200, {"version": "x"}
+            sent.append((url, raw))
+            return 200, {"site": self.site.slug, "pages": 1, "collections": 1}
+
+        with mock.patch.object(publish, "http", side_effect=fake):
+            publish.run(self.site, "staging", release=v1)
+        self.assertTrue(sent[0][0].startswith("https://test.shop.example/__bw/deploy"))
+        self.assertEqual(sent[0][1], releases.path_of(v1).read_bytes())  # the snapshot itself goes to the server
+        self.site.refresh_from_db()
+        self.assertEqual(self.site.base_url, "")  # a test server never becomes the site's address
+        # schedule the same version for production
+        r = self.post(f"/api/sites/{self.site.id}/releases", {"action": "schedule", "id": v1.id, "targets": ["server"],
+                                                               "at": (timezone.localtime() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.post(f"/api/sites/{self.site.id}/releases", {"action": "schedule", "id": v1.id, "targets": ["server"],
+                                                                           "at": "2001-01-01T00:00"}).status_code, 400)
+        with mock.patch.object(publish, "http", side_effect=fake):
+            releases.run_due()
+            self.assertEqual(len(sent), 1)  # not yet
+            self.site.releases.update(scheduled_at=timezone.now() - timedelta(seconds=1))
+            releases.run_due()
+        self.assertTrue(sent[1][0].startswith("https://shop.example/__bw/deploy"))
+        v1.refresh_from_db()
+        self.assertIsNone(v1.scheduled_at)
+        self.assertEqual([d["target"] for d in v1.deploys], ["staging", "server"])
+        # a failing deploy is recorded on the version
+        with mock.patch.object(publish, "http", return_value=(401, {})):
+            with self.assertRaises(publish.PublishError):
+                publish.run(self.site, "server", release=v1)
+        v1.refresh_from_db()
+        self.assertFalse(v1.deploys[-1]["ok"])
+
+    def test_server_config_time_zone_and_domains(self):
+        import os
+        from unittest import mock
+
+        from django.test import RequestFactory
+
+        from . import public, server_api
+
+        rf = RequestFactory()
+        auth = {"HTTP_AUTHORIZATION": "Bearer " + "t" * 32}
+        with mock.patch.dict(os.environ, {"BUILDWEB_DEPLOY_TOKEN": "t" * 32}):
+            self.assertEqual(server_api.server_config(rf.get("/__bw/config")).status_code, 401)
+            r = json.loads(server_api.server_config(rf.post("/__bw/config", json.dumps({"timezone": "Europe/London",
+                                                                                        "domains": {"Shop.Example": self.site.slug}}),
+                                                            content_type="application/json", **auth)).content)
+            self.assertEqual(r["timezone"], "Europe/London")
+            self.assertEqual(r["domains"], {"shop.example": self.site.slug})
+            bad = server_api.server_config(rf.post("/__bw/config", json.dumps({"domains": {"x.example": "nope"}}),
+                                                   content_type="application/json", **auth))
+            self.assertEqual(bad.status_code, 400)
+            h = json.loads(server_api.health(rf.get("/__bw/health")).content)
+            self.assertEqual(h["timezone"], "Europe/London")
+        self.assertEqual(server_api.domain_check(rf.get("/__bw/domain-check?domain=shop.example")).status_code, 200)
+        self.assertEqual(server_api.domain_check(rf.get("/__bw/domain-check?domain=evil.example")).status_code, 404)
+        with override_settings(SERVER_MODE=True):
+            self.assertEqual(public.domain_site(rf.get("/", HTTP_HOST="shop.example")), self.site.slug)
+        self.assertIsNone(public.domain_site(rf.get("/", HTTP_HOST="shop.example")))  # desktop hosting ignores them
+        with mock.patch.dict(os.environ, {"BUILDWEB_DEPLOY_TOKEN": "t" * 32}):
+            server_api.server_config(rf.post("/__bw/config", json.dumps({"remove_domains": ["shop.example"]}),
+                                             content_type="application/json", **auth))
+        self.assertEqual(server_api.saved_domains(), {})
+
+    def test_cloudflare_connect(self):
+        from unittest import mock
+
+        from . import cloudflare, publish
+
+        self.post(f"/api/sites/{self.site.id}/publish", {"target": "server", "url": "https://203.0.113.10", "token": "t" * 32})
+        dns = [{"id": "old", "type": "A", "name": "shop.example", "content": "198.51.100.1", "proxied": False}]
+        calls = []
+
+        def fake(method, url, token, data=None, raw=None, content_type=None, timeout=60):
+            calls.append((method, url, data))
+            if "api.cloudflare.com" in url:
+                self.assertEqual(token, "cf-token-123")
+                path = url.split("/client/v4")[1]
+                if path == "/user/tokens/verify":
+                    return 200, {"success": True, "result": {"status": "active"}}
+                if path.startswith("/zones?"):
+                    return 200, {"success": True, "result": [{"id": "z1", "name": "shop.example", "status": "active", "name_servers": []}]}
+                if "dns_records?name=" in path:
+                    name = path.split("name=")[1].split("&")[0]
+                    return 200, {"success": True, "result": [r for r in dns if r["name"] == name]}
+                if method in ("POST", "PUT"):
+                    return 200, {"success": True, "result": {"id": "new"}}
+                if method == "PATCH":
+                    return 403, {"success": False, "errors": [{"message": "no permission"}]}
+                return 200, {"success": True, "result": {}}
+            return 200, {"ok": True, "domains": {}}  # the BuildWeb server's /__bw/config
+
+        with mock.patch.object(publish, "http", side_effect=fake):
+            r = self.post(f"/api/sites/{self.site.id}/domain", {"action": "token", "token": "cf-token-123"}).json()
+            self.assertEqual(r["zones"][0]["name"], "shop.example")
+            from buildweb import config
+
+            self.assertTrue(config.load()["publish"]["cloudflare_token"].startswith("enc:"))
+            # an existing record with another IP is not overwritten without permission
+            bad = self.post(f"/api/sites/{self.site.id}/domain", {"action": "connect", "domain": "shop.example", "target": "server"})
+            self.assertEqual(bad.status_code, 400)
+            self.assertIn("198.51.100.1", bad.json()["error"])
+            self.assertFalse([c for c in calls if c[0] in ("POST", "PUT", "DELETE") and "cloudflare" in c[1]])
+            ok = self.post(f"/api/sites/{self.site.id}/domain", {"action": "connect", "domain": "https://shop.example/", "target": "server",
+                                                                  "replace": True, "www": True, "proxied": True}).json()
+        self.assertIn("แก้ shop.example A → 203.0.113.10", ok["result"]["changes"])
+        self.assertIn("เพิ่ม www.shop.example CNAME → shop.example", ok["result"]["changes"])
+        put = [c for c in calls if c[0] == "PUT" and "dns_records/old" in c[1]][0]
+        self.assertTrue(put[2]["proxied"])
+        srv = [c for c in calls if c[1].endswith("/__bw/config")][0]
+        self.assertEqual(srv[2]["domains"], {"shop.example": self.site.slug, "www.shop.example": self.site.slug})
+        self.site.refresh_from_db()
+        self.assertEqual(self.site.base_url, "https://shop.example/")
+        self.assertEqual(self.site.publish["domain"]["zone"], "shop.example")
+        with self.assertRaises(cloudflare.CloudflareError):
+            cloudflare.clean_domain("not a domain")
+        with self.assertRaises(cloudflare.CloudflareError):  # a LAN address cannot serve a public domain
+            cloudflare.plan(Site(publish={"server": {"url": "http://192.168.1.5:8090"}}), "x.example", "server")
+
+    def test_team_editor_cannot_release_or_connect_domains(self):
+        from django.contrib.auth import get_user_model
+
+        from . import members, releases
+        from .models import TeamMember
+
+        members._attempts.clear()
+        u = get_user_model().objects.create_user("ed2", password="secret123")
+        TeamMember.objects.create(user=u, role="editor", sites=[self.site.id])
+        v = releases.create(self.site, "1.0.0")
+        c = Client()
+        c.post("/login", {"username": "ed2", "password": "secret123"}, **{"buildweb.team": True})
+        self.assertEqual(c.get(f"/api/sites/{self.site.id}/releases", **{"buildweb.team": True}).status_code, 403)
+        self.assertEqual(c.get(f"/api/releases/{v.id}/file.bwsite", **{"buildweb.team": True}).status_code, 403)
+        self.assertEqual(c.post(f"/api/sites/{self.site.id}/domain", "{}", content_type="application/json", **{"buildweb.team": True}).status_code, 403)

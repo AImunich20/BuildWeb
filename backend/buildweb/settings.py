@@ -86,7 +86,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_PASSWORD_VALIDATORS = []
 
 LANGUAGE_CODE = "th"
-TIME_ZONE = "Asia/Bangkok"
+def _zone(name):
+    from zoneinfo import ZoneInfo
+
+    try:
+        return bool(name) and ZoneInfo(name) and name
+    except Exception:
+        return None
+
+
+# Server time zone: set in the app (config "app.timezone", also from the desktop app to a server) or BUILDWEB_TZ.
+TIME_ZONE = _zone(cfg["app"].get("timezone")) or _zone(os.environ.get("BUILDWEB_TZ")) or "Asia/Bangkok"
 USE_I18N = True
 USE_TZ = True
 

@@ -805,7 +805,16 @@ def app_settings(request):
         for k in ("auto_update", "auto_backup", "optimize_images"):
             if k in d:
                 config.update("app", {k: as_bool(d[k])})
-    return {"app": config.load()["app"]}
+        if d.get("timezone"):
+            from . import clock
+
+            if not clock.valid(d["timezone"]):
+                raise ApiError("ไม่รู้จักเขตเวลานี้", field="timezone")
+            config.update("app", {"timezone": d["timezone"]})
+            clock.apply(d["timezone"])
+    from . import clock
+
+    return {"app": config.load()["app"], "clock": clock.info(), "zones": clock.zones() if request.GET.get("zones") else []}
 
 
 # --- import ---------------------------------------------------------------------------------------
@@ -1171,6 +1180,7 @@ PUBLISH_FIELDS = {
     "netlify": ("site_id", "name", "url"),
     "ftp": ("host", "port", "user", "password", "path", "tls", "url"),
     "server": ("url", "token", "site_url"),
+    "staging": ("url", "token", "site_url"),
 }
 
 
@@ -1217,8 +1227,10 @@ def publish_settings(request, site_id):
 @api
 def publish_start(request, site_id, target):
     site = get_object_or_404(Site, pk=site_id)
+    rid = body(request).get("release")
+    release = get_object_or_404(site.releases, pk=int(rid)) if rid else None
     try:
-        job = publish.start(site, target)
+        job = publish.start(site, target, release=release)
     except publish.PublishError as e:
         raise ApiError(str(e))
     return {"job": job}
@@ -1786,10 +1798,10 @@ def import_bwsite(request):
     return {"site": site_json(site), "url": f"/sites/{site.id}/"}
 
 
-def server_cfg(site):
+def server_cfg(site, target="server"):
     from .crypto import decrypt
 
-    cfg = dict((site.publish or {}).get("server") or {})
+    cfg = dict((site.publish or {}).get(target if target in publish.SERVER_TARGETS else "server") or {})
     cfg["token"] = decrypt(cfg.get("token", ""))
     return cfg
 
@@ -1797,14 +1809,57 @@ def server_cfg(site):
 @require_POST
 @api
 def server_test(request, site_id):
+    import time
+
+    from . import clock
+
     site = get_object_or_404(Site, pk=site_id)
+    sent = time.time()
     try:
-        info = publish.server_call(server_cfg(site), "GET", "/__bw/health", timeout=15)
+        info = publish.server_call(server_cfg(site, body(request).get("target", "server")), "GET", "/__bw/health", timeout=15)
     except publish.PublishError as e:
         raise ApiError(str(e))
     on = any(s["slug"] == site.slug for s in info.get("sites", []))
+    drift = clock.drift(info.get("time"), sent, time.time())
+    when = ""
+    if info.get("time"):
+        when = f" · เวลาเซิร์ฟเวอร์ {info['time'][11:16]} ({info.get('timezone')})"
+        if drift is not None and abs(drift) > 60:
+            when += f" ⚠️ นาฬิกาคลาดจากเครื่องนี้ {abs(drift):.0f} วินาที"
     return {"message": f"เชื่อมต่อได้ · BuildWeb {info.get('version')} · ฐานข้อมูล {info.get('database')} · "
-                       + ("มีเว็บนี้แล้ว" if on else "ยังไม่มีเว็บนี้ (กด Deploy)")}
+                       + ("มีเว็บนี้แล้ว" if on else "ยังไม่มีเว็บนี้ (กด Deploy)") + when, "drift": drift}
+
+
+@api
+def server_remote_config(request, site_id):
+    """Time zone and domains of the BuildWeb server, read and set from here."""
+    import time
+
+    from . import clock
+
+    site = get_object_or_404(Site, pk=site_id)
+    d = body(request) if request.method == "POST" else {}
+    cfg = server_cfg(site, d.get("target") or request.GET.get("target", "server"))
+    sent = time.time()
+    try:
+        if request.method == "POST":
+            send = {}
+            if d.get("timezone"):
+                if not clock.valid(d["timezone"]):
+                    raise ApiError("ไม่รู้จักเขตเวลานี้", field="timezone")
+                send["timezone"] = d["timezone"]
+            if d.get("remove_domain"):
+                send["remove_domains"] = [d["remove_domain"]]
+            r = publish.server_call(cfg, "POST", "/__bw/config", data=send, timeout=20)
+        else:
+            r = publish.server_call(cfg, "GET", "/__bw/config", timeout=20)
+    except publish.PublishError as e:
+        if "ไม่พบ BuildWeb server" in str(e):  # health answers but /__bw/config does not: a server from before v0.9
+            raise ApiError("เซิร์ฟเวอร์ยังเป็นรุ่นเก่า — อัปเดตเซิร์ฟเวอร์ก่อน (ดาวน์โหลดชุดติดตั้งใหม่ แล้ว docker compose up -d --build)")
+        raise ApiError(str(e))
+    r["drift"] = clock.drift(r.get("now"), sent, time.time())
+    r["zones"] = clock.zones()
+    return r
 
 
 @require_POST
@@ -2068,3 +2123,105 @@ def assets_optimize(request, site_id):
                 a.size = path.stat().st_size
                 a.save(update_fields=["size"])
     return {"files": n, "saved": saved}
+
+
+# --- versions (releases) --------------------------------------------------------------------------
+
+@api
+def site_releases(request, site_id):
+    from . import releases
+
+    site = get_object_or_404(Site, pk=site_id)
+    if request.method == "POST":
+        d = body(request)
+        action = d.get("action")
+        try:
+            if action == "create":
+                user = request.user.get_username() if request.user.is_authenticated else ""
+                r = releases.create(site, d.get("version"), d.get("notes", ""), user)
+                if d.get("at"):
+                    releases.schedule(r, releases.parse_when(d["at"]), d.get("targets") or [])
+            else:
+                r = get_object_or_404(site.releases, pk=int(d.get("id") or 0))
+                if action == "schedule":
+                    releases.schedule(r, releases.parse_when(d.get("at")), d.get("targets") or [])
+                elif action == "unschedule":
+                    r.scheduled_at, r.scheduled_targets = None, []
+                    r.save(update_fields=["scheduled_at", "scheduled_targets"])
+                elif action == "notes":
+                    r.notes = str(d.get("notes", ""))[:5000]
+                    r.save(update_fields=["notes"])
+                elif action == "restore":
+                    site = releases.restore(r)
+                elif action == "delete":
+                    releases.delete(r)
+                else:
+                    raise ApiError("ไม่รู้จักคำสั่งนี้")
+        except releases.ReleaseError as e:
+            raise ApiError(str(e))
+    from . import clock
+
+    return {"releases": [releases.to_json(r) for r in site.releases.all()[:100]], "suggest": releases.suggest(site),
+            "live": releases.live_versions(site), "targets": publish.LABELS,
+            "configured": [t for t, c in (site.publish or {}).items() if t in publish.RUNNERS and isinstance(c, dict)
+                           and (c.get("url") or c.get("host") or c.get("repo") or c.get("site_id") or c.get("last"))],
+            "clock": clock.info()}
+
+
+@require_GET
+@api
+def release_diff(request, release_id):
+    from . import releases
+    from .models import Release
+
+    r = get_object_or_404(Release, pk=release_id)
+    against = request.GET.get("against", "current")
+    now = releases.bundle_of(r)
+    if against == "current":
+        return {"diff": releases.diff(now, releases.current_of(r.site)), "from": r.version, "to": "ตอนนี้"}
+    other = get_object_or_404(r.site.releases, pk=int(against))
+    return {"diff": releases.diff(releases.bundle_of(other), now), "from": other.version, "to": r.version}
+
+
+def release_file(request, release_id):
+    from . import releases
+    from .models import Release
+
+    r = get_object_or_404(Release, pk=release_id)
+    return download(releases.path_of(r).read_bytes(), f"{r.site.slug}-{r.version}.bwsite")
+
+
+# --- own domain through Cloudflare ----------------------------------------------------------------
+
+@api
+def site_domain(request, site_id):
+    from . import cloudflare
+
+    site = get_object_or_404(Site, pk=site_id)
+    out = {}
+    try:
+        if request.method == "POST":
+            d = body(request)
+            action = d.get("action")
+            if action == "token":
+                tok = (d.get("token") or "").strip()
+                if tok:
+                    out["zones"] = cloudflare.verify(tok)
+                cloudflare.save_token(tok)
+            elif action == "connect":
+                out["result"] = cloudflare.connect(site, d.get("domain"), d.get("target"), proxied=as_bool(d.get("proxied")),
+                                                   www=as_bool(d.get("www")), replace=as_bool(d.get("replace")),
+                                                   content=d.get("content", ""))
+                site.refresh_from_db()
+            elif action == "check":
+                out["check"] = cloudflare.check(site)
+            elif action == "disconnect":
+                out["result"] = cloudflare.disconnect(site, remove_records=as_bool(d.get("remove_records")))
+            else:
+                raise ApiError("ไม่รู้จักคำสั่งนี้")
+        elif cloudflare.token() and request.GET.get("zones"):
+            out["zones"] = cloudflare.zones()
+    except cloudflare.CloudflareError as e:
+        raise ApiError(str(e))
+    return {**out, "token_set": bool(cloudflare.token()), "domain": (site.publish or {}).get("domain"),
+            "targets": {t: publish.LABELS[t] for t in publish.RUNNERS}}

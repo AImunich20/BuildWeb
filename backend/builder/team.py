@@ -23,7 +23,8 @@ ADMIN_ONLY = [r"^/settings/", r"^/django-admin/", r"^/api/settings/", r"^/api/sy
 EDITOR_DENY = [
     r"^/sites/\d+/(api|logic|members|settings|export|stats)/",
     r"^/sites/\d+/edit-shared/",
-    r"^/api/sites/\d+/(update|restapi|logic|members|publish|server|backups|backup\.bwsite|export|navbar|blog|seo|stats)",
+    r"^/api/sites/\d+/(update|restapi|logic|members|publish|server|backups|backup\.bwsite|export|navbar|blog|seo|stats|releases|domain)",
+    r"^/api/releases/",
     r"^/api/sites/\d+/(collections/(create|import-file|import-mysql)|pages/(create|reorder|sync-nav)|shared/extract)",
     r"^/api/collections/\d+/(update|delete|resync|pages)$",
     r"^/api/pages/\d+/(update|delete|duplicate|home)$",
@@ -41,6 +42,7 @@ SITE_PATHS = [
     (re.compile(r"^/api/members/(\d+)/"), "SiteUser"),
     (re.compile(r"^/api/apikeys/(\d+)/"), "ApiKey"),
     (re.compile(r"^/api/revisions/(\d+)/"), "PageRevision"),
+    (re.compile(r"^/api/releases/(\d+)/"), "Release"),
 ]
 
 

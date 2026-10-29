@@ -34,6 +34,7 @@ from .render import build_files
 GITHUB_API = "https://api.github.com"
 NETLIFY_API = "https://api.netlify.com/api/v1"
 TARGETS = ("github", "netlify", "ftp")
+SERVER_TARGETS = ("server", "staging")  # BuildWeb servers: production and a test server
 
 _jobs = {}
 _lock = threading.Lock()
@@ -122,8 +123,10 @@ def publish_github(site, cfg, token, log):
     url = f"https://{owner.lower()}.github.io/" if name.lower() == f"{owner.lower()}.github.io" else f"https://{owner.lower()}.github.io/{name}/"
     if not site.base_url:
         site.base_url = cfg.get("url") or url  # sitemap.xml / share links in this upload already
-    files = site_files(site)
-    files[".nojekyll"] = b""  # serve folders/files starting with "_" as they are
+    files = dict(cfg.get("_files") or site_files(site))
+    files[".nojekyll"] = b""
+    if cfg.get("domain"):  # own domain (connected through Cloudflare): GitHub Pages reads it from this file
+        files["CNAME"] = (cfg["domain"] + "\n").encode()  # serve folders/files starting with "_" as they are
     log(f"เตรียม {len(files)} ไฟล์")
 
     st, ref = http("GET", f"{base}/git/ref/heads/{branch}", token)
@@ -213,7 +216,7 @@ def publish_netlify(site, cfg, token, log):
         log(f"สร้างเว็บบน Netlify: {info.get('name')}")
     if not site.base_url and info.get("ssl_url"):
         site.base_url = info["ssl_url"] + "/"
-    files = site_files(site)
+    files = cfg.get("_files") or site_files(site)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for path, content in files.items():
@@ -255,7 +258,7 @@ def ftp_connect(cfg):
 
 
 def publish_ftp(site, cfg, token, log):
-    files = site_files(site)
+    files = cfg.get("_files") or site_files(site)
     ftp = ftp_connect(cfg)
     root = "/" + (cfg.get("path") or "").strip().strip("/")
     made = set()
@@ -294,14 +297,15 @@ def publish_ftp(site, cfg, token, log):
 
 # --- BuildWeb server (server.py on a VPS/Docker) ---------------------------------------------------
 
-def server_call(cfg, method, path, raw=None, timeout=60):
+def server_call(cfg, method, path, raw=None, timeout=60, data=None):
     url = (cfg.get("url") or "").rstrip("/")
     if not url.startswith(("https://", "http://")):
         raise PublishError("ใส่ที่อยู่เซิร์ฟเวอร์ เช่น https://myshop.com")
     token = cfg.get("token") or ""
     if not token:
         raise PublishError("ใส่ deploy token (BUILDWEB_DEPLOY_TOKEN ในไฟล์ .env ของเซิร์ฟเวอร์)")
-    st, body = http(method, url + path, token, raw=raw, content_type="application/zip" if raw is not None else None, timeout=timeout)
+    st, body = http(method, url + path, token, data=data, raw=raw, content_type="application/zip" if raw is not None else None,
+                    timeout=timeout)
     if st == 401:
         raise PublishError("deploy token ไม่ถูกต้อง")
     if st == 404:
@@ -316,7 +320,7 @@ def publish_server(site, cfg, token, log):
 
     info = server_call(cfg, "GET", "/__bw/health", timeout=20)
     log(f"เชื่อมต่อเซิร์ฟเวอร์ได้ (BuildWeb {info.get('version')}, ฐานข้อมูล {info.get('database', '?')})")
-    data = backup.export_bytes(site)
+    data = cfg.get("_bundle") or backup.export_bytes(site)
     log(f"ส่งเว็บ {len(data) // 1024:,} KB")
     res = server_call(cfg, "POST", f"/__bw/deploy?site={site.slug}", raw=data, timeout=600)
     log(("สร้างเว็บใหม่บนเซิร์ฟเวอร์" if res.get("created") else "อัปเดตเว็บบนเซิร์ฟเวอร์") +
@@ -324,7 +328,8 @@ def publish_server(site, cfg, token, log):
     return {"url": cfg.get("site_url") or cfg["url"].rstrip("/") + "/", "files": res.get("pages", 0)}
 
 
-RUNNERS = {"github": publish_github, "netlify": publish_netlify, "ftp": publish_ftp, "server": publish_server}
+RUNNERS = {"github": publish_github, "netlify": publish_netlify, "ftp": publish_ftp, "server": publish_server,
+           "staging": publish_server}
 
 
 # --- settings & jobs ------------------------------------------------------------------------------
@@ -333,8 +338,9 @@ def tokens():
     return config.load().get("publish", {})
 
 
-def run(site, target, log=lambda m: None):
-    """Publish synchronously; returns the result dict (also stored in Site.publish[target]["last"])."""
+def run(site, target, log=lambda m: None, release=None):
+    """Publish synchronously; returns the result dict (also stored in Site.publish[target]["last"]).
+    With ``release`` the files come from that version's snapshot instead of the site as it is now."""
     from .crypto import decrypt
 
     cfg = dict((site.publish or {}).get(target) or {})
@@ -342,9 +348,24 @@ def run(site, target, log=lambda m: None):
         if cfg.get(k):
             cfg[k] = decrypt(cfg[k])
     token = tokens().get(f"{target}_token", "")
-    if not site.base_url and cfg.get("url"):
+    if not site.base_url and cfg.get("url") and target != "staging":
         site.base_url = cfg["url"]  # so this very upload already has sitemap.xml / absolute share links
-    result = RUNNERS[target](site, cfg, token, log)
+    try:
+        if release is not None:
+            from . import releases
+
+            log(f"ใช้เวอร์ชัน {release.version}")
+            if target in SERVER_TARGETS:
+                cfg["_bundle"] = releases.path_of(release).read_bytes()
+            else:
+                cfg["_files"] = releases.files_of(release)
+        result = RUNNERS[target](site, cfg, token, log)
+    except Exception as e:
+        if release is not None:
+            releases.record(release, target, False, e)
+        raise
+    if release is not None:
+        releases.record(release, target, True, result.get("url", ""))
     site.refresh_from_db()
     pub = dict(site.publish or {})
     t = dict(pub.get(target) or {})
@@ -354,11 +375,11 @@ def run(site, target, log=lambda m: None):
     if result.get("url"):
         t["url"] = t.get("url") or result["url"]
     t["last"] = {"at": datetime.now().isoformat(timespec="seconds"), "ok": True, "url": result.get("url", ""),
-                 "files": result.get("files", 0)}
+                 "files": result.get("files", 0), "version": release.version if release is not None else ""}
     pub[target] = t
     site.publish = pub
     fields = ["publish"]
-    if not site.base_url and t.get("url"):
+    if not site.base_url and t.get("url") and target != "staging":
         site.base_url = t["url"]
         fields.append("base_url")
         log(f"ตั้งที่อยู่เว็บจริงเป็น {t['url']}")
@@ -366,7 +387,7 @@ def run(site, target, log=lambda m: None):
     return result
 
 
-def start(site, target):
+def start(site, target, release=None):
     if target not in RUNNERS:
         raise PublishError("ไม่รู้จักปลายทางนี้")
     with _lock:
@@ -374,7 +395,7 @@ def start(site, target):
             if j["site"] == site.id and j["state"] == "running":
                 raise PublishError("กำลังเผยแพร่เว็บนี้อยู่ รอให้เสร็จก่อน")
         job = {"id": uuid.uuid4().hex[:12], "site": site.id, "target": target, "state": "running", "log": [],
-               "url": "", "error": "", "started": time.time()}
+               "url": "", "error": "", "started": time.time(), "version": release.version if release is not None else ""}
         _jobs[job["id"]] = job
 
     def log(msg):
@@ -385,7 +406,7 @@ def start(site, target):
         try:
             s = Site.objects.get(pk=site.id)
             log(f"เริ่มเผยแพร่ “{s.name}” → {LABELS[target]}")
-            result = run(s, target, log)
+            result = run(s, target, log, release=release)
             job["url"] = result.get("url", "")
             log("เสร็จแล้ว" + (f" → {job['url']}" if job["url"] else ""))
             job["state"] = "done"
@@ -408,4 +429,5 @@ def job(job_id):
     return _jobs.get(job_id)
 
 
-LABELS = {"github": "GitHub Pages", "netlify": "Netlify", "ftp": "FTP", "server": "เซิร์ฟเวอร์ของฉัน"}
+LABELS = {"github": "GitHub Pages", "netlify": "Netlify", "ftp": "FTP", "server": "เซิร์ฟเวอร์ของฉัน",
+          "staging": "เซิร์ฟเวอร์ทดสอบ (staging)"}

@@ -61,6 +61,15 @@ user in Thai. The UI copy is in Thai.
     `BUILDWEB_DATABASE_URL`, `BUILDWEB_DOMAINS` host→site). `server_api.py` = /__bw/health|deploy|pull (Bearer
     `BUILDWEB_DEPLOY_TOKEN`); `serverkit.py` builds the Docker kit. Desktop deploys through publish target "server".
     Docker itself is not available on the dev Mac: the kit is tested by running server.py directly.
+  - `clock.py`: time zone (config `app.timezone` > `BUILDWEB_TZ` > Asia/Bangkok) applied live via `clock.apply()`
+    (clears Django's default-zone cache, sets TZ, reschedules jobs). Servers set it through `/__bw/config`.
+  - `releases.py` + `Release`: versions = .bwsite snapshots in `<data>/releases/<site id>/`. `publish.run(..., release=)`
+    sends the snapshot to server/staging (`cfg["_bundle"]`) or static files built by `files_of()` (import inside a
+    rolled-back transaction, `cfg["_files"]`). Scheduled ones run from the scheduler (`run_due()`). `restore()` uses
+    import mode "deploy" so the Site row, publish settings and live data stay.
+  - `cloudflare.py`: DNS through the Cloudflare API (calls go through `publish.http`, mocked in tests); token encrypted
+    in config `publish.cloudflare_token`. Server-side domains: `/__bw/config` stores host→slug in the server's config
+    (`server_api.saved_domains`, used by `public.domain_site` in server mode); Caddy on-demand TLS asks `/__bw/domain-check`.
   - `team.py`: team access. `TeamServer` serves the app on 0.0.0.0:<team port> with `TEAM_ENV_KEY`; there
     `LocalAdminMiddleware` requires login and `team.check()` applies roles (admin/developer/editor; regex path
     rules + `site_of()` to scope by site). `audit()` logs every write. `TeamMember`, `AuditLog`, `SavedBlock`.

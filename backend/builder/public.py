@@ -151,9 +151,20 @@ def preview(request, slug, path=""):
 
 # --- hosting server -------------------------------------------------------------------------------
 
+def domain_site(request):
+    host = request.get_host().split(":")[0].lower()
+    if settings.DOMAINS.get(host):
+        return settings.DOMAINS[host]
+    if settings.SERVER_MODE:  # domains connected from the desktop app (server_api.server_config)
+        from .server_api import saved_domains
+
+        return saved_domains().get(host)
+    return None
+
+
 @csrf_exempt
 def public(request, path=""):
-    pinned = request.META.get(SITE_ENV_KEY) or settings.DOMAINS.get(request.get_host().split(":")[0].lower())
+    pinned = request.META.get(SITE_ENV_KEY) or domain_site(request)
     if pinned:
         site = render.site_for_slug(pinned, published_only=True)
         if not site:

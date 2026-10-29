@@ -403,6 +403,9 @@ def start_scheduler(interval=30):
             try:
                 for job in Job.objects.select_related("site").filter(enabled=True, next_run__lte=timezone.now()):
                     run_job(job)
+                from .releases import run_due
+
+                run_due()  # versions scheduled for a time
                 if ticks % max(1, 3600 // interval) == 0:  # hourly check, one backup per site per day
                     from .backup import backup_all_due
 
