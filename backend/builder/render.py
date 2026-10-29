@@ -190,6 +190,49 @@ def fill_nav(html, pages, current=None):
     return AUTO_NAV_RE.sub(lambda m: m.group(1) + links + m.group(3), html or "")
 
 
+# <div data-bw-member-fields="register|account"></div> inside a member form gets the site's extra member fields
+# (Site.auth["fields"]) at render time, so the forms follow the field list set in the app.
+MEMBER_FIELDS_RE = re.compile(r'(<div\b[^>]*\bdata-bw-member-fields="(register|account)"[^>]*>).*?(</div>)', re.S | re.I)
+MEMBER_FIELDS_CSS = ("<style>[data-bw-member-fields]{display:contents}"
+                     ".bw-auth select,.bw-auth textarea{font:inherit;font-weight:400;padding:12px 14px;border:1px solid #d9d9e3;border-radius:10px;background:#fff}"
+                     ".bw-auth .bw-check{display:flex;align-items:center;gap:8px;font-weight:500}.bw-auth .bw-check input{width:18px;height:18px}</style>")
+INPUT_TYPES = {"number": "number", "phone": "tel", "email": "email", "date": "date", "link": "url"}
+
+
+def member_fields_html(fields, where, user=None):
+    e = htmllib.escape
+    out = []
+    for f in fields:
+        if not f.get(where):
+            continue
+        val = (user.profile or {}).get(f["name"], "") if user is not None else ""
+        req = " required" if f.get("required") else ""
+        name, label = e(f["name"]), e(f["label"]) + (" *" if f.get("required") else "")
+        ph = f' placeholder="{e(f["placeholder"])}"' if f.get("placeholder") else ""
+        if f["type"] == "bool":
+            on = " checked" if val in (True, "True", "true", "1", "on") else ""
+            out.append(f'<label class="bw-check"><input type="hidden" name="{name}" value="">'
+                       f'<input type="checkbox" name="{name}" value="on"{on}{req}> {label}</label>')
+        elif f["type"] == "select":
+            opts = "".join(f'<option value="{e(o)}"{" selected" if str(val) == o else ""}>{e(o)}</option>' for o in f.get("options") or [])
+            out.append(f'<label>{label}<select name="{name}"{req}><option value="">— เลือก —</option>{opts}</select></label>')
+        elif f["type"] == "longtext":
+            out.append(f'<label>{label}<textarea name="{name}" rows="3"{ph}{req}>{e(str(val))}</textarea></label>')
+        else:
+            t = INPUT_TYPES.get(f["type"], "text")
+            step = ' step="any"' if t == "number" else ""
+            out.append(f'<label>{label}<input type="{t}" name="{name}" value="{e(str(val))}"{ph}{step}{req}></label>')
+    return "".join(out)
+
+
+def fill_member_fields(html, site, user=None):
+    if "data-bw-member-fields" not in html:
+        return html
+    fields = (site.auth or {}).get("fields") or []
+    html = html.replace("</head>", MEMBER_FIELDS_CSS + "</head>", 1) if "</head>" in html else MEMBER_FIELDS_CSS + html
+    return MEMBER_FIELDS_RE.sub(lambda m: m.group(1) + member_fields_html(fields, m.group(2).lower(), user) + m.group(3), html)
+
+
 def strip_body(html):
     m = BODY_RE.match(html or "")
     return m.group(1) if m else (html or "")
@@ -216,7 +259,8 @@ def full_body(page, pages, shared=None, row=None, include_drafts=False, user=Non
         parts.append(strip_body(foot.html))
     from .data import render_html
 
-    return render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts, user)
+    out = render_html(fill_nav("\n".join(parts), pages, page), page.site, page, row, include_drafts, user)
+    return fill_member_fields(out, page.site, user)  # after the binder: member values are never read as {{…}}
 
 
 def visible_pages(site, include_drafts):

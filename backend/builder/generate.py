@@ -243,6 +243,31 @@ def _auth_page(title, intro, form, links="", wide=False):
             f'<h1>{e(title)}</h1><p>{intro}</p>{form}{f"<div class=bw-auth-links>{links}</div>" if links else ""}</div></div></section>')
 
 
+MEMBER_FIELDS = {k: f'<div data-bw-member-fields="{k}"></div>' for k in ("register", "account")}
+
+
+def add_member_fields(site):
+    """Put the member-fields slot into existing sign-up / account forms that don't have it yet (pages made before
+    v0.9 or edited by hand). Returns the titles of the pages changed."""
+    from . import members
+
+    pages = members.settings(site)["pages"]
+    changed = []
+    for key, action in (("register", "register"), ("account", "profile")):
+        page = site.pages.filter(slug=pages[key][:-5]).first()
+        if not page or f'data-bw-member-fields="{key}"' in (page.html or ""):
+            continue
+        m = re.search(r'<form\b[^>]*data-bw-auth="%s"[^>]*>.*?(<button\b[^>]*type="submit")' % action, page.html or "", re.S)
+        if not m:
+            continue
+        i = m.start(1)
+        page.html = page.html[:i] + MEMBER_FIELDS[key] + page.html[i:]
+        page.project_data = {}  # the editor rebuilds its project from the HTML
+        page.save(update_fields=["html", "project_data", "updated_at"])
+        changed.append(page.title)
+    return changed
+
+
 def member_pages_html(p):
     """{key: (title, html, access)} for the member pages; ``p`` maps key -> file name."""
     login = _auth_page("เข้าสู่ระบบ", "ยินดีต้อนรับกลับมา", (
@@ -254,7 +279,7 @@ def member_pages_html(p):
         '<form data-bw-auth="register"><label>ชื่อ<input name="name" autocomplete="name" required></label>'
         '<label>อีเมล<input type="email" name="email" autocomplete="email" required></label>'
         '<label>รหัสผ่าน<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>'
-        '<button type="submit" class="bw-btn">สมัครสมาชิก</button></form>'),
+        f'{MEMBER_FIELDS["register"]}<button type="submit" class="bw-btn">สมัครสมาชิก</button></form>'),
         f'<span>มีบัญชีแล้ว?</span><a href="{p["login"]}">เข้าสู่ระบบ</a>')
     forgot = _auth_page("ลืมรหัสผ่าน", "ใส่อีเมลที่สมัครไว้ เราจะส่งลิงก์ตั้งรหัสผ่านใหม่ให้", (
         '<form data-bw-auth="forgot"><label>อีเมล<input type="email" name="email" autocomplete="email" required></label>'
@@ -265,7 +290,7 @@ def member_pages_html(p):
         '<button type="submit" class="bw-btn">บันทึกรหัสผ่าน</button></form>'))
     account = _auth_page("บัญชีของฉัน", "สวัสดีคุณ{{user.name}} · {{user.email}}", (
         '<form data-bw-auth="profile"><label>ชื่อ<input name="name" value="{{user.name}}" autocomplete="name"></label>'
-        '<button type="submit" class="bw-btn">บันทึกข้อมูล</button></form><hr>'
+        f'{MEMBER_FIELDS["account"]}<button type="submit" class="bw-btn">บันทึกข้อมูล</button></form><hr>'
         '<form data-bw-auth="password"><label>รหัสผ่านปัจจุบัน<input type="password" name="current_password" autocomplete="current-password" required></label>'
         '<label>รหัสผ่านใหม่<input type="password" name="new_password" autocomplete="new-password" minlength="8" required></label>'
         '<button type="submit" class="bw-btn bw-btn-outline">เปลี่ยนรหัสผ่าน</button></form><hr>'

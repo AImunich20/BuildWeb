@@ -30,7 +30,15 @@ SETTINGS = {
     "min_password": 8,
     "after_login": "",        # page to go to after logging in (default: account page or home)
     "pages": {},              # {"login": "login.html", "register": ..., "forgot": ..., "reset": ..., "account": ...}
+    "fields": [],             # extra member fields (FIELD_TYPES), see clean_fields(); values live in SiteUser.profile
 }
+# Extra fields of the sign-up / account forms. "register": asked when signing up · "account": the member may edit it
+# on the account page · neither: only the owner sets it in the app (plan, points, expiry date...).
+FIELD_TYPES = {"text": "ข้อความ", "longtext": "ข้อความยาว", "number": "ตัวเลข", "phone": "เบอร์โทร", "email": "อีเมล",
+               "date": "วันที่", "select": "ตัวเลือก", "bool": "ติ๊กถูก (ใช่/ไม่)", "link": "ลิงก์"}
+FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+RESERVED = {"email", "name", "password", "password2", "role", "id", "token", "current_password", "new_password", "profile"}
+PHONE_RE = re.compile(r"^\+?[0-9][0-9 -]{5,19}$")
 SESSION_DAYS = 30
 TOKEN_TTL = {UserToken.SESSION: timedelta(days=SESSION_DAYS), UserToken.VERIFY: timedelta(days=3),
              UserToken.RESET: timedelta(hours=2)}
@@ -205,8 +213,9 @@ def register(site, d, ip):
         raise AuthError(403, "signup_closed", "ปิดรับสมัครสมาชิก")
     throttle(f"reg:{site.id}:{ip}", limit=10, window=3600)
     failed(f"reg:{site.id}:{ip}")  # counts every registration from this IP
+    profile = collect_fields(site, d, "register")  # checked before the account is created
     user = create_user(site, d.get("email"), d.get("password") or "", d.get("name"),
-                       verified=not s["verify_email"], profile=clean_profile(d.get("profile")))
+                       verified=not s["verify_email"], profile=profile)
     return user
 
 
@@ -234,17 +243,107 @@ def logout(site, request):
         UserToken.objects.filter(token_hash=_hash(plain), kind=UserToken.SESSION).delete()
 
 
-def clean_profile(p):
+def clean_profile(p, site=None):
+    """Profile values sent by a member when the site defines no fields (older sites): any key, except the ones
+    special pages check (a member must not grant themselves "plan": "pro")."""
     if not isinstance(p, dict):
         return {}
-    return {str(k)[:40]: str(v)[:500] for k, v in list(p.items())[:30] if not isinstance(v, (dict, list))}
+    guarded = rule_fields(site) if site else set()
+    return {str(k)[:40]: str(v)[:500] for k, v in list(p.items())[:30]
+            if not isinstance(v, (dict, list)) and str(k)[:40] not in guarded}
+
+
+def rule_fields(site):
+    out = set()
+    for rules in site.pages.filter(access="rules").values_list("access_rules", flat=True):
+        out |= {c.get("field") for c in (rules or {}).get("conditions") or [] if c.get("type") == "field"}
+    return out
+
+
+def clean_fields(fields):
+    """Field definitions from the app → stored form."""
+    out, seen = [], set()
+    for f in (fields or [])[:30]:
+        name = str((f or {}).get("name") or "").strip().lower()
+        if not FIELD_NAME_RE.match(name):
+            raise AuthError(422, "validation", f"ชื่อฟิลด์ “{name}” ใช้ a-z 0-9 _ ขึ้นต้นด้วยตัวอักษร เช่น phone, birthday")
+        if name in RESERVED or name in seen:
+            raise AuthError(422, "validation", f"ชื่อฟิลด์ “{name}” ซ้ำหรือเป็นชื่อที่ระบบใช้อยู่")
+        seen.add(name)
+        t = f.get("type") if f.get("type") in FIELD_TYPES else "text"
+        x = {"name": name, "label": str(f.get("label") or name).strip()[:100], "type": t,
+             "required": f.get("required") in (True, "1", "true", "on", 1),
+             "register": f.get("register", True) in (True, "1", "true", "on", 1),
+             "account": f.get("account", True) in (True, "1", "true", "on", 1),
+             "placeholder": str(f.get("placeholder") or "").strip()[:100]}
+        if t == "select":
+            opts = f.get("options") or []
+            if isinstance(opts, str):
+                opts = re.split(r"[,\n]", opts)
+            x["options"] = [str(o).strip()[:100] for o in opts if str(o).strip()][:100]
+            if not x["options"]:
+                raise AuthError(422, "validation", f"ใส่ตัวเลือกของฟิลด์ “{x['label']}”")
+        out.append(x)
+    return out
+
+
+def coerce_field(f, v):
+    """A submitted value → stored value for one member field (ValueError with a Thai message)."""
+    from . import schema
+
+    if f["type"] == "phone":
+        s = str(v or "").strip()
+        if s and not PHONE_RE.match(s):
+            raise ValueError("เบอร์โทรไม่ถูกต้อง")
+        return s
+    val = schema.coerce({"type": f["type"], "options": f.get("options")}, v)
+    return val[:2000] if isinstance(val, str) else val
+
+
+def collect_fields(site, d, where):
+    """Values of the site's member fields from a form/API body (flat keys or "profile": {...}).
+    where: "register" | "account" (only fields the member may fill there) | "owner" (every field)."""
+    fields = settings(site)["fields"]
+    if not fields:
+        return clean_profile(d.get("profile"), site) if where != "owner" else clean_profile(d.get("profile"))
+    nested = d.get("profile") if isinstance(d.get("profile"), dict) else {}
+    out, errors = {}, {}
+    for f in fields:
+        if where != "owner" and not f.get(where):
+            continue
+        present = f["name"] in d or f["name"] in nested  # checkboxes come with a hidden "" (see render.member_fields_html)
+        if not present:
+            if f.get("required") and where == "register":
+                errors[f["name"]] = f"กรุณากรอก{f['label']}"
+            continue
+        raw = d.get(f["name"], nested.get(f["name"]))
+        try:
+            val = coerce_field(f, raw)
+        except ValueError as e:
+            errors[f["name"]] = f"{f['label']}: {e}"
+            continue
+        if f.get("required") and val in ("", None, False) and where != "owner":
+            errors[f["name"]] = f"กรุณากรอก{f['label']}"
+            continue
+        out[f["name"]] = val
+    if errors:
+        raise AuthError(422, "validation", next(iter(errors.values())), errors)
+    return out
+
+
+def display_value(f, v):
+    if v in (None, ""):
+        return ""
+    if f["type"] == "bool":
+        return "ใช่" if v in (True, "True", "true", "1", "on") else "ไม่"
+    return str(v)
 
 
 def update_me(user, d):
     if "name" in d:
         user.name = str(d["name"] or "").strip()[:150]
-    if "profile" in d:
-        user.profile = {**(user.profile or {}), **clean_profile(d["profile"])}
+    if "profile" in d or settings(user.site)["fields"]:
+        user.profile = {**(user.profile or {}), **collect_fields(user.site, d, "account")}
     if d.get("new_password"):
         if user.password and not check_password(d.get("current_password") or "", user.password):
             raise AuthError(422, "validation", "รหัสผ่านปัจจุบันไม่ถูกต้อง", {"current_password": "ไม่ถูกต้อง"})

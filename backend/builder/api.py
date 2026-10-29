@@ -922,8 +922,10 @@ def validation_error(col, e):
 @api
 def collection_list(request, site_id):
     site = get_object_or_404(Site, pk=site_id)
+    ms = members.settings(site)
     return {"collections": [collection_json(c) for c in site.collections.select_related("connection")],
-            "connections": [connection_json(c) for c in DataConnection.objects.all()]}
+            "connections": [connection_json(c) for c in DataConnection.objects.all()],
+            "members": {"enabled": ms["enabled"], "count": site.members.count(), "fields": ms["fields"]}}
 
 
 @require_POST
@@ -1410,6 +1412,7 @@ def member_or_404(member_id):
 @api
 def members_settings(request, site_id):
     site = get_object_or_404(Site, pk=site_id)
+    added = []
     if request.method == "POST":
         d = body(request).get("settings") or {}
         cur = {**(site.auth or {})}
@@ -1429,12 +1432,22 @@ def members_settings(request, site_id):
             cur["min_password"] = max(6, min(64, int(d["min_password"] or 8)))
         if "after_login" in d:
             cur["after_login"] = str(d["after_login"] or "").strip()[:200]
+        if "fields" in d:
+            try:
+                cur["fields"] = members.clean_fields(d["fields"])
+            except members.AuthError as e:
+                raise ApiError(str(e), field="fields")
         site.auth = cur
         site.save(update_fields=["auth"])
+        if cur.get("fields"):
+            from . import generate
+
+            added = generate.add_member_fields(site)
     s = members.settings(site)
     return {"settings": s, "roles": members.all_roles(site), "smtp": notify.smtp_ready(),
             "pages": {k: site.pages.filter(slug=v[:-5]).exists() for k, v in s["pages"].items()},
-            "count": site.members.count()}
+            "count": site.members.count(), "field_types": members.FIELD_TYPES,
+            "forms_updated": added}
 
 
 @require_GET
@@ -1458,7 +1471,9 @@ def members_create(request, site_id):
     site = get_object_or_404(Site, pk=site_id)
     d = body(request)
     try:
-        u = members.create_user(site, d.get("email"), d.get("password") or "", d.get("name"), d.get("role"), verified=True)
+        profile = members.collect_fields(site, d, "owner") if d.get("profile") else {}
+        u = members.create_user(site, d.get("email"), d.get("password") or "", d.get("name"), d.get("role"), verified=True,
+                                profile=profile)
     except members.AuthError as e:
         raise ApiError(str(e), field=next(iter(e.fields or {}), None))
     return {"member": members.user_json(u, full=True)}
@@ -1479,6 +1494,11 @@ def member_action(request, member_id, action):
         for k in ("is_active", "email_verified"):
             if k in d:
                 setattr(u, k, as_bool(d[k]))
+        if isinstance(d.get("profile"), dict):
+            try:
+                u.profile = {**(u.profile or {}), **members.collect_fields(u.site, {"profile": d["profile"]}, "owner")}
+            except members.AuthError as e:
+                raise ApiError(str(e), field=next(iter(e.fields or {}), None))
         u.save()
         if not u.is_active:
             u.tokens.all().delete()  # log a suspended member out everywhere
@@ -2267,3 +2287,35 @@ def page_access(request, page_id):
             "collections": [{"slug": c.slug, "name": c.name, "fields": c.field_names} for c in site.collections.all()],
             "profile_fields": sorted(keys | {"name"}), "pages": [{"slug": p.slug, "title": p.title} for p in site.pages.all() if p.pk != page.pk],
             "members": site.members.count()}
+
+
+def members_csv(request, site_id):
+    """Every member with their extra fields, for Excel (UTF-8 with BOM)."""
+    import csv
+    import io
+
+    site = get_object_or_404(Site, pk=site_id)
+    fields = members.settings(site)["fields"]
+    extra = [f["name"] for f in fields]
+    for prof in site.members.values_list("profile", flat=True):
+        extra += [k for k in (prof or {}) if k not in extra]
+    labels = {f["name"]: f["label"] for f in fields}
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["อีเมล", "ชื่อ", "บทบาท", "ยืนยันอีเมล", "ใช้งานได้", "สมัครเมื่อ", "เข้าล่าสุด"] + [labels.get(k, k) for k in extra])
+    for u in site.members.all():
+        w.writerow([u.email, u.name, u.role, "ใช่" if u.email_verified else "ไม่", "ใช่" if u.is_active else "ไม่",
+                    timezone_now_of(u.created_at), timezone_now_of(u.last_login)]
+                   + [_csv_safe((u.profile or {}).get(k, "")) for k in extra])
+    return download(("\ufeff" + buf.getvalue()).encode("utf-8"), f"members-{site.slug}.csv", "text/csv; charset=utf-8")
+
+
+def timezone_now_of(dt):
+    from django.utils import timezone
+
+    return timezone.localtime(dt).strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+def _csv_safe(v):
+    s = str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s  # no formulas when opened in Excel

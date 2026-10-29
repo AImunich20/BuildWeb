@@ -205,12 +205,17 @@
         <button class="btn" id="d-file">${BW_ICON('upload')} นำเข้า .sql / CSV</button><button class="btn primary" id="d-new">${BW_ICON('plus')} สร้างเอง</button></div></div>
       <div class="data-layout"><div class="card data-list" id="d-list"></div><div id="d-main"></div></div>`;
     const list = document.getElementById('d-list');
-    list.innerHTML = DATA.collections.length ? DATA.collections.map(c => `<a class="data-item ${c.id === sel ? 'active' : ''}" data-id="${c.id}">
+    const memItem = DATA.members && DATA.members.enabled ? `<a class="data-item ${sel === 'members' ? 'active' : ''}" data-members>
+        <div class="row between"><b>สมาชิก</b><span class="badge">ระบบ</span></div>
+        <div class="small muted mono">members · ${DATA.members.fields.length + 4} ฟิลด์ · ${DATA.members.count} คน</div></a>` : '';
+    list.innerHTML = memItem + (DATA.collections.length || memItem ? DATA.collections.map(c => `<a class="data-item ${c.id === sel ? 'active' : ''}" data-id="${c.id}">
         <div class="row between"><b>${esc(c.name)}</b>${c.mode === 'live' ? '<span class="badge brand">สด</span>' : ''}</div>
         <div class="small muted mono">${esc(c.slug)} · ${c.fields.length} ฟิลด์${c.count != null ? ' · ' + c.count + ' แถว' : ''}</div>
         ${c.pending ? `<div style="margin-top:4px"><span class="badge warn">รออนุมัติ ${c.pending}</span></div>` : ''}</a>`).join('')
-      : `<div class="empty-state">${BW_ICON('table', 28)}<div style="margin-top:8px">ยังไม่มีชุดข้อมูล</div></div>`;
+      : `<div class="empty-state">${BW_ICON('table', 28)}<div style="margin-top:8px">ยังไม่มีชุดข้อมูล</div></div>`);
     list.querySelectorAll('[data-id]').forEach(a => a.onclick = () => openCollection(+a.dataset.id));
+    const mi = list.querySelector('[data-members]');
+    if (mi) mi.onclick = openMembersData;
     document.getElementById('d-mysql').onclick = mysqlWizard;
     document.getElementById('d-file').onclick = fileImport;
     document.getElementById('d-new').onclick = newCollection;
@@ -219,11 +224,27 @@
       try { const r = await api(`/api/sites/${site.id}/blog`, {}); toast('สร้างระบบบทความแล้ว', 'ok'); renderData(r.collection.id); }
       catch (e) { toast(e.message, 'err'); }
     };
-    if (sel) openCollection(sel); else document.getElementById('d-main').innerHTML = `<div class="card pad"><h2>เริ่มใช้ข้อมูลในเว็บ</h2>
+    if (new URLSearchParams(location.search).get('c') === 'members' && mi) openMembersData();
+    else if (sel) openCollection(sel); else document.getElementById('d-main').innerHTML = `<div class="card pad"><h2>เริ่มใช้ข้อมูลในเว็บ</h2>
       <div class="hint">ตัวอย่าง: นำตาราง <code>products</code> จาก XAMPP มาแสดงเป็นการ์ดสินค้าในหน้าเว็บ — แก้ใน phpMyAdmin แล้วหน้าเว็บเปลี่ยนตาม (โหมดเชื่อมสด)</div>
       <ol class="small" style="line-height:2;margin:0;padding-left:18px"><li>กด “นำเข้าจาก MySQL / XAMPP” หรือ “นำเข้า .sql / CSV”</li>
       <li>เปิดตัวออกแบบ › แท็บ “ข้อมูล” หรือหมวดบล็อก “ข้อมูล” แล้วลากการ์ด/ตารางลงหน้า</li>
       <li>หรือเลือกกล่องใดก็ได้ › “ตั้งค่า” › “วนซ้ำจากข้อมูล” แล้วใส่ <code>{{ฟิลด์}}</code> ในข้อความ</li></ol></div>`;
+  }
+
+  async function openMembersData() {
+    document.querySelectorAll('.data-item').forEach(a => a.classList.toggle('active', a.hasAttribute('data-members')));
+    history.replaceState(null, '', '?c=members');
+    const main = document.getElementById('d-main');
+    main.innerHTML = '<div class="card pad muted">กำลังโหลด…</div>';
+    const [S, r] = await Promise.all([api(`/api/sites/${site.id}/members/settings`), api(`/api/sites/${site.id}/members`)]);
+    const fields = S.settings.fields || [];
+    main.innerHTML = `<div class="card"><div class="card-head"><div><h2>สมาชิก <span class="muted">(${r.total})</span></h2>
+        <div class="hint" style="margin:0">ข้อมูลจากฟอร์มสมัครและหน้าบัญชีของเว็บ · เก็บในตาราง <code>builder_siteuser</code> ของฐานข้อมูลแอป (ฟิลด์เพิ่มอยู่ในคอลัมน์ <code>profile</code>)</div></div>
+        <div class="row"><a class="btn sm" href="/api/sites/${site.id}/members.csv">${BW_ICON('download')} CSV</a><a class="btn sm primary" href="/sites/${site.id}/members/">จัดการสมาชิก</a></div></div>
+      <div class="data-table-wrap"><table class="table"><thead><tr><th>อีเมล</th><th>ชื่อ</th>${fields.map(f => `<th>${esc(f.label)}<div class="small muted mono">${esc(f.name)}</div></th>`).join('')}<th>บทบาท</th><th>สมัครเมื่อ</th></tr></thead><tbody>
+        ${r.members.map(u => `<tr><td class="small">${esc(u.email)}</td><td>${esc(u.name || '')}</td>${fields.map(f => `<td class="small">${fieldVal(f, (u.profile || {})[f.name])}</td>`).join('')}
+          <td><span class="badge">${esc(u.role)}</span></td><td class="small muted">${when(u.created_at)}</td></tr>`).join('') || `<tr><td colspan="${fields.length + 4}" class="muted">ยังไม่มีสมาชิก</td></tr>`}</tbody></table></div></div>`;
   }
 
   async function openCollection(id) {
@@ -1369,10 +1390,11 @@
           ${MEM.pages[k] ? '<span class="badge ok">มีแล้ว</span>' : '<span class="badge warn">ยังไม่มี</span>'}</div>`).join('')}
         ${missing.length ? `<button class="btn" id="m-pages" style="margin-top:10px">${BW_ICON('pages')} สร้างหน้าสมาชิกที่ยังไม่มี</button>` : '<div class="small muted" style="margin-top:8px">แก้หน้าตาได้ในตัวออกแบบ · ฟอร์มใช้ <code>data-bw-auth</code></div>'}
         <div class="small muted" style="margin-top:12px">ระบบสมาชิกทำงานบนเซิร์ฟเวอร์ของ BuildWeb (โฮสต์จากเครื่องนี้/Tailscale) · หน้าเฉพาะสมาชิกจะไม่ถูกส่งออกเป็นไฟล์</div>
+        <div class="sect-title">ฟอร์มข้อมูลสมาชิก</div><div id="m-fields"></div>
       </div>
       <div class="card"><div class="card-head"><div><h2>สมาชิก <span class="muted" id="m-total"></span></h2></div>
           <div class="row"><input class="input" id="m-q" placeholder="ค้นหาอีเมล/ชื่อ" style="width:200px"><select class="input" id="m-role" style="width:120px"><option value="">ทุกบทบาท</option>${MEM.roles.map(r => `<option>${esc(r)}</option>`).join('')}</select>
-          <button class="btn primary sm" id="m-add">${BW_ICON('plus')} เพิ่มสมาชิก</button></div></div>
+          <a class="btn sm" href="/api/sites/${site.id}/members.csv">${BW_ICON('download')} CSV</a><button class="btn primary sm" id="m-add">${BW_ICON('plus')} เพิ่มสมาชิก</button></div></div>
         <div id="m-list" class="data-table-wrap"></div></div></div>`;
     const saveSettings = async extra => {
       const d = { enabled: document.getElementById('m-on').checked, signup: document.getElementById('m-signup').checked,
@@ -1393,16 +1415,67 @@
     document.getElementById('m-q').oninput = () => { clearTimeout(t); t = setTimeout(loadMembers, 250); };
     document.getElementById('m-role').onchange = loadMembers;
     document.getElementById('m-add').onclick = addMember;
+    drawMemberFields();
     loadMembers();
   }
+
+  function drawMemberFields() {
+    const box = document.getElementById('m-fields');
+    const F = JSON.parse(JSON.stringify(MEM.settings.fields || []));
+    const types = Object.entries(MEM.field_types);
+    const draw = () => {
+      box.innerHTML = `<div class="small muted" style="margin-bottom:8px">ช่องที่ถามเพิ่มตอนสมัคร/ในหน้าบัญชี นอกจากชื่อ อีเมล รหัสผ่าน · ข้อมูลแสดงในตารางสมาชิก, แท็บข้อมูล และไฟล์ CSV · ใช้ในหน้าเว็บด้วย <code>{{user.profile.ชื่อฟิลด์}}</code></div>
+        ${F.map((f, i) => `<div class="pub-form" data-f="${i}" style="margin-bottom:8px;padding:10px 12px">
+          <div class="row" style="gap:6px;flex-wrap:nowrap"><input class="input" data-k="label" value="${esc(f.label || '')}" placeholder="ชื่อที่แสดง เช่น เบอร์โทร">
+            <input class="input mono" data-k="name" value="${esc(f.name || '')}" placeholder="phone" style="max-width:120px" title="ชื่อฟิลด์ (a-z 0-9 _)">
+            <select class="input" data-k="type" style="max-width:150px">${types.map(([k, l]) => `<option value="${k}" ${k === f.type ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+            <button class="btn ghost icon sm" data-up="${i}" title="เลื่อนขึ้น" ${i ? '' : 'disabled'}>↑</button><button class="btn ghost icon sm" data-rm="${i}" title="ลบ">${BW_ICON('trash')}</button></div>
+          ${f.type === 'select' ? `<input class="input" data-k="options" value="${esc((f.options || []).join(', '))}" placeholder="ตัวเลือก คั่นด้วย , เช่น ชาย, หญิง, ไม่ระบุ" style="margin-top:6px">` : ''}
+          <div class="row small" style="gap:14px;margin-top:6px"><label class="check"><input type="checkbox" data-k="register" ${f.register !== false ? 'checked' : ''}>ถามตอนสมัคร</label>
+            <label class="check"><input type="checkbox" data-k="account" ${f.account !== false ? 'checked' : ''}>สมาชิกแก้เองได้</label>
+            <label class="check"><input type="checkbox" data-k="required" ${f.required ? 'checked' : ''}>บังคับกรอก</label>
+            ${f.register === false && f.account === false ? '<span class="muted">· เจ้าของเว็บกำหนดในแอปเท่านั้น (เช่น แพ็กเกจ แต้ม วันหมดอายุ)</span>' : ''}</div></div>`).join('')}
+        <div class="row" style="gap:6px"><button class="btn sm" data-add>${BW_ICON('plus')} เพิ่มช่อง</button>
+          <select class="input sm" data-preset style="width:auto"><option value="">+ ช่องสำเร็จรูป…</option><option value="phone">เบอร์โทร</option><option value="birthday">วันเกิด</option><option value="gender">เพศ</option><option value="address">ที่อยู่</option><option value="line_id">LINE ID</option><option value="company">บริษัท</option><option value="newsletter">รับข่าวสาร</option><option value="consent">ยอมรับเงื่อนไข</option><option value="plan">แพ็กเกจ (เจ้าของกำหนด)</option><option value="expires">วันหมดอายุสมาชิก (เจ้าของกำหนด)</option></select>
+          <button class="btn primary sm" data-save style="margin-left:auto">บันทึกฟอร์ม</button></div>`;
+      box.querySelectorAll('[data-k=type],[data-k=register],[data-k=account]').forEach(x => x.onchange = () => { read(); draw(); });
+      box.querySelectorAll('[data-k=label]').forEach((x, i) => x.oninput = () => { const n = box.querySelectorAll('[data-k=name]')[i]; if (!F[i].name && !n.dataset.touched) n.value = x.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40); });
+      box.querySelectorAll('[data-k=name]').forEach(x => x.oninput = () => x.dataset.touched = 1);
+      box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { read(); F.splice(+b.dataset.rm, 1); draw(); });
+      box.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { read(); const i = +b.dataset.up; [F[i - 1], F[i]] = [F[i], F[i - 1]]; draw(); });
+      box.querySelector('[data-add]').onclick = () => { read(); F.push({ label: '', name: '', type: 'text', register: true, account: true }); draw(); };
+      const PRESETS = { phone: ['เบอร์โทร', 'phone', 'phone'], birthday: ['วันเกิด', 'birthday', 'date'], gender: ['เพศ', 'gender', 'select', ['ชาย', 'หญิง', 'ไม่ระบุ']], address: ['ที่อยู่', 'address', 'longtext'],
+        line_id: ['LINE ID', 'line_id', 'text'], company: ['บริษัท', 'company', 'text'], newsletter: ['รับข่าวสารทางอีเมล', 'newsletter', 'bool'], consent: ['ยอมรับเงื่อนไขการใช้งาน', 'consent', 'bool', null, true],
+        plan: ['แพ็กเกจ', 'plan', 'select', ['free', 'pro'], false, true], expires: ['วันหมดอายุสมาชิก', 'expires', 'date', null, false, true] };
+      box.querySelector('[data-preset]').onchange = e => { const p = PRESETS[e.target.value]; if (!p) return; read();
+        if (!F.some(f => f.name === p[1])) F.push({ label: p[0], name: p[1], type: p[2], options: p[3] || undefined, required: !!p[4], register: !p[5], account: !p[5] }); draw(); };
+      box.querySelector('[data-save]').onclick = async () => {
+        read();
+        try {
+          const r = await api(`/api/sites/${site.id}/members/settings`, { settings: { fields: F } });
+          MEM = { ...MEM, ...r };
+          toast(r.forms_updated.length ? `บันทึกแล้ว · ใส่ช่องใหม่ในหน้า ${r.forms_updated.join(', ')} ให้แล้ว` : 'บันทึกฟอร์มแล้ว — หน้าสมัคร/บัญชีอัปเดตตามทันที', 'ok');
+          drawMemberFields(); loadMembers();
+        } catch (e) { toast(e.message, 'err'); }
+      };
+    };
+    const read = () => box.querySelectorAll('[data-f]').forEach((el, i) => {
+      el.querySelectorAll('[data-k]').forEach(x => F[i][x.dataset.k] = x.type === 'checkbox' ? x.checked : x.value);
+      if (typeof F[i].options === 'string') F[i].options = F[i].options.split(',').map(o => o.trim()).filter(Boolean);
+    });
+    draw();
+  }
+  const memberFieldCols = () => (MEM.settings.fields || []).slice(0, 4);
+  const fieldVal = (f, v) => v === undefined || v === null || v === '' ? '<span class="muted">—</span>' : f.type === 'bool' ? (v === true || v === 'True' || v === 'true' ? '✓' : '✗') : esc(String(v));
 
   async function loadMembers() {
     const q = document.getElementById('m-q').value, role = document.getElementById('m-role').value;
     const r = await api(`/api/sites/${site.id}/members?q=${encodeURIComponent(q)}&role=${encodeURIComponent(role)}`);
     document.getElementById('m-total').textContent = `(${r.total})`;
     const box = document.getElementById('m-list');
-    box.innerHTML = r.members.length ? `<table class="table"><thead><tr><th>สมาชิก</th><th>บทบาท</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody>
-      ${r.members.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name || '—')}</b><div class="small muted">${esc(u.email)}</div></td>
+    const cols = memberFieldCols();
+    box.innerHTML = r.members.length ? `<table class="table"><thead><tr><th>สมาชิก</th>${cols.map(f => `<th>${esc(f.label)}</th>`).join('')}<th>บทบาท</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody>
+      ${r.members.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name || '—')}</b><div class="small muted">${esc(u.email)}</div></td>${cols.map(f => `<td class="small">${fieldVal(f, (u.profile || {})[f.name])}</td>`).join('')}
         <td><select class="input sm" data-role>${MEM.roles.map(x => `<option ${x === u.role ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>
         <td>${u.is_active ? (u.email_verified ? '<span class="badge ok">ใช้งาน</span>' : '<span class="badge warn" title="ยังไม่ยืนยันอีเมล">รอยืนยัน</span>') : '<span class="badge err">ระงับ</span>'}</td>
         <td class="small muted">${u.last_login ? ago(u.last_login) : 'ยังไม่เคย'}</td>
@@ -1420,6 +1493,7 @@
   function memberMenu(u) {
     const m = modal(`<header><h2>${esc(u.name || u.email)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header>
       <div class="body" style="display:grid;gap:8px"><div class="small muted">${esc(u.email)} · สมัคร ${when(u.created_at)}</div>
+        <button class="btn primary" data-a="profile">ดู / แก้ข้อมูลสมาชิก</button>
         <button class="btn" data-a="reset">สร้างลิงก์ตั้งรหัสผ่านใหม่</button>
         ${u.email_verified ? '' : '<button class="btn" data-a="verify">ยืนยันอีเมลให้</button>'}
         <button class="btn" data-a="logout">ออกจากระบบทุกอุปกรณ์</button>
@@ -1427,6 +1501,7 @@
         <button class="btn danger" data-a="delete">ลบสมาชิก</button></div>`);
     m.el.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
       const a = b.dataset.a;
+      if (a === 'profile') { m.close(); memberProfileModal(u); return; }
       try {
         if (a === 'reset') {
           const r = await api(`/api/members/${u.id}/reset-link`, {});
@@ -1449,15 +1524,41 @@
     });
   }
 
+  function memberFieldInput(f, v) {
+    const n = `data-pf="${esc(f.name)}"`;
+    if (f.type === 'bool') return `<label class="check"><input type="checkbox" ${n} ${v === true || v === 'True' || v === 'true' ? 'checked' : ''}>${esc(f.label)}</label>`;
+    if (f.type === 'select') return `<label class="field"><span>${esc(f.label)}</span><select class="input" ${n}><option value="">—</option>${(f.options || []).map(o => `<option ${String(v) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+    if (f.type === 'longtext') return `<label class="field"><span>${esc(f.label)}</span><textarea class="input" rows="2" ${n}>${esc(v ?? '')}</textarea></label>`;
+    const t = { number: 'number', date: 'date', email: 'email', phone: 'tel', link: 'url' }[f.type] || 'text';
+    return `<label class="field"><span>${esc(f.label)}</span><input class="input" type="${t}" ${t === 'number' ? 'step="any"' : ''} ${n} value="${esc(v ?? '')}"></label>`;
+  }
+  const readProfile = el => { const p = {}; el.querySelectorAll('[data-pf]').forEach(x => p[x.dataset.pf] = x.type === 'checkbox' ? x.checked : x.value); return p; };
+  function memberProfileModal(u) {
+    const fields = MEM.settings.fields || [], known = new Set(fields.map(f => f.name));
+    const other = Object.entries(u.profile || {}).filter(([k]) => !known.has(k));
+    const m = modal(`<header><h2>${esc(u.name || u.email)}</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
+      <div class="grid g2" style="gap:0 12px"><label class="field"><span>ชื่อ</span><input class="input" name="name" value="${esc(u.name || '')}"></label>
+        <label class="field"><span>อีเมล</span><input class="input" value="${esc(u.email)}" disabled></label></div>
+      ${fields.length ? `<div class="grid g2" style="gap:0 12px">${fields.map(f => memberFieldInput(f, (u.profile || {})[f.name])).join('')}</div>` : '<div class="small muted">ยังไม่มีช่องข้อมูลเพิ่ม — ตั้งได้ที่ “ฟอร์มข้อมูลสมาชิก”</div>'}
+      ${other.length ? `<div class="sect-title">ข้อมูลอื่นในโปรไฟล์</div><table class="table"><tbody>${other.map(([k, v]) => `<tr><td class="mono small">${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join('')}</tbody></table>` : ''}
+      <div class="small muted" style="margin-top:8px">สมัคร ${when(u.created_at)} · เข้าล่าสุด ${u.last_login ? when(u.last_login) : 'ยังไม่เคย'} · บทบาท ${esc(u.role)}</div></div>
+      <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>บันทึก</button></footer>`, { wide: true });
+    m.el.querySelector('[data-ok]').onclick = async () => {
+      try { await api(`/api/members/${u.id}/update`, { name: m.el.querySelector('[name=name]').value, profile: readProfile(m.el) }); m.close(); toast('บันทึกแล้ว', 'ok'); loadMembers(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+  }
+
   function addMember() {
     const m = modal(`<header><h2>เพิ่มสมาชิก</h2><button class="btn ghost icon sm" data-close>${BW_ICON('x')}</button></header><div class="body">
       <label class="field"><span>อีเมล</span><input class="input" name="email" type="email"></label>
       <label class="field"><span>ชื่อ</span><input class="input" name="name"></label>
       <div class="grid g2" style="gap:0 12px"><label class="field"><span>รหัสผ่าน <small>(เว้นว่าง = ส่งลิงก์ให้ตั้งเอง)</small></span><input class="input" name="password" type="password" autocomplete="new-password"></label>
-      <label class="field"><span>บทบาท</span><select class="input" name="role">${MEM.roles.map(r => `<option ${r === MEM.settings.default_role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label></div></div>
+      <label class="field"><span>บทบาท</span><select class="input" name="role">${MEM.roles.map(r => `<option ${r === MEM.settings.default_role ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label></div>
+      ${(MEM.settings.fields || []).length ? `<div class="grid g2" style="gap:0 12px">${MEM.settings.fields.map(f => memberFieldInput(f, '')).join('')}</div>` : ''}</div>
       <footer><button class="btn" data-close>ยกเลิก</button><button class="btn primary" data-ok>เพิ่ม</button></footer>`);
     m.el.querySelector('[data-ok]').onclick = async () => {
-      try { await api(`/api/sites/${site.id}/members/create`, formData(m.el)); m.close(); toast('เพิ่มสมาชิกแล้ว', 'ok'); loadMembers(); }
+      try { await api(`/api/sites/${site.id}/members/create`, { ...formData(m.el), profile: readProfile(m.el) }); m.close(); toast('เพิ่มสมาชิกแล้ว', 'ok'); loadMembers(); }
       catch (e) { showFieldError(m.el, e); }
     };
   }

@@ -61,6 +61,10 @@ user in Thai. The UI copy is in Thai.
     `BUILDWEB_DATABASE_URL`, `BUILDWEB_DOMAINS` host→site). `server_api.py` = /__bw/health|deploy|pull (Bearer
     `BUILDWEB_DEPLOY_TOKEN`); `serverkit.py` builds the Docker kit. Desktop deploys through publish target "server".
     Docker itself is not available on the dev Mac: the kit is tested by running server.py directly.
+  - Member fields: `Site.auth["fields"]` (`members.clean_fields`, `collect_fields(site, d, "register"|"account"|"owner")`),
+    values in `SiteUser.profile`. Forms get them at render time from `<div data-bw-member-fields="register|account">`
+    (`render.fill_member_fields`, run after the binder; checkboxes carry a hidden "" so unticking saves False).
+    Without fields, members may still send any profile key except the ones special pages check (`rule_fields`).
   - `access.py`: special pages, `Page.access == "rules"` + `Page.access_rules` (conditions, match all/any, deny message
     or redirect). `members.can_view()` calls `access.evaluate()`; `public.members_only()` applies deny/login.
   - `clock.py`: time zone (config `app.timezone` > `BUILDWEB_TZ` > Asia/Bangkok) applied live via `clock.apply()`

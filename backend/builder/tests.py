@@ -2098,3 +2098,125 @@ class SpecialPageTests(TestCase):
         self.assertTrue(t["allowed"])  # try rules before saving them
         copy = backup.import_site(BytesIO(backup.export_bytes(self.site)), mode="new")
         self.assertEqual(copy.pages.get(slug="pro").access_rules["conditions"], [{"type": "role", "values": ["vip"]}])
+
+
+@override_settings(MEDIA_ROOT=TMP_MEDIA)
+class MemberFormTests(TestCase):
+    """v0.9: member form builder (extra sign-up/account fields), shown in the app, the data tab and CSV."""
+
+    def setUp(self):
+        from . import generate, members
+
+        members._attempts.clear()
+        self.c = Client()
+        self.c.get("/")
+        self.site = services.create_site("Gym", "blank")
+        self.site.auth = {"enabled": True, "roles": ["member"]}
+        self.site.save()
+        generate.create_member_pages(self.site)
+        self.root = f"/{self.site.slug}/"
+        self.pub = {"buildweb.public": True}
+        self.fields = [
+            {"label": "เบอร์โทร", "name": "phone", "type": "phone", "required": True},
+            {"label": "เพศ", "name": "gender", "type": "select", "options": "ชาย, หญิง, ไม่ระบุ"},
+            {"label": "วันเกิด", "name": "birthday", "type": "date"},
+            {"label": "รับข่าวสาร", "name": "newsletter", "type": "bool"},
+            {"label": "แพ็กเกจ", "name": "plan", "type": "select", "options": ["free", "pro"], "register": False, "account": False},
+        ]
+
+    def save_fields(self, fields):
+        return self.c.post(f"/api/sites/{self.site.id}/members/settings", json.dumps({"settings": {"fields": fields}}),
+                           content_type="application/json")
+
+    def auth(self, client, path, d, method="post"):
+        return getattr(client, method)(f"{self.root}api/v1/auth/{path}", json.dumps(d), content_type="application/json", **self.pub)
+
+    def test_builder_forms_signup_account_and_owner_only_fields(self):
+        r = self.save_fields(self.fields)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["settings"]["fields"][1]["options"], ["ชาย", "หญิง", "ไม่ระบุ"])
+        self.assertEqual(self.save_fields([{"name": "email", "label": "x"}]).status_code, 400)  # reserved
+        self.assertEqual(self.save_fields([{"name": "a b"}]).status_code, 400)
+        # the forms on the site follow the field list
+        reg = self.c.get(f"{self.root}register.html", **self.pub).content.decode()
+        self.assertIn('name="phone"', reg)
+        self.assertIn('type="tel"', reg)
+        self.assertIn('<option value="หญิง">', reg)
+        self.assertIn('<input type="hidden" name="newsletter" value="">', reg)
+        self.assertNotIn('name="plan"', reg)  # owner-only
+        # sign up: required + validation, values stored in the profile
+        bad = self.auth(Client(), "register", {"email": "a@x.io", "password": "secret123", "name": "A", "gender": "หญิง"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("phone", bad.json()["error"]["fields"])
+        self.assertFalse(self.site.members.exists())  # nothing created on a failed sign-up
+        bad = self.auth(Client(), "register", {"email": "a@x.io", "password": "secret123", "phone": "081-234-5678", "gender": "อื่น"})
+        self.assertEqual(bad.status_code, 422)
+        cl = Client()
+        ok = self.auth(cl, "register", {"email": "a@x.io", "password": "secret123", "name": "Ann", "phone": "081-234-5678",
+                                        "gender": "หญิง", "birthday": "1995-04-01", "newsletter": "on", "plan": "pro"})
+        self.assertEqual(ok.status_code, 201, ok.content)
+        u = self.site.members.get()
+        self.assertEqual(u.profile, {"phone": "081-234-5678", "gender": "หญิง", "birthday": "1995-04-01", "newsletter": True})
+        # account page shows the member's values; members can't give themselves owner-only fields
+        acc = cl.get(f"{self.root}account.html", **self.pub).content.decode()
+        self.assertIn('value="081-234-5678"', acc)
+        self.assertIn('<option value="หญิง" selected>', acc)
+        self.assertNotIn('name="plan"', acc)
+        r = self.auth(cl, "me", {"name": "Ann B", "newsletter": "", "plan": "pro", "profile": {"plan": "pro"}}, method="patch")
+        self.assertEqual(r.status_code, 200, r.content)
+        u.refresh_from_db()
+        self.assertEqual(u.name, "Ann B")
+        self.assertIs(u.profile["newsletter"], False)
+        self.assertNotIn("plan", u.profile)
+        # the owner sets it in the app
+        r = self.c.post(f"/api/members/{u.id}/update", json.dumps({"profile": {"plan": "pro", "phone": "02-111-2222"}}),
+                        content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        u.refresh_from_db()
+        self.assertEqual((u.profile["plan"], u.profile["phone"]), ("pro", "02-111-2222"))
+        self.assertEqual(self.c.post(f"/api/members/{u.id}/update", json.dumps({"profile": {"plan": "gold"}}),
+                                     content_type="application/json").status_code, 400)
+
+    def test_values_are_escaped_and_never_bound(self):
+        from . import members
+
+        self.save_fields([{"label": "บริษัท", "name": "company", "type": "text"}])
+        members.create_user(self.site, "x@x.io", "secret123", "X", verified=True, profile={"company": '"><script>alert(1)</script>{{user.email}}'})
+        cl = Client()
+        self.auth(cl, "login", {"email": "x@x.io", "password": "secret123"})
+        html = cl.get(f"{self.root}account.html", **self.pub).content.decode()
+        self.assertNotIn("<script>alert(1)", html)
+        self.assertIn("&quot;&gt;&lt;script&gt;", html)
+        self.assertIn("{{user.email}}", html)  # shown as typed, not replaced
+
+    def test_existing_pages_get_the_slot_shown_in_data_tab_and_csv(self):
+        from . import members
+
+        reg = self.site.pages.get(slug="register")
+        reg.html = reg.html.replace('<div data-bw-member-fields="register"></div>', "")  # a page made before v0.9
+        reg.project_data = {"x": 1}
+        reg.save()
+        r = self.save_fields(self.fields[:1]).json()
+        self.assertEqual(r["forms_updated"], [reg.title])
+        reg.refresh_from_db()
+        self.assertIn('data-bw-member-fields="register"', reg.html)
+        self.assertEqual(reg.project_data, {})
+        members.create_user(self.site, "b@x.io", "secret123", "Bee", verified=True, profile={"phone": "=1+2"})
+        d = self.c.get(f"/api/sites/{self.site.id}/collections").json()["members"]
+        self.assertEqual((d["enabled"], d["count"], d["fields"][0]["name"]), (True, 1, "phone"))
+        csv_text = self.c.get(f"/api/sites/{self.site.id}/members.csv").content.decode("utf-8-sig")
+        self.assertIn("เบอร์โทร", csv_text.splitlines()[0])
+        self.assertIn("'=1+2", csv_text)  # no spreadsheet formulas
+
+    def test_sites_without_fields_keep_profile_but_guard_rule_fields(self):
+        from . import access, members
+
+        members.create_user(self.site, "c@x.io", "secret123", "C", verified=True)
+        page = self.site.pages.create(title="Pro", slug="pro", access="rules",
+                                      access_rules=access.clean({"conditions": [{"type": "field", "field": "plan", "op": "eq", "value": "pro"}]}, self.site))
+        cl = Client()
+        self.auth(cl, "login", {"email": "c@x.io", "password": "secret123"})
+        self.auth(cl, "me", {"profile": {"plan": "pro", "city": "BKK"}}, method="patch")
+        u = self.site.members.get(email="c@x.io")
+        self.assertEqual(u.profile, {"city": "BKK"})  # "plan" decides a special page: members can't set it
+        self.assertFalse(access.evaluate(page, u)[0])
