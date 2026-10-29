@@ -114,6 +114,8 @@ user in Thai. The UI copy is in Thai.
 ## Rules
 - Run tests with `cd backend && BUILDWEB_DATA=$(mktemp -d) .venv/bin/python manage.py test builder`.
 - When running a dev server while testing, use a port other than 5050 if the installed app may be running.
+- Commits: no `Co-Authored-By: Claude` / `Claude-Session` trailers or any Claude attribution; the user is the only
+  author. Claude only commits locally and never pushes; the user pushes with GitHub Desktop.
 - Releases: every push to main publishes a patch (`.github/workflows/release.yml`), so pushing is itself a
   release and is outward-facing; confirm with the user first. Use `[skip release]` for non-release pushes.
   Versions are set with `node scripts/set-version.js` (it updates package.json and Cargo.toml).
