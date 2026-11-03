@@ -117,7 +117,7 @@
 
   // Theme: light | dark | system (saved per device).
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
-  function getTheme() { try { return localStorage.getItem('bw-theme') || 'system'; } catch (e) { return 'system'; } }
+  function getTheme() { try { return localStorage.getItem('bw-theme') || 'dark'; } catch (e) { return 'dark'; } }
   function applyTheme() {
     const t = getTheme();
     const dark = t === 'dark' || (t === 'system' && mq.matches);
